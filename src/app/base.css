@@ -1,0 +1,23 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--ice);
+  color: var(--deep);
+  font-family: "Hanken Grotesk Variable", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+h1, h2, h3 {
+  font-family: "Bricolage Grotesque Variable", sans-serif;
+}
+code, pre, kbd {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+:focus-visible {
+  outline: 2px solid var(--sonar);
+  outline-offset: 1px;
+}
