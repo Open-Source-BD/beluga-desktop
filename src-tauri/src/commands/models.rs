@@ -27,7 +27,7 @@ pub async fn list_models(s: &AppState, force: bool) -> Result<Vec<ModelInfo>, Ui
     {
         return Ok(cached);
     }
-    match models::list_models(&s.http, &s.api_base()).await {
+    match models::list_models(&s.api_http, &s.api_base()).await {
         Ok(list) => {
             let _ = ModelCache::save(&cache, &list);
             Ok(list)

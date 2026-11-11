@@ -108,7 +108,7 @@ fn save_key(s: &AppState, key: String) -> Result<(), UiError> {
 }
 
 async fn complete_with_code(s: &AppState, code: &str, verifier: &str) -> Result<(), UiError> {
-    let key = pkce::exchange_code(&s.http, &s.origin, code, verifier)
+    let key = pkce::exchange_code(&s.api_http, &s.origin, code, verifier)
         .await
         .map_err(|e| match e {
             ApiError::Network(_) => UiError::from(e),
@@ -185,7 +185,7 @@ pub async fn sign_in_with_key(s: &AppState, key: &str) -> Result<(), UiError> {
     let key = key.trim();
     // A rejected candidate key says nothing about the saved one, so this
     // failure does not mark the session revoked.
-    key_info::key_status(&s.http, &s.api_base(), key)
+    key_info::key_status(&s.api_http, &s.api_base(), key)
         .await
         .map_err(UiError::from)?;
     save_key(s, key.to_string())
@@ -227,7 +227,7 @@ pub async fn key_status(s: &AppState) -> Result<KeyStatus, UiError> {
         Ok(None) => return Err(ApiError::Unauthorized.into()),
         Err(_) => return Err(UiError::key_unreadable()),
     };
-    key_info::key_status(&s.http, &s.api_base(), &key)
+    key_info::key_status(&s.api_http, &s.api_base(), &key)
         .await
         .map_err(|e| note(s, e.into()))
 }

@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 pub const OPENROUTER_ORIGIN: &str = "https://openrouter.ai";
@@ -90,13 +91,62 @@ impl PendingSignIn {
     }
 }
 
+/// Limits on every request to OpenRouter, so a dropped connection ends in an
+/// error instead of waiting forever.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HttpTimeouts {
+    /// Establishing the connection.
+    pub connect: Duration,
+    /// The longest silence between two reads; a long stream that keeps
+    /// talking is never cut off.
+    pub read: Duration,
+    /// The whole of a single, non-streaming request.
+    pub request: Duration,
+}
+
+impl HttpTimeouts {
+    pub const PRODUCTION: Self = Self {
+        connect: Duration::from_secs(15),
+        read: Duration::from_secs(60),
+        request: Duration::from_secs(30),
+    };
+}
+
+/// `stream` carries chat replies; `api` carries the single requests (code
+/// exchange, key status, model list) and also has the total-request limit.
+pub struct HttpClients {
+    pub stream: reqwest::Client,
+    pub api: reqwest::Client,
+}
+
+impl HttpClients {
+    pub fn new(timeouts: HttpTimeouts) -> reqwest::Result<Self> {
+        Self::from_builder(reqwest::Client::builder, timeouts)
+    }
+
+    /// `base` makes the starting builder for each client.
+    pub fn from_builder(
+        base: impl Fn() -> reqwest::ClientBuilder,
+        t: HttpTimeouts,
+    ) -> reqwest::Result<Self> {
+        let limited = || base().connect_timeout(t.connect).read_timeout(t.read);
+        Ok(Self {
+            stream: limited().build()?,
+            api: limited().timeout(t.request).build()?,
+        })
+    }
+}
+
 pub struct RunningTurn {
     pub id: u64,
     pub cancel: CancellationToken,
 }
 
 pub struct AppState {
+    /// For streamed chat replies.
     pub http: reqwest::Client,
+    /// For single requests; bounded in total as well.
+    pub api_http: reqwest::Client,
     /// `https://openrouter.ai` in production; a mock server in tests.
     pub origin: String,
     pub keys: Arc<SharedKeyStore>,
@@ -115,7 +165,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(
-        http: reqwest::Client,
+        http: HttpClients,
         origin: String,
         key_store: Arc<dyn KeyStore>,
         store: Store,
@@ -124,12 +174,13 @@ impl AppState {
     ) -> Self {
         let keys = Arc::new(SharedKeyStore::new(key_store));
         let engine = Arc::new(DirectEngine::new(
-            http.clone(),
+            http.stream.clone(),
             api_base(&origin),
             keys.clone(),
         ));
         Self {
-            http,
+            http: http.stream,
+            api_http: http.api,
             origin,
             keys,
             store,
@@ -150,8 +201,9 @@ impl AppState {
         std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
         let store = Store::open(&data_dir.join(DB_FILE)).map_err(|e| e.to_string())?;
         let key_store = startup_key_store(&data_dir);
+        let http = HttpClients::new(HttpTimeouts::PRODUCTION).map_err(|e| e.to_string())?;
         Ok(Self::new(
-            reqwest::Client::new(),
+            http,
             OPENROUTER_ORIGIN.to_string(),
             key_store,
             store,

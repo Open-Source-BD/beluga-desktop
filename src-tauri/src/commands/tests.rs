@@ -4,7 +4,7 @@ use super::{chats, models, turn};
 use crate::engine::{EngineEvent, UiError};
 use crate::openrouter::models::{ModelCache, ModelInfo};
 use crate::secrets::{KeyStore, SecretError, SessionStore, StorageKind};
-use crate::state::{AppState, EventSink};
+use crate::state::{AppState, EventSink, HttpClients, HttpTimeouts};
 use crate::store::{Store, StoredAttachment};
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
@@ -68,10 +68,16 @@ struct Harness {
 }
 
 fn harness_with(origin: &str, keys: Arc<dyn KeyStore>) -> Harness {
+    harness_timed(origin, keys, HttpTimeouts::PRODUCTION)
+}
+
+fn harness_timed(origin: &str, keys: Arc<dyn KeyStore>, timeouts: HttpTimeouts) -> Harness {
     let dir = tempfile::tempdir().unwrap();
     let events = Arc::new(Recorder::default());
+    let http =
+        HttpClients::from_builder(|| reqwest::Client::builder().no_proxy(), timeouts).unwrap();
     let state = Arc::new(AppState::new(
-        reqwest::Client::builder().no_proxy().build().unwrap(),
+        http,
         origin.to_string(),
         keys,
         Store::in_memory().unwrap(),
@@ -612,6 +618,95 @@ async fn send_message_401_emits_auth_revoked_and_auth_status_becomes_signed_out(
     // Chats survive; only the user's message was stored.
     assert_eq!(chats::list_chats(&h.state).unwrap().len(), 1);
     assert_eq!(chats::get_messages(&h.state, &chat.id).unwrap().len(), 1);
+}
+
+// ---- timeouts ----
+
+const SHORT: HttpTimeouts = HttpTimeouts {
+    connect: Duration::from_secs(2),
+    read: Duration::from_millis(300),
+    request: Duration::from_millis(300),
+};
+const STALL: Duration = Duration::from_secs(3);
+
+fn signed_in_short(origin: &str) -> Harness {
+    let keys = SessionStore::default();
+    keys.set(KEY).unwrap();
+    harness_timed(origin, Arc::new(keys), SHORT)
+}
+
+/// Run `f` and require it to finish well before the server would answer.
+async fn promptly<T>(f: impl std::future::Future<Output = T>) -> T {
+    tokio::time::timeout(Duration::from_millis(2500), f)
+        .await
+        .expect("a stalled request must time out")
+}
+
+#[tokio::test]
+async fn a_stalled_model_list_times_out_as_a_network_error() {
+    let server = MockServer::start().await;
+    let slow = ResponseTemplate::new(200)
+        .set_body_string(MODELS)
+        .set_delay(STALL);
+    mock(&server, "GET", "/api/v1/models", slow).await;
+    let h = signed_in_short(&server.uri());
+    let err = promptly(models::list_models(&h.state, true))
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind, "network");
+}
+
+#[tokio::test]
+async fn a_stalled_key_check_times_out_as_a_network_error() {
+    let server = MockServer::start().await;
+    let slow = ResponseTemplate::new(200)
+        .set_body_string(KEY_FREE)
+        .set_delay(STALL);
+    mock(&server, "GET", "/api/v1/key", slow).await;
+    let h = harness_timed(&server.uri(), Arc::new(SessionStore::default()), SHORT);
+    let err = promptly(auth::sign_in_with_key(&h.state, KEY))
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind, "network");
+    let h = signed_in_short(&server.uri());
+    let err = promptly(auth::key_status(&h.state)).await.unwrap_err();
+    assert_eq!(err.kind, "network");
+}
+
+#[tokio::test]
+async fn a_stalled_code_exchange_times_out_as_a_network_error() {
+    let server = MockServer::start().await;
+    let slow = ResponseTemplate::new(200)
+        .set_body_json(json!({"key": KEY}))
+        .set_delay(STALL);
+    mock(&server, "POST", "/api/v1/auth/keys", slow).await;
+    let h = harness_timed(&server.uri(), Arc::new(SessionStore::default()), SHORT);
+    auth::sign_in_code_url(&h.state);
+    let err = promptly(auth::sign_in_with_code(&h.state, "c1"))
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind, "network");
+}
+
+#[tokio::test]
+async fn a_reply_that_goes_silent_fails_as_a_network_error() {
+    let server = MockServer::start().await;
+    let slow = sse(PAID_REPLY).set_delay(STALL);
+    mock(&server, "POST", "/api/v1/chat/completions", slow).await;
+    let h = signed_in_short(&server.uri());
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    let (r, _) = promptly(send(&h, &chat.id, "Hi", "m/a", vec![])).await;
+    let r = r.unwrap();
+    assert_eq!(r.status, TurnStatus::Failed);
+    assert_eq!(r.error.map(|e| e.kind), Some("network".to_string()));
+}
+
+#[test]
+fn production_timeouts_match_the_ruling() {
+    let t = HttpTimeouts::PRODUCTION;
+    assert_eq!(t.connect, Duration::from_secs(15));
+    assert_eq!(t.read, Duration::from_secs(60));
+    assert_eq!(t.request, Duration::from_secs(30));
 }
 
 #[tokio::test]
