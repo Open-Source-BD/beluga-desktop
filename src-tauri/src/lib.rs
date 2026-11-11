@@ -4,6 +4,7 @@ pub mod commands;
 pub mod engine;
 pub mod openrouter;
 pub mod secrets;
+pub mod skills;
 pub mod state;
 pub mod store;
 
