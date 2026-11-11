@@ -40,9 +40,10 @@ export default function Gauge({ status, monthSpend, usingFreeModel, refreshFaile
     );
   }
 
-  const count = Math.min(daily.limit, MARKS);
-  const perMark = daily.limit / count;
-  const spentMarks = Math.min(count, Math.floor(daily.used / perMark));
+  const count = daily.limit > 0 ? Math.min(daily.limit, MARKS) : 0;
+  // Integer arithmetic: a mark is spent only when all its requests are used.
+  const spentMarks =
+    count > 0 ? Math.min(count, Math.max(0, Math.floor((daily.used * count) / daily.limit))) : 0;
   const summary = `${daily.remaining} of ${daily.limit} free requests left`;
   return (
     <div className={daily.remaining <= LOW ? "gauge low" : "gauge"} role="group" aria-label={summary}>

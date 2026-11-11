@@ -39,6 +39,18 @@ describe("Gauge on a free model", () => {
     expect(spent(container)).toHaveLength(1);
   });
 
+  it("limit 55 used 55: every mark is spent", () => {
+    const { container } = render(<Gauge status={status(55, 55)} monthSpend={0} usingFreeModel />);
+    expect(marks(container)).toHaveLength(50);
+    expect(spent(container)).toHaveLength(50);
+  });
+
+  it("limit 0: no marks, the text line stays", () => {
+    const { container } = render(<Gauge status={status(0, 0)} monthSpend={0} usingFreeModel />);
+    expect(marks(container)).toHaveLength(0);
+    expect(screen.getByRole("group").firstElementChild).toHaveTextContent("0 of 0 free requests left");
+  });
+
   it("remaining 10 is amber, remaining 11 is not", () => {
     const { container, rerender } = render(<Gauge status={status(40, 50)} monthSpend={0} usingFreeModel />);
     expect(container.querySelector(".gauge")).toHaveClass("low");
