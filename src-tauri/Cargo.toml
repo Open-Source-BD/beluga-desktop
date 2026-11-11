@@ -37,11 +37,14 @@ rusqlite = { version = "0.41", features = ["bundled"] }
 tauri-plugin-opener = "2"
 uuid = { version = "1", features = ["v4"] }
 time = "0.3"
+tempfile = "3"
+flate2 = "1.1.11"
+tar = "0.4.46"
+zip = { version = "9.5.1", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 wiremock = "0.6"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }
-tempfile = "3"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

@@ -1,5 +1,6 @@
 //! Skills: SKILL.md parsing and the acts-on-your-computer text scan.
 
+pub mod archive;
 pub mod pack;
 pub mod parse;
 pub mod scan;
