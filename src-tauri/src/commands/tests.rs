@@ -998,9 +998,32 @@ async fn a_fence_inside_the_file_gets_a_longer_outer_fence() {
     let a = att("a.md", "text/markdown", b"x\n```rust\nfn main() {}\n```\ny");
     send(&h, &chat.id, "", "m/a", vec![a]).await.0.unwrap();
     let body = last_body(&server).await;
-    let text = body["messages"][0]["content"][1]["text"].as_str().unwrap();
+    let text = body["messages"][0]["content"][0]["text"].as_str().unwrap();
     assert!(text.starts_with("File: a.md\n````\n"), "{text}");
     assert!(text.ends_with("\n````"), "{text}");
+}
+
+#[tokio::test]
+async fn an_attachment_only_message_sends_no_empty_text_part() {
+    let server = chat_server().await;
+    let h = signed_in(&server.uri());
+    cache_model(&h, "m/a", true);
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    let atts = vec![
+        att("n.txt", "text/plain", b"hello"),
+        att("p.png", "image/png", &[1, 2, 3]),
+    ];
+    send(&h, &chat.id, "", "m/a", atts).await.0.unwrap();
+    let body = last_body(&server).await;
+    let parts = body["messages"][0]["content"].as_array().unwrap().clone();
+    assert_eq!(parts.len(), 2, "{parts:?}");
+    assert!(
+        parts[0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("File: n.txt")
+    );
+    assert_eq!(parts[1]["type"], "image_url");
 }
 
 #[tokio::test]

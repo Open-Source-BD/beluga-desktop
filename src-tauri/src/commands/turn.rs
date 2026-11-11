@@ -151,7 +151,11 @@ fn wire(m: &StoredMessage, with_images: bool) -> WireMessage {
         "system" => Role::System,
         _ => Role::User,
     };
-    let mut parts = vec![Part::Text(m.text.clone())];
+    // An attachment-only message has no text part rather than an empty one.
+    let mut parts = Vec::new();
+    if !m.text.is_empty() {
+        parts.push(Part::Text(m.text.clone()));
+    }
     for a in &m.attachments {
         if is_image(a) {
             if with_images {
