@@ -936,6 +936,12 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
     record(to(&chat_state::activate_skill(&h.state, &id, "p:a", "m/a")));
     record(to(&chat_state::deactivate_skill(&h.state, &id, "p:a")));
     record(to(&chat_state::chat_fullness(&h.state, &id, "m/a", 10)));
+    // The success path, in a harness that has a skill to activate.
+    let f = skills_fx(&server.uri(), &[("a", 10)], &[]);
+    let skill_chat = chats::create_chat(&f.h.state, "m/a").unwrap().id;
+    let activated = chat_state::activate_skill(&f.h.state, &skill_chat, "p:a", "m/a");
+    assert!(activated.is_ok(), "{activated:?}");
+    record(to(&activated));
     turn::stop(&h.state, &id);
     record(to(&auth::sign_out(&h.state)));
     record(to(&auth::auth_status(&h.state)));
@@ -945,8 +951,8 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
         record(json!([name, payload]));
     }
 
-    // 23 command results plus at least one event.
-    assert!(outputs.len() >= 24, "{}", outputs.len());
+    // 24 command results plus at least one event.
+    assert!(outputs.len() >= 25, "{}", outputs.len());
     for out in &outputs {
         assert!(!out.contains(KEY), "key leaked in {out}");
     }
@@ -1993,5 +1999,33 @@ fn the_four_chat_state_commands_reject_an_unknown_chat() {
     assert_eq!(
         chat_state::chat_fullness(s, "nope", BIG, 0),
         Err(other("That chat no longer exists."))
+    );
+}
+
+#[tokio::test]
+async fn a_model_reporting_a_context_length_of_0_is_treated_as_fitting() {
+    let server = chat_server().await;
+    let f = skills_fx(&server.uri(), &[("a", 10)], &[]);
+    cache_models(&f.h, &[("m/zero", "Zero", 0)]);
+    let s = &f.h.state;
+    let chat = chats::create_chat(s, "m/zero").unwrap();
+    let st = chat_state::activate_skill(s, &chat.id, "p:a", "m/zero").unwrap();
+    assert!(!st.active_skills[0].too_long);
+    let st = chat_state::chat_state(s, &chat.id, "m/zero").unwrap();
+    assert!(!st.active_skills[0].too_long);
+    send(&f.h, &chat.id, "Hi", "m/zero", vec![])
+        .await
+        .0
+        .unwrap();
+    assert_eq!(
+        sent(&last_body(&server).await),
+        vec![sys(SKILL_NOTE), skill_msg("a", 10), user("Hi")]
+    );
+    assert_eq!(
+        chat_state::chat_fullness(s, &chat.id, "m/zero", 1_000).unwrap(),
+        chat_state::Fullness {
+            percent: 0,
+            context_length: 0
+        }
     );
 }

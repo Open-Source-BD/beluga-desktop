@@ -285,7 +285,7 @@ export interface ChatState {
   compacted: boolean;
 }
 
-/** `percent` is not capped at 100; both are 0 for a model missing from the cache. */
+/** `percent` is not capped at 100; both are 0 when the model's context length is unknown. */
 export interface Fullness {
   percent: number;
   context_length: number;

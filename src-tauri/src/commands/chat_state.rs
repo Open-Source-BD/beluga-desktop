@@ -4,8 +4,9 @@
 //! "Fits" is judged per turn against the model the turn is sent with: the
 //! fixed note plus the active skill bodies, at four characters a token, must
 //! not exceed half the model's context. Skills are left out from the end of
-//! the activation order until the rest fit. A model missing from the cached
-//! model list is treated as fitting.
+//! the activation order until the rest fit. A model whose context length is
+//! unknown (missing from the cached model list, or reported as 0) is treated
+//! as fitting; see `sized_model`.
 
 use super::chats::local;
 use super::turn::{decode, is_image};
@@ -48,7 +49,7 @@ pub struct ChatState {
     pub compacted: bool,
 }
 
-/// `percent` is not capped at 100. Both are 0 for a model missing from the cache.
+/// `percent` is not capped at 100. Both are 0 when the model's context length is unknown.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Fullness {
     pub percent: u32,
@@ -86,10 +87,14 @@ fn require_chat(s: &AppState, chat_id: &str) -> Result<(), UiError> {
     }
 }
 
-fn cached_model(s: &AppState, model_id: &str) -> Option<ModelInfo> {
+/// The cached model whose context length is known. Every fit decision and
+/// the fullness meter go through this: a model missing from the cache, or
+/// one reporting a context length of 0 (OpenRouter omitted it), is unknown,
+/// so every skill fits it and its fullness is 0/0.
+fn sized_model(s: &AppState, model_id: &str) -> Option<ModelInfo> {
     ModelCache::load(&s.model_cache_file())?
         .into_iter()
-        .find(|m| m.id == model_id)
+        .find(|m| m.id == model_id && m.context_length > 0)
 }
 
 fn skill_view(s: &AppState, id: &str) -> Option<SkillView> {
@@ -141,7 +146,7 @@ fn resolve(s: &AppState, ids: &[String], model: Option<&ModelInfo>) -> Vec<Resol
 
 fn resolve_chat(s: &AppState, chat_id: &str, model_id: &str) -> Result<Vec<Resolved>, UiError> {
     let ids = s.store.active_skills(chat_id).map_err(local)?;
-    Ok(resolve(s, &ids, cached_model(s, model_id).as_ref()))
+    Ok(resolve(s, &ids, sized_model(s, model_id).as_ref()))
 }
 
 /// `(id, SKILL.md text)` of each active skill sent with a turn on `model_id`,
@@ -207,7 +212,7 @@ pub fn activate_skill(
         return Err(UiError::other(TOO_LONG_TO_RUN));
     }
     ids.push(skill_id.to_string());
-    if let Some(model) = cached_model(s, model_id)
+    if let Some(model) = sized_model(s, model_id)
         && resolve(s, &ids, Some(&model))
             .last()
             .is_some_and(|r| r.too_long)
@@ -250,7 +255,7 @@ pub fn chat_fullness(
     draft_chars: u64,
 ) -> Result<Fullness, UiError> {
     require_chat(s, chat_id)?;
-    let Some(model) = cached_model(s, model_id).filter(|m| m.context_length > 0) else {
+    let Some(model) = sized_model(s, model_id) else {
         return Ok(Fullness {
             percent: 0,
             context_length: 0,
