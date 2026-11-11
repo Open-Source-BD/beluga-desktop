@@ -4,8 +4,10 @@
 //! regular files and folders are written, sizes are enforced on the bytes
 //! actually read, and nothing is ever made executable.
 
+use std::cell::Cell;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 /// Size and count limits applied while unpacking and downloading.
 #[derive(Debug, Clone)]
@@ -25,11 +27,25 @@ impl Default for Limits {
     }
 }
 
+const MAX_PATH_BYTES: usize = 4096;
+/// Most bytes of header and metadata (long names, PAX data) read between two
+/// entries.
+const MAX_METADATA_BYTES: u64 = 1024 * 1024;
+
+/// A short, printable excerpt of an archive-supplied path for error messages.
+fn excerpt(raw: &str) -> String {
+    raw.chars()
+        .take(100)
+        .map(|c| if c.is_control() { '?' } else { c })
+        .collect()
+}
+
 /// Validates an archive entry path and returns its components. `Ok(None)`
-/// means the entry names the archive root itself (nothing to write).
-/// Backslashes count as separators on every platform.
+/// means there is nothing to write: the entry names the archive root, or a
+/// component contains `:` (unsafe on Windows, so skipped everywhere along
+/// with its descendants). Backslashes count as separators on every platform.
 fn validate_path(raw: &str) -> Result<Option<Vec<String>>, String> {
-    let bad = || format!("archive entry has an unsafe path: {raw:?}");
+    let bad = || format!("archive entry has an unsafe path: \"{}\"", excerpt(raw));
     if raw.contains('\0') {
         return Err(bad());
     }
@@ -38,15 +54,30 @@ fn validate_path(raw: &str) -> Result<Option<Vec<String>>, String> {
         return Err(bad());
     }
     let mut parts = Vec::new();
+    let mut skip = false;
     for comp in norm.split('/') {
         match comp {
             "" | "." => {}
             ".." => return Err(bad()),
-            c if c.contains(':') => return Err(bad()),
-            c => parts.push(c.to_string()),
+            c => {
+                skip |= c.contains(':');
+                parts.push(c.to_string());
+            }
         }
     }
-    Ok(if parts.is_empty() { None } else { Some(parts) })
+    Ok(if skip || parts.is_empty() {
+        None
+    } else {
+        Some(parts)
+    })
+}
+
+/// Length-checks raw entry name bytes before any string conversion.
+fn parts_from_bytes(raw: &[u8]) -> Result<Option<Vec<String>>, String> {
+    if raw.len() > MAX_PATH_BYTES {
+        return Err("archive entry has a path that is too long".to_string());
+    }
+    validate_path(&String::from_utf8_lossy(raw))
 }
 
 fn dest_for(dest: &Path, parts: &[String]) -> PathBuf {
@@ -93,20 +124,26 @@ fn copy_limited(
 }
 
 /// Caps the bytes pulled from a stream, so skipped entries cannot expand
-/// without bound either.
+/// without bound either. A second, resettable window bounds how much header
+/// and metadata the tar reader may buffer between entries.
 struct CapReader<R> {
     inner: R,
     remaining: u64,
+    window: Rc<Cell<u64>>,
 }
 
 impl<R: Read> Read for CapReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let n = self.inner.read(buf)?;
-        if n as u64 > self.remaining {
+        let n = self.inner.read(buf)? as u64;
+        if n > self.remaining {
             return Err(std::io::Error::other("archive is too large when unpacked"));
         }
-        self.remaining -= n as u64;
-        Ok(n)
+        if n > self.window.get() {
+            return Err(std::io::Error::other("archive header data is too large"));
+        }
+        self.remaining -= n;
+        self.window.set(self.window.get() - n);
+        Ok(n as usize)
     }
 }
 
@@ -118,17 +155,27 @@ pub fn unpack_tar_gz(reader: impl Read, dest: &Path, limits: &Limits) -> Result<
         .max_total_bytes
         .saturating_add((limits.max_entries as u64).saturating_mul(2048))
         .saturating_add(4096);
+    let window = Rc::new(Cell::new(MAX_METADATA_BYTES));
     let mut archive = tar::Archive::new(CapReader {
         inner: reader,
         remaining: cap,
+        window: Rc::clone(&window),
     });
     let entries = archive
         .entries()
         .map_err(|e| format!("could not read archive: {e}"))?;
     let mut count = 0usize;
     let mut total = 0u64;
-    for entry in entries {
+    let mut entries = entries;
+    loop {
+        // Only headers and metadata are read while the window is limited;
+        // entry bodies are bounded by the counting copy below.
+        window.set(MAX_METADATA_BYTES);
+        let Some(entry) = entries.next() else {
+            break;
+        };
         let mut entry = entry.map_err(|e| format!("could not read archive: {e}"))?;
+        window.set(u64::MAX);
         count += 1;
         if count > limits.max_entries {
             return Err("archive has too many files".to_string());
@@ -137,16 +184,27 @@ pub fn unpack_tar_gz(reader: impl Read, dest: &Path, limits: &Limits) -> Result<
         let is_dir = ty == tar::EntryType::Directory;
         let is_file = ty == tar::EntryType::Regular || ty == tar::EntryType::Continuous;
         // Validate every entry, even ones we skip, so a hostile name aborts.
-        let raw = String::from_utf8_lossy(&entry.path_bytes()).into_owned();
-        let Some(parts) = validate_path(&raw)? else {
-            continue;
-        };
-        let target = dest_for(dest, &parts);
-        if is_dir {
-            std::fs::create_dir_all(&target)
-                .map_err(|e| format!("could not create folder: {e}"))?;
-        } else if is_file {
-            copy_limited(&mut entry, &target, limits, &mut total)?;
+        let parts = parts_from_bytes(&entry.path_bytes())?;
+        match parts {
+            Some(parts) if is_dir => {
+                std::fs::create_dir_all(dest_for(dest, &parts))
+                    .map_err(|e| format!("could not create folder: {e}"))?;
+            }
+            Some(parts) if is_file => {
+                copy_limited(&mut entry, &dest_for(dest, &parts), limits, &mut total)?;
+            }
+            _ => {
+                // Skipped: read the body here, bounded, rather than leaving
+                // it to the metadata window.
+                let n = std::io::copy(
+                    &mut (&mut entry).take(limits.max_file_bytes + 1),
+                    &mut std::io::sink(),
+                )
+                .map_err(|e| format!("could not read archive: {e}"))?;
+                if n > limits.max_file_bytes {
+                    return Err("archive contains a file that is too large".to_string());
+                }
+            }
         }
     }
     Ok(())
@@ -167,7 +225,7 @@ pub fn unpack_zip(path: &Path, dest: &Path, limits: &Limits) -> Result<(), Strin
             .by_index(i)
             .map_err(|e| format!("could not read the ZIP: {e}"))?;
         let raw = String::from_utf8_lossy(entry.name_raw()).into_owned();
-        let Some(parts) = validate_path(&raw)? else {
+        let Some(parts) = parts_from_bytes(entry.name_raw())? else {
             continue;
         };
         let target = dest_for(dest, &parts);
@@ -396,13 +454,7 @@ mod tests {
 
     #[test]
     fn tar_absolute_and_drive_and_unc_paths_error() {
-        for name in [
-            "/etc/evil",
-            "C:/evil",
-            "C:\\evil",
-            "\\\\server\\share\\x",
-            "//server/x",
-        ] {
+        for name in ["/etc/evil", "\\\\server\\share\\x", "//server/x"] {
             let (p, dest) = sandbox();
             let mut b = tar::Builder::new(Vec::new());
             tar_raw(&mut b, name, b"x");
@@ -558,7 +610,7 @@ mod tests {
 
     #[test]
     fn zip_absolute_paths_error() {
-        for name in ["/etc/evil", "C:\\evil", "\\\\server\\share\\x"] {
+        for name in ["/etc/evil", "\\\\server\\share\\x", "\\evil"] {
             let (p, dest) = sandbox();
             let z = zip_bytes(&[(name, b"x")]);
             assert!(unzip(&z, &dest, &limits()).is_err(), "{name}");
@@ -656,6 +708,106 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(mode & 0o111, 0);
+    }
+
+    // ---- colon skipping, long metadata, message length ----
+
+    #[test]
+    fn tar_colon_components_are_skipped_siblings_unpack() {
+        let (p, dest) = sandbox();
+        let mut b = tar::Builder::new(Vec::new());
+        tar_file(&mut b, "top/a:b.md", b"x");
+        tar_file(&mut b, "top/C:evil/x.md", b"x");
+        tar_raw(&mut b, "C:/evil", b"x");
+        tar_file(&mut b, "top/ok.md", b"ok");
+        untar(finish_gz(b), &dest, &limits()).unwrap();
+        assert!(dest.join("top/ok.md").exists());
+        assert!(!dest.join("top/a:b.md").exists());
+        assert!(!dest.join("top/C:evil").exists());
+        assert!(!dest.join("C:").exists());
+        only_dest(p.path());
+    }
+
+    #[test]
+    fn zip_colon_components_are_skipped_siblings_unpack() {
+        let (p, dest) = sandbox();
+        let z = zip_bytes(&[
+            ("top/a:b.md", b"x"),
+            ("top/C:evil/x.md", b"x"),
+            ("C:\\evil", b"x"),
+            ("top/ok.md", b"ok"),
+        ]);
+        unzip(&z, &dest, &limits()).unwrap();
+        assert!(dest.join("top/ok.md").exists());
+        assert!(!dest.join("top/a:b.md").exists());
+        assert!(!dest.join("top/C:evil").exists());
+        only_dest(p.path());
+    }
+
+    #[test]
+    fn dotdot_after_colon_component_still_errors() {
+        assert!(validate_path("a:b/../../evil").is_err());
+        assert!(validate_path("/x").is_err());
+        assert!(validate_path("\\x").is_err());
+        assert_eq!(validate_path("top/a:b").unwrap(), None);
+    }
+
+    fn tar_long_name(b: &mut tar::Builder<Vec<u8>>, name: &[u8]) {
+        let mut data = name.to_vec();
+        data.push(0);
+        let mut h = tar::Header::new_gnu();
+        h.as_old_mut().name[..13].copy_from_slice(b"././@LongLink");
+        h.set_size(data.len() as u64);
+        h.set_entry_type(tar::EntryType::GNULongName);
+        h.set_cksum();
+        b.append(&h, &data[..]).unwrap();
+    }
+
+    #[test]
+    fn tar_huge_long_name_header_errors_promptly() {
+        let (_p, dest) = sandbox();
+        let l = Limits {
+            max_total_bytes: 100_000_000,
+            max_file_bytes: 1_000,
+            max_entries: 100,
+        };
+        let mut b = tar::Builder::new(Vec::new());
+        tar_long_name(&mut b, &vec![b'a'; 5 * 1024 * 1024]);
+        tar_file(&mut b, "ignored", b"x");
+        let started = std::time::Instant::now();
+        let err = untar(finish_gz(b), &dest, &l).unwrap_err();
+        assert!(err.contains("too large"), "{err}");
+        assert!(err.len() < 200);
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    #[test]
+    fn tar_over_long_path_errors() {
+        let (_p, dest) = sandbox();
+        let mut b = tar::Builder::new(Vec::new());
+        tar_long_name(&mut b, "a/".repeat(2_500).as_bytes());
+        tar_file(&mut b, "ignored", b"x");
+        let err = untar(finish_gz(b), &dest, &limits()).unwrap_err();
+        assert!(err.contains("too long"), "{err}");
+        assert!(err.len() < 200);
+    }
+
+    #[test]
+    fn zip_over_long_path_errors() {
+        let (_p, dest) = sandbox();
+        let name = "a/".repeat(2_500);
+        let z = zip_bytes(&[(name.as_str(), b"x")]);
+        let err = unzip(&z, &dest, &limits()).unwrap_err();
+        assert!(err.contains("too long"), "{err}");
+    }
+
+    #[test]
+    fn hostile_path_error_message_is_short() {
+        let long = format!("../{}\n\u{1}", "a".repeat(3_000));
+        let err = validate_path(&long).unwrap_err();
+        assert!(err.len() <= 200, "{}", err.len());
+        let ctl = format!("../{}", "\u{1}".repeat(100));
+        assert!(validate_path(&ctl).unwrap_err().len() <= 200);
     }
 
     // ---- download ----
