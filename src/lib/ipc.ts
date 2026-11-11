@@ -225,7 +225,7 @@ export const rowsAfter = (chatId: string, messageId: string) =>
 export const compactChat = (chatId: string, modelId: string, keep: string | null = null) =>
   invoke<TurnResult>("compact_chat", { chatId, modelId, keep });
 
-/** Writes the chat as Markdown to `path`, an absolute path from a save dialog. */
+/** Writes the chat as Markdown to `path`, an absolute `.md` path from a save dialog. */
 export const exportChat = (chatId: string, path: string) =>
   invoke<void>("export_chat", { chatId, path });
 

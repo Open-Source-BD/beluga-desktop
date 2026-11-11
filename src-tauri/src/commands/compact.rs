@@ -10,6 +10,7 @@ use crate::store::StoredMessage;
 
 const SUMMARY_ASK: &str = "Summarise the conversation below so it can be continued later. Keep decisions, file names, code that matters and open questions. Be brief.";
 const LEFT_OUT: &str = "The oldest messages were too long to include in the summary.\n\n";
+const TURN_RUNNING: &str = "Wait for the reply to finish, or stop it, before shortening the chat.";
 const TOO_SHORT: &str = "This chat is too short to shorten.";
 const SUMMARISED_NOTE: &str = "Summarised above this line";
 const MIN_MESSAGES: usize = 4;
@@ -53,7 +54,8 @@ impl Conversation {
 /// messages. Only a completed, non-empty summary changes the chat: it is
 /// stored with the boundary just past the last summarised message and the
 /// note "Summarised above this line" is added. Usage is recorded whenever a
-/// request was made. Runs as the chat's turn, so `stop` cancels it.
+/// request was made. Refused while a turn runs in the chat; runs as the
+/// chat's turn, so `stop` cancels it.
 pub async fn compact_chat(
     s: &AppState,
     chat_id: &str,
@@ -61,6 +63,11 @@ pub async fn compact_chat(
     keep: Option<&str>,
 ) -> Result<TurnResult, UiError> {
     require_chat(s, chat_id)?;
+    // A reply cancelled by the compaction would be stored after the boundary
+    // with no question before it, so a running reply is never replaced here.
+    if s.turns().contains_key(chat_id) {
+        return Err(UiError::other(TURN_RUNNING));
+    }
     let messages = s.store.sendable_messages(chat_id).map_err(local)?;
     if messages.len() < MIN_MESSAGES {
         return Err(UiError::other(TOO_SHORT));

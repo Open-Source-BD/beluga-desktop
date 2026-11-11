@@ -2621,3 +2621,65 @@ fn export_to_an_unwritable_or_relative_path_is_a_ui_error() {
     );
     assert!(!abs.exists());
 }
+
+#[tokio::test]
+async fn compact_is_refused_while_a_turn_runs_and_sends_nothing() {
+    let server = chat_server().await;
+    let h = signed_in(&server.uri());
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    seed(&h, &chat.id, &FOUR);
+    let running = CancellationToken::new();
+    h.state.turns().insert(
+        chat.id.clone(),
+        RunningTurn {
+            id: 99,
+            cancel: running.clone(),
+        },
+    );
+    assert_eq!(
+        compact(&h, &chat.id, "m/a", None).await,
+        Err(other(
+            "Wait for the reply to finish, or stop it, before shortening the chat."
+        ))
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
+    assert!(!running.is_cancelled());
+    assert_eq!(h.state.turns().get(&chat.id).map(|t| t.id), Some(99));
+    assert_eq!(h.state.store.summary(&chat.id).unwrap(), None);
+}
+
+#[test]
+fn export_refuses_a_path_that_is_not_markdown_and_accepts_any_case_of_md() {
+    let h = signed_in("http://unused.invalid");
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    seed(&h, &chat.id, &[("user", "Hi")]);
+    let cannot = Err(other("Could not save the file. Choose another location."));
+    for name in ["chat.txt", "chat", "chat.md.exe", "chat.markdown"] {
+        let path = h._dir.path().join(name);
+        assert_eq!(
+            export::export_chat(&h.state, &chat.id, path.to_str().unwrap()),
+            cannot,
+            "{name}"
+        );
+        assert!(!path.exists(), "{name}");
+    }
+    let upper = h._dir.path().join("chat.MD");
+    assert_eq!(
+        export::export_chat(&h.state, &chat.id, upper.to_str().unwrap()),
+        Ok(())
+    );
+    assert!(upper.exists());
+}
+
+#[test]
+fn export_writes_the_title_on_one_line() {
+    let h = signed_in("http://unused.invalid");
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    chats::rename_chat(&h.state, &chat.id, "Two\nlines\r\n## Injected\rend").unwrap();
+    seed(&h, &chat.id, &[("user", "Hi")]);
+    let file = h._dir.path().join("t.md");
+    export::export_chat(&h.state, &chat.id, file.to_str().unwrap()).unwrap();
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert_eq!(content.lines().next(), Some("# Two lines  ## Injected end"));
+    assert_eq!(content, "# Two lines  ## Injected end\n\n## You\n\nHi\n");
+}

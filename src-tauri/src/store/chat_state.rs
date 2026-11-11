@@ -72,15 +72,6 @@ impl Store {
         Ok(())
     }
 
-    /// Removes the summary and its boundary, so the whole history is sent again.
-    pub fn clear_summary(&self, chat_id: &str) -> Result<()> {
-        self.conn().execute(
-            "UPDATE chats SET summary = NULL, sent_from_seq = NULL WHERE id = ?1",
-            [chat_id],
-        )?;
-        Ok(())
-    }
-
     /// Removes the message and every later row of the same chat (notes
     /// included), in one transaction. An id that is not in this chat is an
     /// error and nothing changes.
@@ -94,6 +85,30 @@ impl Store {
         )?;
         tx.execute(
             "DELETE FROM messages WHERE chat_id = ?1 AND seq >= ?2",
+            params![chat_id, seq],
+        )?;
+        tx.commit()
+    }
+
+    /// `delete_from`, and in the same transaction drops the summary and its
+    /// boundary when the removed message was before the boundary (the
+    /// summary then describes rows that are gone). An id that is not in this
+    /// chat is an error and nothing changes.
+    pub fn delete_from_and_fix_summary(&self, chat_id: &str, message_id: &str) -> Result<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let seq: i64 = tx.query_row(
+            "SELECT seq FROM messages WHERE chat_id = ?1 AND id = ?2",
+            params![chat_id, message_id],
+            |r| r.get(0),
+        )?;
+        tx.execute(
+            "DELETE FROM messages WHERE chat_id = ?1 AND seq >= ?2",
+            params![chat_id, seq],
+        )?;
+        tx.execute(
+            "UPDATE chats SET summary = NULL, sent_from_seq = NULL
+             WHERE id = ?1 AND sent_from_seq > ?2",
             params![chat_id, seq],
         )?;
         tx.commit()

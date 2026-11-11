@@ -410,16 +410,39 @@ fn deleting_a_chat_still_cascades() {
 }
 
 #[test]
-fn clear_summary_removes_the_summary_and_the_boundary() {
+fn delete_from_and_fix_summary_clears_a_summary_that_described_deleted_rows_in_the_same_step() {
     let s = store();
     let c = s.create_chat("m/a").unwrap();
-    s.append_message(&c.id, "user", "one", &[], false).unwrap();
-    let m2 = s
-        .append_message(&c.id, "assistant", "two", &[], false)
+    let m1 = s.append_message(&c.id, "user", "one", &[], false).unwrap();
+    s.append_message(&c.id, "assistant", "two", &[], false)
         .unwrap();
-    s.set_summary(&c.id, "Earlier", m2.seq).unwrap();
-    assert_eq!(s.sendable_messages(&c.id).unwrap().len(), 1);
-    s.clear_summary(&c.id).unwrap();
+    let m3 = s
+        .append_message(&c.id, "user", "three", &[], false)
+        .unwrap();
+    s.append_note(&c.id, "Summarised above this line").unwrap();
+    s.set_summary(&c.id, "Earlier", m3.seq).unwrap();
+
+    // An unknown id changes neither the rows nor the summary.
+    assert!(matches!(
+        s.delete_from_and_fix_summary(&c.id, "nope"),
+        Err(rusqlite::Error::QueryReturnedNoRows)
+    ));
+    assert_eq!(s.get_messages(&c.id).unwrap().len(), 4);
+    assert_eq!(
+        s.summary(&c.id).unwrap(),
+        Some(("Earlier".to_string(), m3.seq))
+    );
+
+    // At the boundary: rows go, the summary stays.
+    s.delete_from_and_fix_summary(&c.id, &m3.id).unwrap();
+    assert_eq!(s.get_messages(&c.id).unwrap().len(), 2);
+    assert_eq!(
+        s.summary(&c.id).unwrap(),
+        Some(("Earlier".to_string(), m3.seq))
+    );
+
+    // Before the boundary: rows and summary go together.
+    s.delete_from_and_fix_summary(&c.id, &m1.id).unwrap();
+    assert!(s.get_messages(&c.id).unwrap().is_empty());
     assert_eq!(s.summary(&c.id).unwrap(), None);
-    assert_eq!(s.sendable_messages(&c.id).unwrap().len(), 2);
 }

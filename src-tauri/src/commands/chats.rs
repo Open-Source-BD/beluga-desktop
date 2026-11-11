@@ -101,12 +101,9 @@ pub fn take_user_message(
         return Err(UiError::other(TURN_RUNNING));
     }
     let (message, removed) = user_message(s, chat_id, message_id)?;
-    s.store.delete_from(chat_id, message_id).map_err(local)?;
-    if let Some((_, boundary)) = s.store.summary(chat_id).map_err(local)?
-        && message.seq < boundary
-    {
-        s.store.clear_summary(chat_id).map_err(local)?;
-    }
+    s.store
+        .delete_from_and_fix_summary(chat_id, message_id)
+        .map_err(local)?;
     Ok(TakenMessage {
         text: message.text,
         attachments: message.attachments.into_iter().map(Into::into).collect(),

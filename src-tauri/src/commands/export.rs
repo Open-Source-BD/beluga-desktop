@@ -40,10 +40,11 @@ fn markdown(s: &AppState, chat_id: &str) -> Result<String, UiError> {
         .get_chat(chat_id)
         .map_err(local)?
         .ok_or_else(|| UiError::other(NO_CHAT))?;
+    // One line, so a title cannot add Markdown lines of its own.
     let title = if chat.title.is_empty() {
-        UNTITLED
+        UNTITLED.to_string()
     } else {
-        &chat.title
+        chat.title.replace(['\r', '\n'], " ")
     };
     let mut summary = s.store.summary(chat_id).map_err(local)?;
     let summary_block = |text: &str| format!("## Summary of earlier messages\n\n{text}");
@@ -62,11 +63,14 @@ fn markdown(s: &AppState, chat_id: &str) -> Result<String, UiError> {
 }
 
 /// Writes the chat as Markdown to `path`, which must be absolute (it comes
-/// from a save dialog).
+/// from a save dialog) and end in `.md` (any case).
 pub fn export_chat(s: &AppState, chat_id: &str, path: &str) -> Result<(), UiError> {
     require_chat(s, chat_id)?;
     let path = Path::new(path);
-    if !path.is_absolute() {
+    let markdown_file = path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("md"));
+    if !path.is_absolute() || !markdown_file {
         return Err(UiError::other(CANNOT_SAVE));
     }
     let text = markdown(s, chat_id)?;
