@@ -1,0 +1,4 @@
+data: {"id":"gen-1","object":"chat.completion.chunk","created":1,"model":"m/x","choices":[{"index":0,"delta":{"content":"নমস্কার"},"finish_reason":null}]}
+
+data: [DONE]
+

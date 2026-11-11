@@ -1,6 +1,7 @@
 pub mod error;
 pub mod key_info;
 pub mod models;
+pub mod stream;
 
 /// Join an API path onto a base URL, with or without a trailing slash.
 pub(crate) fn endpoint(base_url: &str, path: &str) -> String {

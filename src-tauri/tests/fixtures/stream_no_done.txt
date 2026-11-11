@@ -1,0 +1,4 @@
+data: {"id":"gen-1","object":"chat.completion.chunk","created":1,"model":"m/x","choices":[{"index":0,"delta":{"content":"Hel"},"finish_reason":null}]}
+
+data: {"id":"gen-1","object":"chat.completion.chunk","created":1,"model":"m/x","choices":[{"index":0,"delta":{"content":"lo"},"finish_reason":null}]}
+

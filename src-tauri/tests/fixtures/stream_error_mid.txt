@@ -1,0 +1,4 @@
+data: {"id":"gen-1","object":"chat.completion.chunk","created":1,"model":"m/x","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}
+
+data: {"id":"gen-1","error":{"code":429,"message":"Rate limit exceeded"},"choices":[{"index":0,"delta":{"content":""},"finish_reason":"error"}]}
+
