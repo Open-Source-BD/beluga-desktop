@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod brand;
+pub mod engine;
 pub mod openrouter;
 pub mod secrets;
 
