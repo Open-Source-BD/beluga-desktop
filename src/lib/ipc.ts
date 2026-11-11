@@ -265,6 +265,46 @@ export const setPackOn = (id: string, on: boolean) =>
 export const skillFile = (id: string, file: string) =>
   invoke<AttachmentInput>("skill_file", { id, file });
 
+/**
+ * An active skill as it stands for the model asked about. `too_long`: left
+ * out of turns on that model. `unavailable`: switched off, broken or removed;
+ * kept in the chat but not sent.
+ */
+export interface ActiveSkill {
+  id: string;
+  name: string;
+  too_long: boolean;
+  acts_on_computer: boolean;
+  unavailable: boolean;
+}
+
+export interface ChatState {
+  /** In activation order. */
+  active_skills: ActiveSkill[];
+  folder: string | null;
+  compacted: boolean;
+}
+
+/** `percent` is not capped at 100; both are 0 for a model missing from the cache. */
+export interface Fullness {
+  percent: number;
+  context_length: number;
+}
+
+export const chatState = (chatId: string, modelId: string) =>
+  invoke<ChatState>("chat_state", { chatId, modelId });
+
+/** Rejects with the exact refusal copy; activating an active skill changes nothing. */
+export const activateSkill = (chatId: string, skillId: string, modelId: string) =>
+  invoke<ChatState>("activate_skill", { chatId, skillId, modelId });
+
+export const deactivateSkill = (chatId: string, skillId: string) =>
+  invoke<ChatState>("deactivate_skill", { chatId, skillId });
+
+/** `draftChars`: characters typed in the message box but not yet sent. */
+export const chatFullness = (chatId: string, modelId: string, draftChars: number) =>
+  invoke<Fullness>("chat_fullness", { chatId, modelId, draftChars });
+
 /** Opens an OpenRouter page in the browser (allowed only for https://openrouter.ai/*). */
 export const openAuthUrl = (url: string) =>
   invoke<void>("plugin:opener|open_url", { url });

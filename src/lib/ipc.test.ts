@@ -55,6 +55,25 @@ describe("ipc", () => {
     ["setPackOn", () => ipc.setPackOn("p", false), "set_pack_on", { id: "p", on: false }],
     ["skillFile", () => ipc.skillFile("p:s", "a.md"), "skill_file", { id: "p:s", file: "a.md" }],
     ["stop", () => ipc.stop("c"), "stop", { chatId: "c" }],
+    ["chatState", () => ipc.chatState("c", "m/a"), "chat_state", { chatId: "c", modelId: "m/a" }],
+    [
+      "activateSkill",
+      () => ipc.activateSkill("c", "p:s", "m/a"),
+      "activate_skill",
+      { chatId: "c", skillId: "p:s", modelId: "m/a" },
+    ],
+    [
+      "deactivateSkill",
+      () => ipc.deactivateSkill("c", "p:s"),
+      "deactivate_skill",
+      { chatId: "c", skillId: "p:s" },
+    ],
+    [
+      "chatFullness",
+      () => ipc.chatFullness("c", "m/a", 12),
+      "chat_fullness",
+      { chatId: "c", modelId: "m/a", draftChars: 12 },
+    ],
     [
       "openAuthUrl",
       () => ipc.openAuthUrl("https://openrouter.ai/auth"),
@@ -134,5 +153,17 @@ describe("ipc", () => {
     const [m] = await ipc.getMessages("c");
     expect(m.kind).toBe("note");
     expect(m.seq).toBe(7);
+  });
+
+  it("chatState returns active skills with their flags", async () => {
+    const state: ipc.ChatState = {
+      active_skills: [
+        { id: "p:s", name: "s", too_long: false, acts_on_computer: true, unavailable: true },
+      ],
+      folder: null,
+      compacted: false,
+    };
+    invoke.mockResolvedValueOnce(state);
+    await expect(ipc.chatState("c", "m/a")).resolves.toEqual(state);
   });
 });

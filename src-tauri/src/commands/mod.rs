@@ -3,6 +3,7 @@
 //! functions are thin wrappers.
 
 pub mod auth;
+pub mod chat_state;
 pub mod chats;
 pub mod handlers;
 pub mod models;

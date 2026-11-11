@@ -1,6 +1,6 @@
 use super::auth::{self, StorageChoice};
 use super::turn::{TurnResult, TurnStatus};
-use super::{chats, models, turn};
+use super::{chat_state, chats, models, turn};
 use crate::engine::{EngineEvent, UiError};
 use crate::openrouter::models::{ModelCache, ModelInfo};
 use crate::secrets::{KeyStore, SecretError, SessionStore, StorageKind};
@@ -932,6 +932,10 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
     record(to(&chats::chat_usage(&h.state, &id)));
     record(to(&chats::month_spend(&h.state)));
     record(to(&chats::rename_chat(&h.state, &id, "t")));
+    record(to(&chat_state::chat_state(&h.state, &id, "m/a")));
+    record(to(&chat_state::activate_skill(&h.state, &id, "p:a", "m/a")));
+    record(to(&chat_state::deactivate_skill(&h.state, &id, "p:a")));
+    record(to(&chat_state::chat_fullness(&h.state, &id, "m/a", 10)));
     turn::stop(&h.state, &id);
     record(to(&auth::sign_out(&h.state)));
     record(to(&auth::auth_status(&h.state)));
@@ -941,8 +945,8 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
         record(json!([name, payload]));
     }
 
-    // 19 command results plus at least one event.
-    assert!(outputs.len() >= 20, "{}", outputs.len());
+    // 23 command results plus at least one event.
+    assert!(outputs.len() >= 24, "{}", outputs.len());
     for out in &outputs {
         assert!(!out.contains(KEY), "key leaked in {out}");
     }
@@ -1337,4 +1341,657 @@ fn skills_status_reports_a_missing_builtin_tree() {
     let st = super::skills::skills_status(&h.state).unwrap();
     assert!(st.builtin_error.is_some());
     assert_eq!(st.packs, 0);
+}
+
+// ---- running skills ----
+
+use super::chat_state::{MAX_ACTIVE_SKILLS, SKILL_NOTE};
+use crate::openrouter::stream::{Part, Role, WireMessage};
+
+struct SkillsFx {
+    h: Harness,
+    _skills: tempfile::TempDir,
+}
+
+/// The SKILL.md text of a fixture skill: frontmatter plus `len` copies of 'x'.
+fn skill_md(name: &str, len: usize) -> String {
+    format!(
+        "---\nname: {name}\ndescription: d\n---\n{}",
+        "x".repeat(len)
+    )
+}
+
+fn chars(s: &str) -> usize {
+    s.chars().count()
+}
+
+/// A signed-in harness whose only built-in pack is `p`, with every listed
+/// skill on by default; names in `broken` are marked broken.
+fn skills_fx(origin: &str, skills: &[(&str, usize)], broken: &[&str]) -> SkillsFx {
+    let t = tempfile::tempdir().unwrap();
+    let root = t.path().join("skills");
+    let pack = root.join("p");
+    let mut entries = Vec::new();
+    let mut ids = Vec::new();
+    for (name, len) in skills {
+        let dir = pack.join("skills").join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("SKILL.md"), skill_md(name, *len)).unwrap();
+        let id = format!("p:{name}");
+        entries.push(json!({
+            "id": id, "pack": "p", "name": name, "description": "d",
+            "dir": format!("skills/{name}"), "acts_on_computer": *name == "acts",
+            "body_chars": len, "files": [], "license": null,
+            "broken": broken.contains(name).then_some("Missing name"),
+        }));
+        ids.push(id);
+    }
+    let manifest = json!({
+        "id": "p", "title": "P", "repo": "o/p", "commit": "abc", "license": "MIT",
+        "license_files": [], "skills": entries, "skipped": [], "checksum": "x",
+    });
+    std::fs::create_dir_all(&pack).unwrap();
+    std::fs::write(pack.join("pack.json"), manifest.to_string()).unwrap();
+    std::fs::write(
+        root.join("default-skills.json"),
+        json!({ "on": ids }).to_string(),
+    )
+    .unwrap();
+    let keys = SessionStore::default();
+    keys.set(KEY).unwrap();
+    let h = harness_full(origin, Arc::new(keys), HttpTimeouts::PRODUCTION, Some(root));
+    SkillsFx { h, _skills: t }
+}
+
+/// Caches models as `(id, name, context_length)`.
+fn cache_models(h: &Harness, models: &[(&str, &str, u64)]) {
+    let list: Vec<ModelInfo> = models
+        .iter()
+        .map(|(id, name, ctx)| ModelInfo {
+            id: id.to_string(),
+            name: name.to_string(),
+            prompt_usd_per_mtok: 0.0,
+            completion_usd_per_mtok: 0.0,
+            is_free: true,
+            supports_tools: true,
+            accepts_images: true,
+            context_length: *ctx,
+        })
+        .collect();
+    ModelCache::save(&h.state.model_cache_file(), &list).unwrap();
+}
+
+/// `(role, first text part)` of every message in a request body.
+fn sent(body: &Value) -> Vec<(String, String)> {
+    body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| {
+            (
+                m["role"].as_str().unwrap().to_string(),
+                m["content"][0]["text"].as_str().unwrap_or("").to_string(),
+            )
+        })
+        .collect()
+}
+
+fn sys(text: &str) -> (String, String) {
+    ("system".to_string(), text.to_string())
+}
+
+fn user(text: &str) -> (String, String) {
+    ("user".to_string(), text.to_string())
+}
+
+fn skill_msg(name: &str, len: usize) -> (String, String) {
+    sys(&format!("Skill: p:{name}\n\n{}", skill_md(name, len)))
+}
+
+fn other(message: &str) -> UiError {
+    UiError {
+        kind: "other".into(),
+        message: message.into(),
+        retryable: false,
+    }
+}
+
+fn active_ids(h: &Harness, chat_id: &str) -> Vec<String> {
+    h.state.store.active_skills(chat_id).unwrap()
+}
+
+fn notes(h: &Harness, chat_id: &str) -> Vec<String> {
+    h.state
+        .store
+        .get_messages(chat_id)
+        .unwrap()
+        .into_iter()
+        .filter(|m| m.kind == "note")
+        .map(|m| m.text)
+        .collect()
+}
+
+const BIG: &str = "m/big";
+
+#[test]
+fn skill_note_is_the_specs_fixed_note() {
+    assert_eq!(
+        SKILL_NOTE,
+        "You are running inside a chat app. You cannot read or change files, run commands, \
+browse, or start helpers. When the instructions below tell you to do any of those, say what \
+you would do and ask the user to do it and paste the result, or work from the files they \
+attach. Do not claim to have done something you cannot do."
+    );
+    assert_eq!(MAX_ACTIVE_SKILLS, 3);
+}
+
+#[test]
+fn preamble_is_note_then_skills_in_order_then_summary() {
+    let text = |m: &WireMessage| match &m.parts[..] {
+        [Part::Text(t)] => (m.role, t.clone()),
+        other => panic!("{other:?}"),
+    };
+    let got: Vec<_> = turn::preamble(&[("p:b", "B"), ("p:a", "A")], Some("S"))
+        .iter()
+        .map(text)
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            (Role::System, SKILL_NOTE.to_string()),
+            (Role::System, "Skill: p:b\n\nB".to_string()),
+            (Role::System, "Skill: p:a\n\nA".to_string()),
+            (
+                Role::System,
+                "Summary of the earlier conversation:\n\nS".to_string()
+            ),
+        ]
+    );
+    let only_summary: Vec<_> = turn::preamble(&[], Some("S")).iter().map(text).collect();
+    assert_eq!(
+        only_summary,
+        vec![(
+            Role::System,
+            "Summary of the earlier conversation:\n\nS".to_string()
+        )]
+    );
+    assert!(turn::preamble(&[], None).is_empty());
+}
+
+#[tokio::test]
+async fn no_active_skill_sends_the_history_unchanged() {
+    let server = chat_server().await;
+    let f = skills_fx(&server.uri(), &[("a", 10)], &[]);
+    let chat = chats::create_chat(&f.h.state, BIG).unwrap();
+    send(&f.h, &chat.id, "Hi", BIG, vec![]).await.0.unwrap();
+    assert_eq!(sent(&last_body(&server).await), vec![user("Hi")]);
+}
+
+#[tokio::test]
+async fn one_active_skill_is_sent_after_the_fixed_note_and_before_the_conversation() {
+    let server = chat_server().await;
+    let f = skills_fx(&server.uri(), &[("a", 10)], &[]);
+    let chat = chats::create_chat(&f.h.state, BIG).unwrap();
+    chat_state::activate_skill(&f.h.state, &chat.id, "p:a", BIG).unwrap();
+    send(&f.h, &chat.id, "Hi", BIG, vec![]).await.0.unwrap();
+    assert_eq!(
+        sent(&last_body(&server).await),
+        vec![sys(SKILL_NOTE), skill_msg("a", 10), user("Hi")]
+    );
+}
+
+#[tokio::test]
+async fn two_skills_keep_activation_order() {
+    let server = chat_server().await;
+    let f = skills_fx(&server.uri(), &[("a", 10), ("b", 20)], &[]);
+    let chat = chats::create_chat(&f.h.state, BIG).unwrap();
+    chat_state::activate_skill(&f.h.state, &chat.id, "p:b", BIG).unwrap();
+    chat_state::activate_skill(&f.h.state, &chat.id, "p:a", BIG).unwrap();
+    send(&f.h, &chat.id, "Hi", BIG, vec![]).await.0.unwrap();
+    assert_eq!(
+        sent(&last_body(&server).await),
+        vec![
+            sys(SKILL_NOTE),
+            skill_msg("b", 20),
+            skill_msg("a", 10),
+            user("Hi")
+        ]
+    );
+}
+
+#[tokio::test]
+async fn notes_are_never_sent() {
+    let server = chat_server().await;
+    let f = skills_fx(&server.uri(), &[("a", 10)], &[]);
+    let chat = chats::create_chat(&f.h.state, BIG).unwrap();
+    f.h.state.store.append_note(&chat.id, "A note").unwrap();
+    chat_state::activate_skill(&f.h.state, &chat.id, "p:a", BIG).unwrap();
+    send(&f.h, &chat.id, "Hi", BIG, vec![]).await.0.unwrap();
+    f.h.state.store.append_note(&chat.id, "Later").unwrap();
+    send(&f.h, &chat.id, "Again", BIG, vec![]).await.0.unwrap();
+    let got = sent(&last_body(&server).await);
+    assert_eq!(
+        got,
+        vec![
+            sys(SKILL_NOTE),
+            skill_msg("a", 10),
+            user("Hi"),
+            ("assistant".into(), "Hello".into()),
+            user("Again")
+        ]
+    );
+    assert_eq!(notes(&f.h, &chat.id), ["A note", "Using p:a", "Later"]);
+}
+
+#[tokio::test]
+async fn a_summary_is_sent_as_a_system_message_and_older_messages_are_not() {
+    let server = chat_server().await;
+    let f = skills_fx(&server.uri(), &[("a", 10)], &[]);
+    let store = &f.h.state.store;
+    let chat = chats::create_chat(&f.h.state, BIG).unwrap();
+    store
+        .append_message(&chat.id, "user", "old", &[], false)
+        .unwrap();
+    store
+        .append_message(&chat.id, "assistant", "old reply", &[], false)
+        .unwrap();
+    let new = store
+        .append_message(&chat.id, "user", "new", &[], false)
+        .unwrap();
+    store
+        .set_summary(&chat.id, "They said old.", new.seq)
+        .unwrap();
+    retry(&f.h, &chat.id, BIG).await.0.unwrap();
+    assert_eq!(
+        sent(&last_body(&server).await),
+        vec![
+            sys("Summary of the earlier conversation:\n\nThey said old."),
+            user("new")
+        ]
+    );
+    // With a skill active the summary follows the skill messages.
+    chat_state::activate_skill(&f.h.state, &chat.id, "p:a", BIG).unwrap();
+    send(&f.h, &chat.id, "Hi", BIG, vec![]).await.0.unwrap();
+    assert_eq!(
+        sent(&last_body(&server).await),
+        vec![
+            sys(SKILL_NOTE),
+            skill_msg("a", 10),
+            sys("Summary of the earlier conversation:\n\nThey said old."),
+            user("new"),
+            ("assistant".into(), "Hello".into()),
+            user("Hi")
+        ]
+    );
+}
+
+#[test]
+fn activate_refuses_a_fourth_an_over_long_an_off_a_broken_and_an_unknown_skill() {
+    let f = skills_fx(
+        "http://unused.invalid",
+        &[
+            ("a", 10),
+            ("b", 10),
+            ("c", 10),
+            ("d", 10),
+            ("long", 60_001),
+            ("off", 10),
+            ("bad", 10),
+        ],
+        &["bad"],
+    );
+    let s = &f.h.state;
+    super::skills::set_skill_on(s, "p:off", false).unwrap();
+    let chat = chats::create_chat(s, BIG).unwrap();
+    let not_available = other("This skill is not available. Check it in Skills.");
+    for id in ["p:off", "p:bad", "p:nope"] {
+        assert_eq!(
+            chat_state::activate_skill(s, &chat.id, id, BIG),
+            Err(not_available.clone()),
+            "{id}"
+        );
+    }
+    assert_eq!(
+        chat_state::activate_skill(s, &chat.id, "p:long", BIG),
+        Err(other("This skill is too long to run in a chat."))
+    );
+    for id in ["p:a", "p:b", "p:c"] {
+        chat_state::activate_skill(s, &chat.id, id, BIG).unwrap();
+    }
+    assert_eq!(
+        chat_state::activate_skill(s, &chat.id, "p:d", BIG),
+        Err(other(
+            "A chat can have three skills active. Remove one first."
+        ))
+    );
+    assert_eq!(active_ids(&f.h, &chat.id), ["p:a", "p:b", "p:c"]);
+    assert_eq!(
+        notes(&f.h, &chat.id),
+        ["Using p:a", "Using p:b", "Using p:c"]
+    );
+}
+
+#[test]
+fn activate_refuses_a_skill_that_does_not_fit_a_small_context_model() {
+    let f = skills_fx("http://unused.invalid", &[("a", 2_000)], &[]);
+    cache_models(&f.h, &[("m/small", "Small Model", 1_000)]);
+    let chat = chats::create_chat(&f.h.state, "m/small").unwrap();
+    assert_eq!(
+        chat_state::activate_skill(&f.h.state, &chat.id, "p:a", "m/small"),
+        Err(other(
+            "This skill is too long for Small Model. Pick a model with a larger limit, \
+or remove another active skill."
+        ))
+    );
+    assert!(active_ids(&f.h, &chat.id).is_empty());
+    assert!(notes(&f.h, &chat.id).is_empty());
+}
+
+#[test]
+fn activate_twice_adds_one_note() {
+    let f = skills_fx("http://unused.invalid", &[("a", 10)], &[]);
+    let s = &f.h.state;
+    let chat = chats::create_chat(s, BIG).unwrap();
+    let first = chat_state::activate_skill(s, &chat.id, "p:a", BIG).unwrap();
+    let second = chat_state::activate_skill(s, &chat.id, "p:a", BIG).unwrap();
+    assert_eq!(first, second);
+    assert_eq!(active_ids(&f.h, &chat.id), ["p:a"]);
+    assert_eq!(notes(&f.h, &chat.id), ["Using p:a"]);
+}
+
+#[tokio::test]
+async fn switching_to_a_small_model_marks_the_last_activated_skill_too_long_and_leaves_it_out_of_the_wire_history()
+ {
+    let server = chat_server().await;
+    let f = skills_fx(&server.uri(), &[("a", 1_000), ("b", 1_000)], &[]);
+    // Half the small model's context holds the note and `a` exactly, not `b` as well.
+    let small = 2 * ((chars(SKILL_NOTE) + chars(&skill_md("a", 1_000))) / 4) as u64;
+    cache_models(
+        &f.h,
+        &[(BIG, "Big", 1_000_000), ("m/small", "Small", small)],
+    );
+    let s = &f.h.state;
+    let chat = chats::create_chat(s, BIG).unwrap();
+    chat_state::activate_skill(s, &chat.id, "p:a", BIG).unwrap();
+    chat_state::activate_skill(s, &chat.id, "p:b", BIG).unwrap();
+
+    let state = chat_state::chat_state(s, &chat.id, "m/small").unwrap();
+    let flags: Vec<_> = state
+        .active_skills
+        .iter()
+        .map(|k| (k.id.as_str(), k.too_long, k.unavailable))
+        .collect();
+    assert_eq!(flags, [("p:a", false, false), ("p:b", true, false)]);
+    let big = chat_state::chat_state(s, &chat.id, BIG).unwrap();
+    assert!(big.active_skills.iter().all(|k| !k.too_long));
+
+    send(&f.h, &chat.id, "Hi", "m/small", vec![])
+        .await
+        .0
+        .unwrap();
+    assert_eq!(
+        sent(&last_body(&server).await),
+        vec![sys(SKILL_NOTE), skill_msg("a", 1_000), user("Hi")]
+    );
+    // Both are still active for the next turn on a larger model.
+    assert_eq!(active_ids(&f.h, &chat.id), ["p:a", "p:b"]);
+}
+
+#[tokio::test]
+async fn a_model_missing_from_the_cache_is_treated_as_fitting() {
+    let server = chat_server().await;
+    let f = skills_fx(&server.uri(), &[("a", 50_000)], &[]);
+    cache_models(&f.h, &[("m/small", "Small", 100)]);
+    let s = &f.h.state;
+    let chat = chats::create_chat(s, "m/unknown").unwrap();
+    let state = chat_state::activate_skill(s, &chat.id, "p:a", "m/unknown").unwrap();
+    assert!(!state.active_skills[0].too_long);
+    send(&f.h, &chat.id, "Hi", "m/unknown", vec![])
+        .await
+        .0
+        .unwrap();
+    assert_eq!(
+        sent(&last_body(&server).await),
+        vec![sys(SKILL_NOTE), skill_msg("a", 50_000), user("Hi")]
+    );
+}
+
+#[tokio::test]
+async fn retry_turn_sends_the_same_skill_messages_as_send_message() {
+    let server = chat_server().await;
+    let f = skills_fx(&server.uri(), &[("a", 10), ("b", 30)], &[]);
+    let s = &f.h.state;
+    let chat = chats::create_chat(s, BIG).unwrap();
+    chat_state::activate_skill(s, &chat.id, "p:b", BIG).unwrap();
+    chat_state::activate_skill(s, &chat.id, "p:a", BIG).unwrap();
+    send(&f.h, &chat.id, "Hi", BIG, vec![]).await.0.unwrap();
+    let sent_first = last_body(&server).await["messages"].clone();
+    let reply = s.store.get_messages(&chat.id).unwrap().pop().unwrap();
+    s.store.delete_message(&chat.id, &reply.id).unwrap();
+    retry(&f.h, &chat.id, BIG).await.0.unwrap();
+    assert_eq!(last_body(&server).await["messages"], sent_first);
+}
+
+#[tokio::test]
+async fn retry_turn_ignores_a_note_after_the_last_user_message() {
+    let server = chat_server().await;
+    let h = signed_in(&server.uri());
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    h.state
+        .store
+        .append_message(&chat.id, "user", "Hi", &[], false)
+        .unwrap();
+    h.state.store.append_note(&chat.id, "Using p:a").unwrap();
+    assert_eq!(retry(&h, &chat.id, "m/a").await.0.unwrap(), done());
+    assert_eq!(sent(&last_body(&server).await), vec![user("Hi")]);
+    assert_eq!(
+        roles_and_texts(&h, &chat.id),
+        vec![
+            ("user".into(), "Hi".into(), false),
+            ("system".into(), "Using p:a".into(), false),
+            ("assistant".into(), "Hello".into(), false)
+        ]
+    );
+}
+
+#[tokio::test]
+async fn retry_turn_drops_an_interrupted_reply_that_a_note_follows() {
+    let server = chat_server().await;
+    let h = signed_in(&server.uri());
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    let store = &h.state.store;
+    store
+        .append_message(&chat.id, "user", "Hi", &[], false)
+        .unwrap();
+    store
+        .append_message(&chat.id, "assistant", "Partial", &[], true)
+        .unwrap();
+    store.append_note(&chat.id, "Using p:a").unwrap();
+    assert_eq!(retry(&h, &chat.id, "m/a").await.0.unwrap(), done());
+    assert_eq!(sent(&last_body(&server).await), vec![user("Hi")]);
+    assert_eq!(
+        roles_and_texts(&h, &chat.id),
+        vec![
+            ("user".into(), "Hi".into(), false),
+            ("system".into(), "Using p:a".into(), false),
+            ("assistant".into(), "Hello".into(), false)
+        ]
+    );
+}
+
+#[tokio::test]
+async fn retry_turn_after_a_completed_reply_and_a_note_has_nothing_to_retry() {
+    let server = chat_server().await;
+    let h = signed_in(&server.uri());
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    send(&h, &chat.id, "Hi", "m/a", vec![]).await.0.unwrap();
+    h.state.store.append_note(&chat.id, "Using p:a").unwrap();
+    let before = roles_and_texts(&h, &chat.id);
+    assert_eq!(
+        retry(&h, &chat.id, "m/a").await.0,
+        Err(other("There is nothing to retry in this chat."))
+    );
+    assert_eq!(roles_and_texts(&h, &chat.id), before);
+    // An only-notes chat has nothing to retry either.
+    let empty = chats::create_chat(&h.state, "m/a").unwrap();
+    h.state.store.append_note(&empty.id, "Using p:a").unwrap();
+    assert_eq!(
+        retry(&h, &empty.id, "m/a").await.0,
+        Err(other("There is nothing to retry in this chat."))
+    );
+}
+
+#[test]
+fn fullness_of_an_empty_chat_with_a_draft_and_with_active_skills() {
+    let f = skills_fx("http://unused.invalid", &[("a", 4_000)], &[]);
+    cache_models(&f.h, &[("m/4k", "Four", 4_000)]);
+    let s = &f.h.state;
+    let chat = chats::create_chat(s, "m/4k").unwrap();
+    assert_eq!(
+        chat_state::chat_fullness(s, &chat.id, "m/4k", 1_000).unwrap(),
+        chat_state::Fullness {
+            percent: 6,
+            context_length: 4_000
+        }
+    );
+    chat_state::activate_skill(s, &chat.id, "p:a", "m/4k").unwrap();
+    let with_skill = chars(SKILL_NOTE) + chars(&skill_md("a", 4_000)) + 1_000;
+    let expected = (with_skill as f64 / 4.0 / 4_000.0 * 100.0).round() as u32;
+    assert!(expected > 6);
+    assert_eq!(
+        chat_state::chat_fullness(s, &chat.id, "m/4k", 1_000)
+            .unwrap()
+            .percent,
+        expected
+    );
+    // Not capped at 100.
+    let over = chat_state::chat_fullness(s, &chat.id, "m/4k", 20_000).unwrap();
+    assert!(over.percent > 100, "{}", over.percent);
+    // A model missing from the cache.
+    assert_eq!(
+        chat_state::chat_fullness(s, &chat.id, "m/unknown", 1_000).unwrap(),
+        chat_state::Fullness {
+            percent: 0,
+            context_length: 0
+        }
+    );
+}
+
+#[test]
+fn fullness_counts_the_summary_sendable_text_attachments_and_images_in_characters() {
+    let f = skills_fx("http://unused.invalid", &[("a", 400)], &[]);
+    cache_models(&f.h, &[("m/1k", "One", 1_000)]);
+    let s = &f.h.state;
+    let chat = chats::create_chat(s, "m/1k").unwrap();
+    chat_state::activate_skill(s, &chat.id, "p:a", "m/1k").unwrap();
+    s.store
+        .append_message(&chat.id, "user", &"o".repeat(400), &[], false)
+        .unwrap();
+    let atts: Vec<StoredAttachment> = vec![
+        att("n.txt", "text/plain", "é€x".as_bytes()).into(),
+        att("p.png", "image/png", &[1, 2, 3]).into(),
+    ];
+    let kept = s
+        .store
+        .append_message(&chat.id, "user", "héllo", &atts, false)
+        .unwrap();
+    s.store
+        .set_summary(&chat.id, &"S".repeat(40), kept.seq)
+        .unwrap();
+    s.store.append_note(&chat.id, &"n".repeat(400)).unwrap();
+    let total = chars(SKILL_NOTE) + chars(&skill_md("a", 400)) + 40 + 5 + 3 + 1_000 + 7;
+    let expected = (total as f64 / 4.0 / 1_000.0 * 100.0).round() as u32;
+    assert_eq!(
+        chat_state::chat_fullness(s, &chat.id, "m/1k", 7).unwrap(),
+        chat_state::Fullness {
+            percent: expected,
+            context_length: 1_000
+        }
+    );
+}
+
+#[test]
+fn chat_state_reports_skills_folder_and_compaction() {
+    let f = skills_fx("http://unused.invalid", &[("acts", 10), ("a", 10)], &[]);
+    let s = &f.h.state;
+    let chat = chats::create_chat(s, BIG).unwrap();
+    let empty = chat_state::chat_state(s, &chat.id, BIG).unwrap();
+    assert_eq!(
+        to(&empty),
+        json!({"active_skills": [], "folder": null, "compacted": false})
+    );
+    chat_state::activate_skill(s, &chat.id, "p:acts", BIG).unwrap();
+    s.store.set_folder(&chat.id, Some("/tmp/work")).unwrap();
+    s.store.set_summary(&chat.id, "S", 0).unwrap();
+    let st = chat_state::chat_state(s, &chat.id, BIG).unwrap();
+    assert_eq!(
+        to(&st),
+        json!({
+            "active_skills": [{
+                "id": "p:acts", "name": "acts", "too_long": false,
+                "acts_on_computer": true, "unavailable": false
+            }],
+            "folder": "/tmp/work",
+            "compacted": true
+        })
+    );
+}
+
+#[tokio::test]
+async fn an_active_skill_that_is_switched_off_is_kept_reported_unavailable_and_not_sent() {
+    let server = chat_server().await;
+    let f = skills_fx(&server.uri(), &[("a", 10), ("b", 10)], &[]);
+    let s = &f.h.state;
+    let chat = chats::create_chat(s, BIG).unwrap();
+    chat_state::activate_skill(s, &chat.id, "p:a", BIG).unwrap();
+    chat_state::activate_skill(s, &chat.id, "p:b", BIG).unwrap();
+    super::skills::set_skill_on(s, "p:a", false).unwrap();
+    let st = chat_state::chat_state(s, &chat.id, BIG).unwrap();
+    let flags: Vec<_> = st
+        .active_skills
+        .iter()
+        .map(|k| (k.id.as_str(), k.too_long, k.unavailable))
+        .collect();
+    assert_eq!(flags, [("p:a", false, true), ("p:b", false, false)]);
+    send(&f.h, &chat.id, "Hi", BIG, vec![]).await.0.unwrap();
+    assert_eq!(
+        sent(&last_body(&server).await),
+        vec![sys(SKILL_NOTE), skill_msg("b", 10), user("Hi")]
+    );
+    super::skills::set_skill_on(s, "p:b", false).unwrap();
+    send(&f.h, &chat.id, "Again", BIG, vec![]).await.0.unwrap();
+    let got = sent(&last_body(&server).await);
+    assert!(got.iter().all(|(role, _)| role != "system"), "{got:?}");
+    assert_eq!(active_ids(&f.h, &chat.id), ["p:a", "p:b"]);
+}
+
+#[test]
+fn deactivate_removes_the_skill_and_adds_no_note() {
+    let f = skills_fx("http://unused.invalid", &[("a", 10), ("b", 10)], &[]);
+    let s = &f.h.state;
+    let chat = chats::create_chat(s, BIG).unwrap();
+    chat_state::activate_skill(s, &chat.id, "p:a", BIG).unwrap();
+    chat_state::activate_skill(s, &chat.id, "p:b", BIG).unwrap();
+    let st = chat_state::deactivate_skill(s, &chat.id, "p:a").unwrap();
+    assert_eq!(st.active_skills.len(), 1);
+    assert_eq!(st.active_skills[0].id, "p:b");
+    assert_eq!(active_ids(&f.h, &chat.id), ["p:b"]);
+    assert_eq!(notes(&f.h, &chat.id), ["Using p:a", "Using p:b"]);
+    // Deactivating a skill that is not active changes nothing.
+    chat_state::deactivate_skill(s, &chat.id, "p:a").unwrap();
+    assert_eq!(active_ids(&f.h, &chat.id), ["p:b"]);
+}
+
+#[test]
+fn the_four_chat_state_commands_reject_an_unknown_chat() {
+    let f = skills_fx("http://unused.invalid", &[("a", 10)], &[]);
+    let s = &f.h.state;
+    let gone = Err(other("That chat no longer exists."));
+    assert_eq!(chat_state::chat_state(s, "nope", BIG), gone);
+    assert_eq!(chat_state::activate_skill(s, "nope", "p:a", BIG), gone);
+    assert_eq!(chat_state::deactivate_skill(s, "nope", "p:a"), gone);
+    assert_eq!(
+        chat_state::chat_fullness(s, "nope", BIG, 0),
+        Err(other("That chat no longer exists."))
+    );
 }

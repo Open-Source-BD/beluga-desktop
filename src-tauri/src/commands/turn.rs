@@ -1,6 +1,7 @@
 //! Sending a message and stopping a reply.
 
 use super::auth::revoke;
+use super::chat_state::{SKILL_NOTE, skills_to_send};
 use super::chats::local;
 use crate::engine::{EngineEvent, TurnOutcome, TurnRequest, UiError};
 use crate::openrouter::models::ModelCache;
@@ -89,11 +90,11 @@ const MAX_IMAGE_BYTES: usize = 5_000_000;
 const BLIND_MODEL: &str =
     "This model cannot read images. Pick a model that can, or remove the image.";
 
-fn is_image(a: &StoredAttachment) -> bool {
+pub(super) fn is_image(a: &StoredAttachment) -> bool {
     a.mime.starts_with("image/")
 }
 
-fn decode(a: &StoredAttachment) -> Option<Vec<u8>> {
+pub(super) fn decode(a: &StoredAttachment) -> Option<Vec<u8>> {
     use base64::Engine as _;
     base64::engine::general_purpose::STANDARD
         .decode(&a.data_base64)
@@ -171,6 +172,59 @@ fn wire(m: &StoredMessage, with_images: bool) -> WireMessage {
     WireMessage { role, parts }
 }
 
+fn system(text: String) -> WireMessage {
+    WireMessage {
+        role: Role::System,
+        parts: vec![Part::Text(text)],
+    }
+}
+
+/// The system messages sent ahead of the conversation, in this order:
+/// 1. when any skill is given, `SKILL_NOTE`;
+/// 2. for each skill `(id, SKILL.md text)`, in the order given (activation
+///    order), `Skill: {id}\n\n{text}`;
+/// 3. when there is a summary, `Summary of the earlier conversation:\n\n{summary}`.
+pub(super) fn preamble(skills: &[(&str, &str)], summary: Option<&str>) -> Vec<WireMessage> {
+    let mut out = Vec::new();
+    if !skills.is_empty() {
+        out.push(system(SKILL_NOTE.to_string()));
+    }
+    for (id, body) in skills {
+        out.push(system(format!("Skill: {id}\n\n{body}")));
+    }
+    if let Some(summary) = summary {
+        out.push(system(format!(
+            "Summary of the earlier conversation:\n\n{summary}"
+        )));
+    }
+    out
+}
+
+/// Everything a turn on `model_id` sends: the `preamble`, then every
+/// sendable message (no notes, nothing before the compaction boundary).
+fn wire_history(s: &AppState, chat_id: &str, model_id: &str) -> Result<Vec<WireMessage>, UiError> {
+    let skills = skills_to_send(s, chat_id, model_id)?;
+    let skills: Vec<(&str, &str)> = skills
+        .iter()
+        .map(|(id, body)| (id.as_str(), body.as_str()))
+        .collect();
+    let summary = s
+        .store
+        .summary(chat_id)
+        .map_err(local)?
+        .map(|(text, _)| text);
+    let with_images = !model_is_blind(s, model_id);
+    let mut messages = preamble(&skills, summary.as_deref());
+    messages.extend(
+        s.store
+            .sendable_messages(chat_id)
+            .map_err(local)?
+            .iter()
+            .map(|m| wire(m, with_images)),
+    );
+    Ok(messages)
+}
+
 fn is_unauthorized(e: &EngineEvent) -> bool {
     match e {
         EngineEvent::Failed { error } => error.kind == "unauthorized",
@@ -214,14 +268,7 @@ async fn run_stored_turn(
     on_event: &(dyn Fn(EngineEvent) + Send + Sync),
 ) -> Result<TurnResult, UiError> {
     s.store.set_chat_model(chat_id, model_id).map_err(local)?;
-    let with_images = !model_is_blind(s, model_id);
-    let messages = s
-        .store
-        .get_messages(chat_id)
-        .map_err(local)?
-        .iter()
-        .map(|m| wire(m, with_images))
-        .collect();
+    let messages = wire_history(s, chat_id, model_id)?;
 
     let id = s.next_id();
     let cancel = CancellationToken::new();
@@ -296,7 +343,8 @@ fn persist(s: &AppState, chat_id: &str, out: &TurnOutcome) -> Result<(), UiError
 }
 
 /// Answers the chat's last user message again without storing it twice. An
-/// interrupted partial reply is removed first; a completed one is not.
+/// interrupted partial reply is removed first; a completed one is not. Notes
+/// are ignored: only sendable messages count as "last".
 pub async fn retry_turn(
     s: &AppState,
     chat_id: &str,
@@ -306,7 +354,7 @@ pub async fn retry_turn(
     if s.store.get_chat(chat_id).map_err(local)?.is_none() {
         return Err(UiError::other("This chat no longer exists."));
     }
-    let messages = s.store.get_messages(chat_id).map_err(local)?;
+    let messages = s.store.sendable_messages(chat_id).map_err(local)?;
     let partial = messages
         .last()
         .filter(|m| m.role == "assistant" && m.interrupted);

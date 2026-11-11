@@ -3,10 +3,11 @@
 //! Tauri converts them by default.
 
 use super::auth::{AuthStatus, AuthUrl, StorageChoice};
+use super::chat_state::{ChatState, Fullness};
 use super::chats::ChatUsage;
 use super::skills::SkillsStatus;
 use super::turn::{AttachmentInput, TurnResult};
-use super::{auth, chats, models, skills, turn};
+use super::{auth, chat_state, chats, models, skills, turn};
 use crate::auth::callback::PRODUCTION_TIMEOUT;
 use crate::engine::{EngineEvent, UiError};
 use crate::openrouter::key_info::KeyStatus;
@@ -180,4 +181,42 @@ pub async fn skill_file(
 #[tauri::command]
 pub async fn skills_status(state: S<'_>) -> Result<SkillsStatus, UiError> {
     skills::skills_status(&state)
+}
+
+#[tauri::command]
+pub async fn chat_state(
+    state: S<'_>,
+    chat_id: String,
+    model_id: String,
+) -> Result<ChatState, UiError> {
+    chat_state::chat_state(&state, &chat_id, &model_id)
+}
+
+#[tauri::command]
+pub async fn activate_skill(
+    state: S<'_>,
+    chat_id: String,
+    skill_id: String,
+    model_id: String,
+) -> Result<ChatState, UiError> {
+    chat_state::activate_skill(&state, &chat_id, &skill_id, &model_id)
+}
+
+#[tauri::command]
+pub async fn deactivate_skill(
+    state: S<'_>,
+    chat_id: String,
+    skill_id: String,
+) -> Result<ChatState, UiError> {
+    chat_state::deactivate_skill(&state, &chat_id, &skill_id)
+}
+
+#[tauri::command]
+pub async fn chat_fullness(
+    state: S<'_>,
+    chat_id: String,
+    model_id: String,
+    draft_chars: u64,
+) -> Result<Fullness, UiError> {
+    chat_state::chat_fullness(&state, &chat_id, &model_id, draft_chars)
 }

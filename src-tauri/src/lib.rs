@@ -57,6 +57,10 @@ pub fn run() {
             h::set_skill_on,
             h::set_pack_on,
             h::skill_file,
+            h::chat_state,
+            h::activate_skill,
+            h::deactivate_skill,
+            h::chat_fullness,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
