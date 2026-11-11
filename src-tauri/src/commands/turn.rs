@@ -282,7 +282,9 @@ async fn run_stored_turn(
         model_id: model_id.to_string(),
         messages: wire_history(s, chat_id, model_id)?,
     };
-    let ran = run_registered(s, chat_id, request, on_event).await;
+    let registration =
+        register_turn(s, chat_id, Register::Replace).expect("replacing always registers");
+    let ran = run_registered(s, chat_id, registration, request, on_event).await;
     // The turn ran and the user message is stored, so a failure to store the
     // reply is reported as a failed turn, not as a send that never happened.
     if let Err(e) = persist(s, chat_id, &ran.outcome) {
@@ -299,18 +301,31 @@ pub(super) struct Ran {
     pub superseded: bool,
 }
 
-/// Runs one engine request as the chat's running turn: `stop` cancels it,
-/// and a turn started in the same chat meanwhile cancels and supersedes it.
-/// Signs out when OpenRouter rejects the key. Stores nothing.
-pub(super) async fn run_registered(
+/// How `register_turn` treats a turn already running in the chat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Register {
+    /// Cancel it and take its place (sending and retrying).
+    Replace,
+    /// Leave it running and register nothing (compaction).
+    IfFree,
+}
+
+/// Registers a new running turn for the chat, checking for and replacing an
+/// existing one in a single critical section. Returns its id and
+/// cancellation token, or `None` when `IfFree` finds the chat busy, in which
+/// case nothing changes.
+pub(super) fn register_turn(
     s: &AppState,
     chat_id: &str,
-    request: TurnRequest,
-    on_event: &(dyn Fn(EngineEvent) + Send + Sync),
-) -> Ran {
+    mode: Register,
+) -> Option<(u64, CancellationToken)> {
+    let mut turns = s.turns();
+    if mode == Register::IfFree && turns.contains_key(chat_id) {
+        return None;
+    }
     let id = s.next_id();
     let cancel = CancellationToken::new();
-    let previous = s.turns().insert(
+    let previous = turns.insert(
         chat_id.to_string(),
         RunningTurn {
             id,
@@ -320,7 +335,20 @@ pub(super) async fn run_registered(
     if let Some(previous) = previous {
         previous.cancel.cancel();
     }
+    Some((id, cancel))
+}
 
+/// Runs one engine request as the chat's running turn, registered by
+/// `register_turn`: `stop` cancels it, and a turn started in the same chat
+/// meanwhile cancels and supersedes it. Signs out when OpenRouter rejects
+/// the key. Stores nothing.
+pub(super) async fn run_registered(
+    s: &AppState,
+    chat_id: &str,
+    (id, cancel): (u64, CancellationToken),
+    request: TurnRequest,
+    on_event: &(dyn Fn(EngineEvent) + Send + Sync),
+) -> Ran {
     let unauthorized = AtomicBool::new(false);
     let ended: Mutex<Option<TurnResult>> = Mutex::new(None);
     let emit = |e: EngineEvent| {

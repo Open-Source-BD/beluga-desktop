@@ -3,7 +3,9 @@
 
 use super::chat_state::{CHARS_PER_TOKEN, message_chars, require_chat, sized_model};
 use super::chats::local;
-use super::turn::{TurnResult, TurnStatus, preamble, run_registered, system, wire};
+use super::turn::{
+    Register, TurnResult, TurnStatus, preamble, register_turn, run_registered, system, wire,
+};
 use crate::engine::{TurnOutcome, TurnRequest, UiError};
 use crate::state::AppState;
 use crate::store::StoredMessage;
@@ -65,6 +67,7 @@ pub async fn compact_chat(
     require_chat(s, chat_id)?;
     // A reply cancelled by the compaction would be stored after the boundary
     // with no question before it, so a running reply is never replaced here.
+    // This early check only saves the store reads; `register_turn` decides.
     if s.turns().contains_key(chat_id) {
         return Err(UiError::other(TURN_RUNNING));
     }
@@ -103,7 +106,12 @@ pub async fn compact_chat(
         model_id: model_id.to_string(),
         messages: wire_messages,
     };
-    let ran = run_registered(s, chat_id, request, &|_| {}).await;
+    // Checking and registering together is what keeps a reply that started
+    // since the check above from being cancelled by the compaction.
+    let Some(registration) = register_turn(s, chat_id, Register::IfFree) else {
+        return Err(UiError::other(TURN_RUNNING));
+    };
+    let ran = run_registered(s, chat_id, registration, request, &|_| {}).await;
 
     // A turn that started in the chat meanwhile cancelled this one; should the
     // summary have arrived anyway, it no longer describes the chat.

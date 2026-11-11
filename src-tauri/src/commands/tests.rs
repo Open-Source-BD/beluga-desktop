@@ -2683,3 +2683,28 @@ fn export_writes_the_title_on_one_line() {
     assert_eq!(content.lines().next(), Some("# Two lines  ## Injected end"));
     assert_eq!(content, "# Two lines  ## Injected end\n\n## You\n\nHi\n");
 }
+
+#[test]
+fn registering_only_if_free_refuses_a_busy_chat_and_registers_a_free_one() {
+    let h = signed_in("http://unused.invalid");
+    let running = CancellationToken::new();
+    h.state.turns().insert(
+        "busy".to_string(),
+        RunningTurn {
+            id: 99,
+            cancel: running.clone(),
+        },
+    );
+    assert!(turn::register_turn(&h.state, "busy", turn::Register::IfFree).is_none());
+    assert!(!running.is_cancelled());
+    assert_eq!(h.state.turns().get("busy").map(|t| t.id), Some(99));
+
+    let (id, cancel) = turn::register_turn(&h.state, "free", turn::Register::IfFree).unwrap();
+    assert_eq!(h.state.turns().get("free").map(|t| t.id), Some(id));
+    assert!(!cancel.is_cancelled());
+
+    // A normal turn still replaces and cancels the one running.
+    let (replacing, _) = turn::register_turn(&h.state, "busy", turn::Register::Replace).unwrap();
+    assert!(running.is_cancelled());
+    assert_eq!(h.state.turns().get("busy").map(|t| t.id), Some(replacing));
+}
