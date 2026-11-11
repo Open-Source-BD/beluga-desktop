@@ -12,9 +12,10 @@
   "app": {
     "windows": [
       {
-        "title": "Beluga",
-        "width": 800,
-        "height": 600
+        "width": 1180,
+        "height": 760,
+        "minWidth": 720,
+        "minHeight": 520
       }
     ],
     "security": {

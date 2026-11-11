@@ -8,7 +8,9 @@ import "./app/tokens.css";
 import "./app/base.css";
 import { applyAppearance, getAppearance } from "./app/appearance";
 import App from "./app/App";
+import { APP_NAME } from "./app/brand";
 
+document.title = APP_NAME;
 applyAppearance(getAppearance());
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

@@ -19,6 +19,10 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             let state = state::AppState::open(data_dir, Arc::new(app.handle().clone()))?;
             app.manage(Arc::new(state));
+            // The window takes its title from the one place the name lives.
+            if let Some(window) = app.get_webview_window("main") {
+                window.set_title(brand::APP_NAME)?;
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
