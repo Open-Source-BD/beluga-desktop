@@ -32,10 +32,10 @@ function wordStart(text: string, caret: number): number {
   return i;
 }
 
-/** The box without the token at [start, caret): one space between what remains, caret at the join. */
-function withoutToken(text: string, start: number, caret: number) {
+/** The box without the token at [start, end): one space between what remains, caret at the join. */
+function withoutToken(text: string, start: number, end: number) {
   const left = text.slice(0, start).replace(/ +$/, "");
-  const right = text.slice(caret).replace(/^ +/, "");
+  const right = text.slice(end).replace(/^ +/, "");
   const sep = left !== "" && right !== "" && !left.endsWith("\n") && !right.startsWith("\n");
   return { text: left + (sep ? " " : "") + right, caret: left.length + (sep ? 1 : 0) };
 }
@@ -60,7 +60,8 @@ export function useMentionMenu({ chatId, folder, openFolder, control }: Options)
   const [box, setBox] = useState({ text: "", caret: 0 });
   const [closedFor, setClosedFor] = useState<string | null>(null);
   const [active, setActive] = useState(0);
-  const [found, setFound] = useState<FileList | null>(null);
+  const [found, setFound] = useState<{ query: string; list: FileList } | null>(null);
+  const picking = useRef(false);
   const latest = useRef(box);
   latest.current = box;
   const seq = useRef(0);
@@ -81,10 +82,10 @@ export function useMentionMenu({ chatId, folder, openFolder, control }: Options)
     const timer = setTimeout(() => {
       folderFiles(chatId, query).then(
         (r) => {
-          if (seq.current === mine) setFound(r);
+          if (seq.current === mine) setFound({ query, list: r });
         },
         () => {
-          if (seq.current === mine) setFound(null);
+          if (seq.current === mine) setFound({ query, list: { entries: [], total: 0, cut: false } });
         },
       );
     }, DEBOUNCE_MS);
@@ -100,10 +101,13 @@ export function useMentionMenu({ chatId, folder, openFolder, control }: Options)
     if (closedFor !== null && closedFor !== text) setClosedFor(null);
   }, [closedFor, text]);
 
+  // Results belong to the query they were fetched for; until the new ones arrive nothing is shown or picked.
+  const list = found?.query === query ? found.list : null;
   const rows = useMemo(
-    () => (!hasFolder ? [OPEN_ROW] : (found?.entries ?? []).map(fileRow)),
-    [hasFolder, found],
+    () => (!hasFolder ? [OPEN_ROW] : list ? list.entries.map(fileRow) : []),
+    [hasFolder, list],
   );
+  const searching = wanted && hasFolder && !list;
   const open = wanted && rows.length > 0;
   const current = Math.min(active, rows.length - 1);
   const group = hasFolder
@@ -113,25 +117,29 @@ export function useMentionMenu({ chatId, folder, openFolder, control }: Options)
   const shown = rows.map((r) => ({ ...r, group }));
 
   const pick = async (row: Row) => {
-    const ctl = control.current;
-    if (!ctl) return;
+    if (picking.current || !control.current) return;
     if (row.id === OPEN_ROW.id) {
       const before = latest.current;
       if (await openFolder()) control.current?.setText(before.text, before.caret);
       return;
     }
     if (!chatId) return;
+    picking.current = true;
     try {
       const attachment = await attachFolderFile(chatId, row.id);
-      ctl.addAttachment(attachment);
+      // The box may have changed while waiting: use it as it is now.
+      const ctl = control.current;
+      if (!ctl?.addAttachment(attachment)) return;
+      if (latest.current.text !== text) return;
+      let end = caret;
+      while (end < text.length && !/\s/.test(text[end])) end++;
+      const next = withoutToken(text, start, end);
+      ctl.setText(next.text, next.caret);
     } catch (e) {
-      ctl.refuse(toUiError(e).message);
-      return;
+      control.current?.refuse(toUiError(e).message);
+    } finally {
+      picking.current = false;
     }
-    const now = latest.current;
-    if (now.text !== text) return;
-    const next = withoutToken(text, start, caret);
-    ctl.setText(next.text, next.caret);
   };
 
   const actions = {
@@ -143,7 +151,10 @@ export function useMentionMenu({ chatId, folder, openFolder, control }: Options)
   };
 
   const onKeyIntercept = (e: KeyboardEvent<HTMLTextAreaElement>): boolean => {
-    if (!open || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return false;
+    if (e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return false;
+    // Results on their way: Enter and Tab must not send the half-typed mention.
+    if (searching) return e.key === "Enter" || e.key === "Tab";
+    if (!open) return false;
     return handleMenuKey(e, actions);
   };
 
@@ -151,7 +162,7 @@ export function useMentionMenu({ chatId, folder, openFolder, control }: Options)
     <PopMenu
       {...actions}
       groups={groups}
-      totals={hasFolder ? { [group]: found?.total ?? 0 } : undefined}
+      totals={hasFolder ? { [group]: list?.total ?? 0 } : undefined}
       idPrefix={PREFIX}
       label="Files in the folder"
       footer={
@@ -159,7 +170,7 @@ export function useMentionMenu({ chatId, folder, openFolder, control }: Options)
           <span>↑↓ move</span>
           <span>Enter attach</span>
           <span>Esc close</span>
-          {found?.cut && <span>list cut at 5,000 files</span>}
+          {list?.cut && <span>list cut at 5,000 files</span>}
         </>
       }
     />

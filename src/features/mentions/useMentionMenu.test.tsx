@@ -19,6 +19,7 @@ const ATTACHMENT = { name: "login.ts", mime: "text/plain", data: "x", size: 1229
 function Harness({
   folder = "/home/me/app" as string | null,
   openFolder = vi.fn().mockResolvedValue(true),
+  acceptsImages = true,
 }) {
   const control = useRef<ComposerControl>(null);
   const m = useMentionMenu({ chatId: "c1", folder, openFolder, control });
@@ -30,6 +31,7 @@ function Harness({
       onKeyIntercept={m.onKeyIntercept}
       onTextChange={m.onTextChange}
       onSend={vi.fn()}
+      acceptsImages={acceptsImages}
     />
   );
 }
@@ -182,5 +184,68 @@ describe("useMentionMenu", () => {
     await userEvent.type(box(), "@");
     expect(await screen.findByText("<img src=x onerror=alert(1)>.md")).toBeInTheDocument();
     expect(document.querySelector("img")).toBeNull();
+  });
+
+  it("a sixth file shows the limit message and leaves the text and caret alone", async () => {
+    let n = 0;
+    ipc.attachFolderFile.mockImplementation(async () => ({ ...ATTACHMENT, name: `f${++n}.ts` }));
+    render(<Harness />);
+    for (let i = 0; i < 5; i++) {
+      await userEvent.type(box(), "@");
+      await screen.findByText("login.ts");
+      await userEvent.keyboard("{Enter}");
+      await waitFor(() => expect(box().value).toBe(""));
+    }
+    await userEvent.type(box(), "@");
+    await screen.findByText("login.ts");
+    await userEvent.keyboard("{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("You can attach up to 5 files.");
+    expect(box().value).toBe("@");
+    expect(box().selectionStart).toBe(1);
+  });
+
+  it("an image for a model that cannot read images is refused and the text stays", async () => {
+    ipc.attachFolderFile.mockResolvedValue({ name: "a.png", mime: "image/png", data: "x", size: 1 });
+    render(<Harness acceptsImages={false} />);
+    await userEvent.type(box(), "see @a");
+    await screen.findByText("login.ts");
+    await userEvent.keyboard("{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("This model cannot read images.");
+    expect(box().value).toBe("see @a");
+    expect(screen.queryByRole("list", { name: "Attachments" })).toBeNull();
+  });
+
+  it("a second Enter before the attach resolves does nothing", async () => {
+    let done!: (v: unknown) => void;
+    ipc.attachFolderFile.mockReturnValue(new Promise((r) => (done = r)));
+    render(<Harness />);
+    await userEvent.type(box(), "@");
+    await screen.findByText("login.ts");
+    await userEvent.keyboard("{Enter}{Enter}");
+    done(ATTACHMENT);
+    await waitFor(() => expect(box().value).toBe(""));
+    expect(ipc.attachFolderFile).toHaveBeenCalledTimes(1);
+    expect(within(screen.getByRole("list", { name: "Attachments" })).getAllByRole("listitem")).toHaveLength(1);
+  });
+
+  it("Enter right after a new character, before new results arrive, attaches nothing", async () => {
+    render(<Harness />);
+    await userEvent.type(box(), "@a");
+    await screen.findByText("login.ts");
+    await userEvent.keyboard("b{Enter}");
+    expect(ipc.attachFolderFile).not.toHaveBeenCalled();
+    expect(box().value).toBe("@ab");
+  });
+
+  it("removes the whole token when the caret is in the middle of it", async () => {
+    ipc.attachFolderFile.mockResolvedValue(ATTACHMENT);
+    render(<Harness />);
+    await userEvent.type(box(), "@rou");
+    await screen.findByText("login.ts");
+    await userEvent.keyboard("{ArrowLeft}{ArrowLeft}");
+    await waitFor(() => expect(ipc.folderFiles).toHaveBeenLastCalledWith("c1", "r"));
+    await screen.findByText("login.ts");
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => expect(box().value).toBe(""));
   });
 });

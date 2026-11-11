@@ -30,8 +30,8 @@ export interface ComposerControl {
   setText(text: string, caret?: number): void;
   /** Sends `text` (default: the box) with the current attachments, as the Send button would. */
   submit(text?: string, intent?: SendIntent): Promise<void>;
-  /** Adds a chip as a picked file would, with the same limits and refusal copy. */
-  addAttachment(attachment: AttachmentInput): void;
+  /** Adds a chip as a picked file would, with the same limits and refusal copy; false when refused. */
+  addAttachment(attachment: AttachmentInput): boolean;
   /** Shows `message` where attachment refusals appear. */
   refuse(message: string): void;
 }
@@ -172,10 +172,19 @@ export default function Composer({
     },
     submit,
     addAttachment(a) {
-      if (files.length >= MAX_ATTACHMENTS) return setRefusals([MAX_ATTACHMENTS_MESSAGE]);
-      if (a.mime.startsWith("image/") && !acceptsImages) return setRefusals([CANNOT_READ_IMAGES]);
+      const refused =
+        files.length >= MAX_ATTACHMENTS
+          ? MAX_ATTACHMENTS_MESSAGE
+          : a.mime.startsWith("image/") && !acceptsImages
+            ? CANNOT_READ_IMAGES
+            : null;
+      if (refused) {
+        setRefusals([refused]);
+        return false;
+      }
       setFiles((cur) => [...cur, a].slice(0, MAX_ATTACHMENTS));
       setRefusals([]);
+      return true;
     },
     refuse: (message) => setRefusals([message]),
   }));
