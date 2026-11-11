@@ -54,6 +54,27 @@ describe("Composer", () => {
   });
 });
 
+describe("Composer when the send is rejected", () => {
+  it("keeps the text and the attachment chips", async () => {
+    const onSend = vi.fn().mockRejectedValue({ kind: "other", message: "db down", retryable: true });
+    render(<Composer onSend={onSend} />);
+    const input = screen.getByLabelText("Attach files") as HTMLInputElement;
+    await userEvent.upload(input, new File(["hi"], "a.txt", { type: "text/plain" }));
+    await screen.findByText("a.txt");
+    await userEvent.type(screen.getByLabelText("Message"), "draft{Enter}");
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("Message")).toHaveValue("draft");
+    expect(screen.getByText("a.txt")).toBeInTheDocument();
+  });
+
+  it("clears once an asynchronous send is accepted", async () => {
+    const onSend = vi.fn().mockResolvedValue(undefined);
+    render(<Composer onSend={onSend} />);
+    await userEvent.type(screen.getByLabelText("Message"), "draft{Enter}");
+    expect(screen.getByLabelText("Message")).toHaveValue("");
+  });
+});
+
 describe("Composer attachments", () => {
   const BLIND = "This model cannot read images. Pick a model that can, or remove the image.";
   const input = () => screen.getByLabelText("Attach files") as HTMLInputElement;

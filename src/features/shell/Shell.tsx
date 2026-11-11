@@ -95,8 +95,9 @@ export default function Shell({ onSignInAgain }: Props) {
         setSelectedId(id);
         refreshChats();
       } catch (e) {
+        // Rejecting keeps the draft in the message box.
         setStartError(toUiError(e));
-        return;
+        throw e;
       } finally {
         setCreating(false);
       }

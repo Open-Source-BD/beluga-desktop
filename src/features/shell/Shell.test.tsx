@@ -142,6 +142,20 @@ describe("Shell", () => {
     expect(await screen.findByRole("listbox")).toBeInTheDocument();
   });
 
+  it("keeps the draft and its attachments when creating the chat fails, and shows the error", async () => {
+    localStorage.setItem("lastModel", "test/model");
+    ipc.createChat.mockRejectedValue({ kind: "other", message: "Could not save.", retryable: true });
+    render(<Shell />);
+    const input = (await screen.findByLabelText("Attach files")) as HTMLInputElement;
+    await userEvent.upload(input, new File(["hi"], "n.txt", { type: "text/plain" }));
+    await screen.findByText("n.txt");
+    await userEvent.type(screen.getByLabelText("Message"), "my draft{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not save.");
+    expect(screen.getByLabelText("Message")).toHaveValue("my draft");
+    expect(screen.getByText("n.txt")).toBeInTheDocument();
+    expect(ipc.sendMessage).not.toHaveBeenCalled();
+  });
+
   it("shows the gauge for a free model and spend and balance for a paid one", async () => {
     render(<Shell />);
     expect(await screen.findByRole("group", { name: "38 of 50 free requests left" })).toBeInTheDocument();

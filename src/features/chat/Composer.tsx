@@ -16,7 +16,12 @@ import {
 } from "./attachments";
 
 interface Props {
-  onSend: (text: string, attachments: AttachmentInput[]) => void;
+  /**
+   * The draft is cleared once this returns or its promise resolves. If the
+   * promise rejects, the text and attachments stay in the box; showing the
+   * error is the handler's job.
+   */
+  onSend: (text: string, attachments: AttachmentInput[]) => void | Promise<void>;
   onStop?: () => void;
   /** A reply is streaming in this chat: sending is blocked and the button becomes Stop. */
   streaming?: boolean;
@@ -45,6 +50,7 @@ export default function Composer({
   const [text, setText] = useState("");
   const [files, setFiles] = useState<AttachmentInput[]>([]);
   const [refusals, setRefusals] = useState<string[]>([]);
+  const [sending, setSending] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   const locked = disabled || noModel;
@@ -53,6 +59,7 @@ export default function Composer({
   const canSend =
     !locked &&
     !streaming &&
+    !sending &&
     !imageBlocked &&
     (text.trim() !== "" || files.length > 0);
   const notices =
@@ -67,9 +74,17 @@ export default function Composer({
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`;
   }, [text]);
 
-  const submit = () => {
+  const submit = async () => {
     if (!canSend) return;
-    onSend(text.trim(), files);
+    setSending(true);
+    try {
+      await onSend(text.trim(), files);
+    } catch {
+      // Not accepted: keep the draft so nothing typed or attached is lost.
+      return;
+    } finally {
+      setSending(false);
+    }
     setText("");
     setFiles([]);
     setRefusals([]);
@@ -100,7 +115,7 @@ export default function Composer({
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      submit();
+      void submit();
     }
   };
 
@@ -115,7 +130,7 @@ export default function Composer({
       className="composer"
       onSubmit={(e) => {
         e.preventDefault();
-        submit();
+        void submit();
       }}
     >
       {files.length > 0 && (
