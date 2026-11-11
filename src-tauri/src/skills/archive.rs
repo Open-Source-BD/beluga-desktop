@@ -410,6 +410,26 @@ mod tests {
         (parent, dest)
     }
 
+    /// Every file and folder under `dir` as sorted relative names with `/`
+    /// separators. Built from directory listings only, so it never joins an
+    /// archive-style name (drive prefix, leading separator) onto a path.
+    fn tree(dir: &Path) -> Vec<String> {
+        fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) {
+            for e in std::fs::read_dir(dir).unwrap() {
+                let e = e.unwrap();
+                let name = format!("{prefix}{}", e.file_name().to_string_lossy());
+                out.push(name.clone());
+                if e.file_type().unwrap().is_dir() {
+                    walk(&e.path(), &format!("{name}/"), out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(dir, "", &mut out);
+        out.sort();
+        out
+    }
+
     fn only_dest(parent: &Path) {
         let names: Vec<_> = std::fs::read_dir(parent)
             .unwrap()
@@ -721,10 +741,7 @@ mod tests {
         tar_raw(&mut b, "C:/evil", b"x");
         tar_file(&mut b, "top/ok.md", b"ok");
         untar(finish_gz(b), &dest, &limits()).unwrap();
-        assert!(dest.join("top/ok.md").exists());
-        assert!(!dest.join("top/a:b.md").exists());
-        assert!(!dest.join("top/C:evil").exists());
-        assert!(!dest.join("C:").exists());
+        assert_eq!(tree(&dest), vec!["top", "top/ok.md"]);
         only_dest(p.path());
     }
 
@@ -738,9 +755,7 @@ mod tests {
             ("top/ok.md", b"ok"),
         ]);
         unzip(&z, &dest, &limits()).unwrap();
-        assert!(dest.join("top/ok.md").exists());
-        assert!(!dest.join("top/a:b.md").exists());
-        assert!(!dest.join("top/C:evil").exists());
+        assert_eq!(tree(&dest), vec!["top", "top/ok.md"]);
         only_dest(p.path());
     }
 
