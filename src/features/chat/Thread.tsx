@@ -11,6 +11,8 @@ interface Props {
   streamingText: string;
   status: ChatStatus;
   error: UiError | null;
+  /** The pending text was rejected before it was stored. */
+  notSent?: boolean;
   onRetry: () => void;
   onSignInAgain: () => void;
   onPickModel: () => void;
@@ -22,6 +24,7 @@ export default function Thread({
   streamingText,
   status,
   error,
+  notSent = false,
   onRetry,
   onSignInAgain,
   onPickModel,
@@ -65,7 +68,10 @@ export default function Thread({
           ),
         )}
         {pendingUser !== null && (
-          <div className="me">{pendingUser}</div>
+          <div className="me">
+            {pendingUser}
+            {notSent && <span className="not-sent"> Not sent.</span>}
+          </div>
         )}
         <div className="reply live" aria-live="polite">
           {streaming && streamingText && <Markdown text={streamingText} />}

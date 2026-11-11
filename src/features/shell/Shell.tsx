@@ -131,6 +131,7 @@ export default function Shell({ onOpenSettings, onSignInAgain }: Props) {
               streamingText={chat.streamingText}
               status={chat.status}
               error={chat.error}
+              notSent={chat.unsent !== null}
               onRetry={() => chat.retry(modelId)}
               onSignInAgain={() => onSignInAgain?.()}
               onPickModel={pickModel}

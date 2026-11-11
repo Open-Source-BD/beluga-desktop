@@ -152,3 +152,7 @@
   margin: 0 auto 14px;
   width: min(680px, 100% - 48px);
 }
+.not-sent {
+  color: var(--mid);
+  font-size: 12.5px;
+}

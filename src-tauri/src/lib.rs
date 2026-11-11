@@ -40,6 +40,7 @@ pub fn run() {
             h::chat_usage,
             h::month_spend,
             h::send_message,
+            h::retry_turn,
             h::stop,
         ])
         .run(tauri::generate_context!())

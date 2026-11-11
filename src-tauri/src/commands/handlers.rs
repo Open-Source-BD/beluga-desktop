@@ -128,6 +128,19 @@ pub async fn send_message(
 }
 
 #[tauri::command]
+pub async fn retry_turn(
+    state: S<'_>,
+    chat_id: String,
+    model_id: String,
+    on_event: Channel<EngineEvent>,
+) -> Result<(), UiError> {
+    let emit = move |e: EngineEvent| {
+        let _ = on_event.send(e);
+    };
+    turn::retry_turn(&state, &chat_id, &model_id, &emit).await
+}
+
+#[tauri::command]
 pub async fn stop(state: S<'_>, chat_id: String) -> Result<(), UiError> {
     turn::stop(&state, &chat_id);
     Ok(())

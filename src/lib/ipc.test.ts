@@ -82,6 +82,17 @@ describe("ipc", () => {
     expect(seen).toEqual([{ type: "text_delta", text: "Hel" }]);
   });
 
+  it("retryTurn passes chat id, model id and a channel", async () => {
+    const seen: ipc.EngineEvent[] = [];
+    await ipc.retryTurn("c", "m/a", (e) => seen.push(e));
+    const [cmd, args] = invoke.mock.calls[0];
+    expect(cmd).toBe("retry_turn");
+    expect(Object.keys(args).sort()).toEqual(["chatId", "modelId", "onEvent"]);
+    expect(args).toMatchObject({ chatId: "c", modelId: "m/a" });
+    args.onEvent.onmessage({ type: "done" });
+    expect(seen).toEqual([{ type: "done" }]);
+  });
+
   it("onAuthFinished unwraps the event payload", async () => {
     const handler = vi.fn();
     await ipc.onAuthFinished(handler);

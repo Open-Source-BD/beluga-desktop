@@ -6,6 +6,7 @@ import { useChat } from "./useChat";
 const ipc = vi.hoisted(() => ({
   getMessages: vi.fn(),
   sendMessage: vi.fn(),
+  retryTurn: vi.fn(),
   stop: vi.fn(),
 }));
 vi.mock("../../lib/ipc", () => ipc);
@@ -23,6 +24,14 @@ beforeEach(() => {
   ipc.stop.mockResolvedValue(undefined);
   ipc.sendMessage.mockImplementation(
     (_c: string, _t: string, _a: unknown, _m: string, onEvent: (e: EngineEvent) => void) => {
+      emit = onEvent;
+      return new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    },
+  );
+  ipc.retryTurn.mockImplementation(
+    (_c: string, _m: string, onEvent: (e: EngineEvent) => void) => {
       emit = onEvent;
       return new Promise<void>((resolve) => {
         finish = resolve;
@@ -78,8 +87,48 @@ describe("useChat", () => {
     expect(result.current.status).toBe("interrupted");
     expect(result.current.messages[1]).toMatchObject({ text: "Hel", interrupted: true });
     act(() => result.current.retry());
-    expect(ipc.sendMessage).toHaveBeenLastCalledWith("a", "hi", [], "m1", expect.any(Function));
+    expect(ipc.retryTurn).toHaveBeenCalledWith("a", "m1", expect.any(Function));
+    expect(ipc.sendMessage).toHaveBeenCalledTimes(1);
     expect(result.current.status).toBe("streaming");
+  });
+
+  it("after a failed event (message stored) retry uses retryTurn, never sendMessage", async () => {
+    const { result } = renderHook(() => useChat("a"));
+    act(() => result.current.send("hi", [], "m1"));
+    ipc.getMessages.mockResolvedValue([msg("1", "user", "hi")]);
+    await act(async () =>
+      emit({ type: "failed", error: { kind: "network", message: "Offline", retryable: true } }),
+    );
+    act(() => result.current.retry());
+    expect(ipc.retryTurn).toHaveBeenCalledWith("a", "m1", expect.any(Function));
+    expect(ipc.sendMessage).toHaveBeenCalledTimes(1);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("a rejected send in a new chat keeps the text, and retry sends that text again", async () => {
+    ipc.sendMessage.mockRejectedValueOnce({ kind: "other", message: "db down", retryable: true });
+    const att = { name: "n", mime: "text/plain", data_base64: "aGk=" };
+    const { result } = renderHook(() => useChat("a"));
+    act(() => result.current.send("typed", [att], "m1"));
+    await waitFor(() => expect(result.current.status).toBe("failed"));
+    expect(result.current.pendingUser).toBe("typed");
+    expect(result.current.unsent).not.toBeNull();
+    act(() => result.current.retry());
+    expect(ipc.sendMessage).toHaveBeenLastCalledWith("a", "typed", [att], "m1", expect.any(Function));
+    expect(ipc.retryTurn).not.toHaveBeenCalled();
+    expect(result.current.unsent).toBeNull();
+  });
+
+  it("a rejected send in a chat with earlier messages retries the new text, not an earlier one", async () => {
+    ipc.getMessages.mockResolvedValue([msg("1", "user", "earlier"), msg("2", "assistant", "ok")]);
+    ipc.sendMessage.mockRejectedValueOnce({ kind: "other", message: "db down", retryable: true });
+    const { result } = renderHook(() => useChat("a"));
+    await waitFor(() => expect(result.current.messages).toHaveLength(2));
+    act(() => result.current.send("new text", [], "m1"));
+    await waitFor(() => expect(result.current.status).toBe("failed"));
+    expect(result.current.pendingUser).toBe("new text");
+    act(() => result.current.retry());
+    expect(ipc.sendMessage).toHaveBeenLastCalledWith("a", "new text", [], "m1", expect.any(Function));
   });
 
   it("does not start a second send while the chat is streaming", () => {

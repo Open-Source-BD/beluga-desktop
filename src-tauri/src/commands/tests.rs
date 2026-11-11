@@ -465,6 +465,109 @@ async fn send_message_interrupted_persists_partial_text_with_interrupted_true() 
     assert_eq!(chats::chat_usage(&h.state, &chat.id).unwrap().requests, 1);
 }
 
+async fn retry(h: &Harness, chat_id: &str, model: &str) -> (Result<(), UiError>, Vec<EngineEvent>) {
+    let events: Events = Arc::default();
+    let sink = events.clone();
+    let r = turn::retry_turn(&h.state, chat_id, model, &move |e| {
+        sink.lock().unwrap().push(e)
+    })
+    .await;
+    let out = events.lock().unwrap().clone();
+    (r, out)
+}
+
+fn roles_and_texts(h: &Harness, chat_id: &str) -> Vec<(String, String, bool)> {
+    chats::get_messages(&h.state, chat_id)
+        .unwrap()
+        .into_iter()
+        .map(|m| (m.role, m.text, m.interrupted))
+        .collect()
+}
+
+#[tokio::test]
+async fn retry_turn_after_an_interrupted_reply_replaces_the_partial() {
+    let server = MockServer::start().await;
+    mock(&server, "POST", "/api/v1/chat/completions", sse(PAID_REPLY)).await;
+    let h = signed_in(&server.uri());
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    h.state
+        .store
+        .append_message(&chat.id, "user", "Hi", &[], false)
+        .unwrap();
+    h.state
+        .store
+        .append_message(&chat.id, "assistant", "Partial", &[], true)
+        .unwrap();
+    let (r, events) = retry(&h, &chat.id, "m/b").await;
+    r.unwrap();
+    assert_eq!(events.last(), Some(&EngineEvent::Done));
+    assert_eq!(
+        roles_and_texts(&h, &chat.id),
+        vec![
+            ("user".into(), "Hi".into(), false),
+            ("assistant".into(), "Hello".into(), false)
+        ]
+    );
+    assert_eq!(chats::list_chats(&h.state).unwrap()[0].model_id, "m/b");
+    assert_eq!(chats::chat_usage(&h.state, &chat.id).unwrap().requests, 1);
+    // The model saw the question once and no partial reply.
+    let reqs = server.received_requests().await.unwrap();
+    let body: Value = reqs[0].body_json().unwrap();
+    let sent: Vec<(&str, &str)> = body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| {
+            (
+                m["role"].as_str().unwrap(),
+                m["content"][0]["text"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(sent, vec![("user", "Hi")]);
+}
+
+#[tokio::test]
+async fn retry_turn_after_a_failed_turn_stores_one_reply_and_no_second_user_message() {
+    let server = MockServer::start().await;
+    mock(&server, "POST", "/api/v1/chat/completions", sse(PAID_REPLY)).await;
+    let h = signed_in(&server.uri());
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    h.state
+        .store
+        .append_message(&chat.id, "user", "Hi", &[], false)
+        .unwrap();
+    retry(&h, &chat.id, "m/a").await.0.unwrap();
+    assert_eq!(
+        roles_and_texts(&h, &chat.id),
+        vec![
+            ("user".into(), "Hi".into(), false),
+            ("assistant".into(), "Hello".into(), false)
+        ]
+    );
+}
+
+#[tokio::test]
+async fn retry_turn_with_nothing_to_retry_errors_and_changes_nothing() {
+    let server = MockServer::start().await;
+    mock(&server, "POST", "/api/v1/chat/completions", sse(PAID_REPLY)).await;
+    let h = signed_in(&server.uri());
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    let expect = UiError {
+        kind: "other".into(),
+        message: "There is nothing to retry in this chat.".into(),
+        retryable: false,
+    };
+    // Empty chat.
+    assert_eq!(retry(&h, &chat.id, "m/a").await.0, Err(expect.clone()));
+    // Last message is a completed assistant reply.
+    send(&h, &chat.id, "Hi", "m/a", vec![]).await.0.unwrap();
+    let before = roles_and_texts(&h, &chat.id);
+    assert_eq!(retry(&h, &chat.id, "m/a").await.0, Err(expect));
+    assert_eq!(roles_and_texts(&h, &chat.id), before);
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
 #[tokio::test]
 async fn send_message_401_emits_auth_revoked_and_auth_status_becomes_signed_out() {
     let server = MockServer::start().await;
@@ -651,6 +754,9 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
     record(to(&chat));
     let id = chat.unwrap().id;
     let (r, events) = send(&h, &id, "Hi", "m/a", vec![]).await;
+    record(to(&r));
+    record(to(&events));
+    let (r, events) = retry(&h, &id, "m/a").await;
     record(to(&r));
     record(to(&events));
     record(to(&chats::list_chats(&h.state)));

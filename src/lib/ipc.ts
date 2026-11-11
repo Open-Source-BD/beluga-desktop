@@ -172,6 +172,19 @@ export function sendMessage(
   });
 }
 
+/**
+ * Answers the chat's last stored user message again without storing it twice
+ * (an interrupted partial reply is removed first). Events as for `sendMessage`.
+ */
+export function retryTurn(
+  chatId: string,
+  modelId: string,
+  onEvent: (event: EngineEvent) => void,
+): Promise<void> {
+  const channel = new Channel<EngineEvent>(onEvent);
+  return invoke<void>("retry_turn", { chatId, modelId, onEvent: channel });
+}
+
 export const stop = (chatId: string) => invoke<void>("stop", { chatId });
 
 /** Opens an OpenRouter page in the browser (allowed only for https://openrouter.ai/*). */

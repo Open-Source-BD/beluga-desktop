@@ -66,6 +66,17 @@ pub async fn send_message(
     s.store
         .append_message(chat_id, "user", text, &attachments, false)
         .map_err(local)?;
+    run_stored_turn(s, chat_id, model_id, on_event).await
+}
+
+/// Run one turn over the stored history of the chat and store the reply and
+/// its usage. The caller has already stored the user message to answer.
+async fn run_stored_turn(
+    s: &AppState,
+    chat_id: &str,
+    model_id: &str,
+    on_event: &(dyn Fn(EngineEvent) + Send + Sync),
+) -> Result<(), UiError> {
     s.store.set_chat_model(chat_id, model_id).map_err(local)?;
     let messages = s
         .store
@@ -121,6 +132,33 @@ pub async fn send_message(
             .map_err(local)?;
     }
     Ok(())
+}
+
+/// Answers the chat's last user message again without storing it twice. An
+/// interrupted partial reply is removed first; a completed one is not.
+pub async fn retry_turn(
+    s: &AppState,
+    chat_id: &str,
+    model_id: &str,
+    on_event: &(dyn Fn(EngineEvent) + Send + Sync),
+) -> Result<(), UiError> {
+    if s.store.get_chat(chat_id).map_err(local)?.is_none() {
+        return Err(UiError::other("This chat no longer exists."));
+    }
+    let messages = s.store.get_messages(chat_id).map_err(local)?;
+    let partial = messages
+        .last()
+        .filter(|m| m.role == "assistant" && m.interrupted);
+    let answered = &messages[..messages.len() - usize::from(partial.is_some())];
+    if answered.last().is_none_or(|m| m.role != "user") {
+        return Err(UiError::other("There is nothing to retry in this chat."));
+    }
+    if let Some(partial) = partial {
+        s.store
+            .delete_message(chat_id, &partial.id)
+            .map_err(local)?;
+    }
+    run_stored_turn(s, chat_id, model_id, on_event).await
 }
 
 /// Stops the reply running in this chat, if any.

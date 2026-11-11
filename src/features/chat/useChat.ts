@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getMessages,
+  retryTurn,
   sendMessage,
   stop as stopTurn,
   type AttachmentInput,
@@ -19,6 +20,8 @@ export interface ChatState {
   pendingUser: string | null;
   status: ChatStatus;
   error: UiError | null;
+  /** The send was rejected before the core stored anything: `pendingUser` was not sent. */
+  unsent: { attachments: AttachmentInput[] } | null;
 }
 
 const EMPTY: ChatState = {
@@ -27,6 +30,7 @@ const EMPTY: ChatState = {
   pendingUser: null,
   status: "idle",
   error: null,
+  unsent: null,
 };
 
 export interface UseChat extends ChatState {
@@ -38,7 +42,11 @@ export interface UseChat extends ChatState {
     targetChatId?: string,
   ): void;
   stop(): void;
-  /** Resends the last user message. `modelId` overrides the model of the previous send. */
+  /**
+   * Answers again. A message the core rejected is sent anew; otherwise the
+   * stored last user message is answered without being stored twice.
+   * `modelId` overrides the model of the previous send.
+   */
   retry(modelId?: string | null): void;
 }
 
@@ -95,21 +103,31 @@ export function useChat(
     };
   }, [chatId, reload, patch]);
 
-  const send = useCallback<UseChat["send"]>(
-    (text, attachments, modelId, targetChatId) => {
-      const id = targetChatId ?? chatId;
-      if (!id || streaming.current.has(id)) return;
+  /** Runs one turn; `pending` is the just-typed text not yet in the stored list. */
+  const start = useCallback(
+    (
+      id: string,
+      modelId: string,
+      pending: { text: string; attachments: AttachmentInput[] } | null,
+      run: (onEvent: (e: EngineEvent) => void) => Promise<void>,
+    ) => {
+      if (streaming.current.has(id)) return;
       streaming.current.add(id);
       lastModel.current[id] = modelId;
       patch(id, () => ({
         streamingText: "",
-        pendingUser: text,
+        pendingUser: pending?.text ?? null,
         status: "streaming",
         error: null,
+        unsent: null,
       }));
 
       let settled = false;
-      const settle = async (status: ChatStatus, error: UiError | null) => {
+      const settle = async (
+        status: ChatStatus,
+        error: UiError | null,
+        notSent = false,
+      ) => {
         if (settled) return;
         settled = true;
         const messages = await reload(id);
@@ -117,7 +135,9 @@ export function useChat(
         patch(id, (s) => ({
           messages: messages ?? s.messages,
           streamingText: "",
-          pendingUser: messages ? null : s.pendingUser,
+          // A rejected send stored nothing: keep the text so it can be retried.
+          pendingUser: notSent || !messages ? s.pendingUser : null,
+          unsent: notSent && pending ? { attachments: pending.attachments } : null,
           status,
           error,
         }));
@@ -140,12 +160,23 @@ export function useChat(
             break;
         }
       };
-      sendMessage(id, text, attachments, modelId, onEvent).then(
+      run(onEvent).then(
         () => settle("idle", null),
-        (e: unknown) => settle("failed", toUiError(e)),
+        (e: unknown) => settle("failed", toUiError(e), true),
       );
     },
-    [chatId, patch, reload],
+    [patch, reload],
+  );
+
+  const send = useCallback<UseChat["send"]>(
+    (text, attachments, modelId, targetChatId) => {
+      const id = targetChatId ?? chatId;
+      if (!id) return;
+      start(id, modelId, { text, attachments }, (onEvent) =>
+        sendMessage(id, text, attachments, modelId, onEvent),
+      );
+    },
+    [chatId, start],
   );
 
   const stop = useCallback(() => {
@@ -157,14 +188,18 @@ export function useChat(
   const retry = useCallback(
     (modelId?: string | null) => {
       if (!chatId) return;
-      const lastUser = [...currentRef.current.messages]
-        .reverse()
-        .find((m) => m.role === "user");
       const model = modelId ?? lastModel.current[chatId];
-      if (!lastUser || !model) return;
-      send(lastUser.text, lastUser.attachments, model);
+      if (!model) return;
+      const { pendingUser, unsent } = currentRef.current;
+      if (unsent && pendingUser !== null) {
+        // Never stored: send it again as a new message.
+        send(pendingUser, unsent.attachments, model);
+      } else {
+        const id = chatId;
+        start(id, model, null, (onEvent) => retryTurn(id, model, onEvent));
+      }
     },
-    [chatId, send],
+    [chatId, send, start],
   );
 
   return { ...current, send, stop, retry };

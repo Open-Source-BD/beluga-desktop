@@ -87,6 +87,12 @@ describe("Thread content", () => {
     expect(onRetry).toHaveBeenCalled();
   });
 
+  it("marks a pending message that was not sent", () => {
+    render(<Thread {...base} pendingUser="typed" notSent status="failed" />);
+    expect(screen.getByText("typed")).toBeInTheDocument();
+    expect(screen.getByText("Not sent.")).toBeInTheDocument();
+  });
+
   it("keeps a polite live region for the streaming reply", () => {
     const { container } = render(<Thread {...base} status="streaming" streamingText="Hi" />);
     expect(container.querySelector('[aria-live="polite"]')).toHaveTextContent("Hi");

@@ -139,6 +139,14 @@ impl Store {
         Ok(msg)
     }
 
+    pub fn delete_message(&self, chat_id: &str, id: &str) -> Result<()> {
+        self.conn().execute(
+            "DELETE FROM messages WHERE chat_id = ?1 AND id = ?2",
+            params![chat_id, id],
+        )?;
+        Ok(())
+    }
+
     pub fn set_chat_model(&self, id: &str, model_id: &str) -> Result<()> {
         self.conn().execute(
             "UPDATE chats SET model_id = ?2 WHERE id = ?1",

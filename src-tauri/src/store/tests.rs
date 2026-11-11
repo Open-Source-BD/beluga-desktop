@@ -143,3 +143,27 @@ fn set_chat_model_remembers_the_last_model() {
     s.set_chat_model(&c.id, "m/b").unwrap();
     assert_eq!(s.get_chat(&c.id).unwrap().unwrap().model_id, "m/b");
 }
+
+#[test]
+fn delete_message_removes_only_that_message() {
+    let s = store();
+    let c = s.create_chat("m/a").unwrap();
+    let other = s.create_chat("m/a").unwrap();
+    s.append_message(&c.id, "user", "q", &[], false).unwrap();
+    let partial = s
+        .append_message(&c.id, "assistant", "par", &[], true)
+        .unwrap();
+    let foreign = s
+        .append_message(&other.id, "user", "x", &[], false)
+        .unwrap();
+    s.delete_message(&c.id, &foreign.id).unwrap();
+    assert_eq!(s.get_messages(&other.id).unwrap().len(), 1);
+    s.delete_message(&c.id, &partial.id).unwrap();
+    let texts: Vec<_> = s
+        .get_messages(&c.id)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.text)
+        .collect();
+    assert_eq!(texts, vec!["q"]);
+}
