@@ -72,6 +72,15 @@ impl Store {
         Ok(())
     }
 
+    /// Removes the summary and its boundary, so the whole history is sent again.
+    pub fn clear_summary(&self, chat_id: &str) -> Result<()> {
+        self.conn().execute(
+            "UPDATE chats SET summary = NULL, sent_from_seq = NULL WHERE id = ?1",
+            [chat_id],
+        )?;
+        Ok(())
+    }
+
     /// Removes the message and every later row of the same chat (notes
     /// included), in one transaction. An id that is not in this chat is an
     /// error and nothing changes.

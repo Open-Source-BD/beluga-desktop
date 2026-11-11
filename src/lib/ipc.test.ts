@@ -122,10 +122,46 @@ describe("ipc", () => {
     await expect(ipc.retryTurn("c", "m/a", (e) => seen.push(e))).resolves.toEqual(result);
     const [cmd, args] = invoke.mock.calls[0];
     expect(cmd).toBe("retry_turn");
-    expect(Object.keys(args).sort()).toEqual(["chatId", "modelId", "onEvent"]);
-    expect(args).toMatchObject({ chatId: "c", modelId: "m/a" });
+    expect(Object.keys(args).sort()).toEqual(["chatId", "modelId", "onEvent", "regenerate"]);
+    expect(args).toMatchObject({ chatId: "c", modelId: "m/a", regenerate: false });
     args.onEvent.onmessage({ type: "done" });
     expect(seen).toEqual([{ type: "done" }]);
+  });
+
+  it("retryTurn passes regenerate true when asked", async () => {
+    invoke.mockResolvedValueOnce({ status: "done", reason: null, error: null });
+    await ipc.retryTurn("c", "m/b", () => {}, true);
+    const [cmd, args] = invoke.mock.calls[0];
+    expect(cmd).toBe("retry_turn");
+    expect(args).toMatchObject({ chatId: "c", modelId: "m/b", regenerate: true });
+  });
+
+  it("takeUserMessage and rowsAfter pass chat and message ids", async () => {
+    const taken: ipc.TakenMessage = {
+      text: "hi",
+      attachments: [{ name: "a.txt", mime: "text/plain", data_base64: "aGk=" }],
+      removed: 2,
+    };
+    invoke.mockResolvedValueOnce(taken).mockResolvedValueOnce(2);
+    await expect(ipc.takeUserMessage("c", "m1")).resolves.toEqual(taken);
+    await expect(ipc.rowsAfter("c", "m1")).resolves.toBe(2);
+    expect(invoke.mock.calls).toEqual([
+      ["take_user_message", { chatId: "c", messageId: "m1" }],
+      ["rows_after", { chatId: "c", messageId: "m1" }],
+    ]);
+  });
+
+  it("compactChat passes keep (null when not given) and exportChat passes the path", async () => {
+    const result: ipc.TurnResult = { status: "done", reason: null, error: null };
+    invoke.mockResolvedValue(result);
+    await expect(ipc.compactChat("c", "m/a", "the plan")).resolves.toEqual(result);
+    await ipc.compactChat("c", "m/a");
+    await ipc.exportChat("c", "/tmp/chat.md");
+    expect(invoke.mock.calls).toEqual([
+      ["compact_chat", { chatId: "c", modelId: "m/a", keep: "the plan" }],
+      ["compact_chat", { chatId: "c", modelId: "m/a", keep: null }],
+      ["export_chat", { chatId: "c", path: "/tmp/chat.md" }],
+    ]);
   });
 
   it("onAuthFinished unwraps the event payload", async () => {

@@ -408,3 +408,18 @@ fn deleting_a_chat_still_cascades() {
     assert_eq!(s.chat_usage("chat-a").unwrap(), (0, 0.0));
     assert_eq!(s.get_messages("chat-b").unwrap().len(), 2);
 }
+
+#[test]
+fn clear_summary_removes_the_summary_and_the_boundary() {
+    let s = store();
+    let c = s.create_chat("m/a").unwrap();
+    s.append_message(&c.id, "user", "one", &[], false).unwrap();
+    let m2 = s
+        .append_message(&c.id, "assistant", "two", &[], false)
+        .unwrap();
+    s.set_summary(&c.id, "Earlier", m2.seq).unwrap();
+    assert_eq!(s.sendable_messages(&c.id).unwrap().len(), 1);
+    s.clear_summary(&c.id).unwrap();
+    assert_eq!(s.summary(&c.id).unwrap(), None);
+    assert_eq!(s.sendable_messages(&c.id).unwrap().len(), 2);
+}

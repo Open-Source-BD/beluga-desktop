@@ -46,6 +46,7 @@ bytes = "1"
 async-trait = "0.1"
 rusqlite = { version = "0.41", features = ["bundled"] }
 tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
 uuid = { version = "1", features = ["v4"] }
 time = "0.3"
 tempfile = "3"

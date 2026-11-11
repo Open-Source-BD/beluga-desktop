@@ -30,6 +30,16 @@ impl From<AttachmentInput> for StoredAttachment {
     }
 }
 
+impl From<StoredAttachment> for AttachmentInput {
+    fn from(a: StoredAttachment) -> Self {
+        Self {
+            name: a.name,
+            mime: a.mime,
+            data_base64: a.data_base64,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnStatus {
@@ -49,7 +59,7 @@ pub struct TurnResult {
 }
 
 impl TurnResult {
-    fn done() -> Self {
+    pub(super) fn done() -> Self {
         Self {
             status: TurnStatus::Done,
             reason: None,
@@ -57,7 +67,7 @@ impl TurnResult {
         }
     }
 
-    fn interrupted(reason: String) -> Self {
+    pub(super) fn interrupted(reason: String) -> Self {
         Self {
             status: TurnStatus::Interrupted,
             reason: Some(reason),
@@ -65,7 +75,7 @@ impl TurnResult {
         }
     }
 
-    fn failed(error: UiError) -> Self {
+    pub(super) fn failed(error: UiError) -> Self {
         Self {
             status: TurnStatus::Failed,
             reason: None,
@@ -146,7 +156,7 @@ fn fenced(text: &str) -> String {
     format!("{fence}\n{text}\n{fence}")
 }
 
-fn wire(m: &StoredMessage, with_images: bool) -> WireMessage {
+pub(super) fn wire(m: &StoredMessage, with_images: bool) -> WireMessage {
     let role = match m.role.as_str() {
         "assistant" => Role::Assistant,
         "system" => Role::System,
@@ -172,7 +182,7 @@ fn wire(m: &StoredMessage, with_images: bool) -> WireMessage {
     WireMessage { role, parts }
 }
 
-fn system(text: String) -> WireMessage {
+pub(super) fn system(text: String) -> WireMessage {
     WireMessage {
         role: Role::System,
         parts: vec![Part::Text(text)],
@@ -268,8 +278,36 @@ async fn run_stored_turn(
     on_event: &(dyn Fn(EngineEvent) + Send + Sync),
 ) -> Result<TurnResult, UiError> {
     s.store.set_chat_model(chat_id, model_id).map_err(local)?;
-    let messages = wire_history(s, chat_id, model_id)?;
+    let request = TurnRequest {
+        model_id: model_id.to_string(),
+        messages: wire_history(s, chat_id, model_id)?,
+    };
+    let ran = run_registered(s, chat_id, request, on_event).await;
+    // The turn ran and the user message is stored, so a failure to store the
+    // reply is reported as a failed turn, not as a send that never happened.
+    if let Err(e) = persist(s, chat_id, &ran.outcome) {
+        return Ok(TurnResult::failed(e));
+    }
+    Ok(ran.result)
+}
 
+/// What `run_registered` hands back once the engine is done.
+pub(super) struct Ran {
+    pub outcome: TurnOutcome,
+    pub result: TurnResult,
+    /// Another turn in the same chat started meanwhile and took its place.
+    pub superseded: bool,
+}
+
+/// Runs one engine request as the chat's running turn: `stop` cancels it,
+/// and a turn started in the same chat meanwhile cancels and supersedes it.
+/// Signs out when OpenRouter rejects the key. Stores nothing.
+pub(super) async fn run_registered(
+    s: &AppState,
+    chat_id: &str,
+    request: TurnRequest,
+    on_event: &(dyn Fn(EngineEvent) + Send + Sync),
+) -> Ran {
     let id = s.next_id();
     let cancel = CancellationToken::new();
     let previous = s.turns().insert(
@@ -294,18 +332,16 @@ async fn run_stored_turn(
         }
         on_event(e);
     };
-    let request = TurnRequest {
-        model_id: model_id.to_string(),
-        messages,
-    };
-    let out = s.engine.run_turn(request, &emit, cancel).await;
+    let outcome = s.engine.run_turn(request, &emit, cancel).await;
 
-    {
+    let superseded = {
         let mut turns = s.turns();
-        if turns.get(chat_id).is_some_and(|t| t.id == id) {
+        let ours = turns.get(chat_id).is_some_and(|t| t.id == id);
+        if ours {
             turns.remove(chat_id);
         }
-    }
+        !ours
+    };
     if unauthorized.load(Ordering::SeqCst) {
         revoke(s);
     }
@@ -314,18 +350,17 @@ async fn run_stored_turn(
         .unwrap_or_else(|p| p.into_inner())
         .unwrap_or_else(|| {
             // Defensive: every engine turn ends with a terminal event.
-            if out.interrupted {
+            if outcome.interrupted {
                 TurnResult::interrupted("network".to_string())
             } else {
                 TurnResult::done()
             }
         });
-    // The turn ran and the user message is stored, so a failure to store the
-    // reply is reported as a failed turn, not as a send that never happened.
-    if let Err(e) = persist(s, chat_id, &out) {
-        return Ok(TurnResult::failed(e));
+    Ran {
+        outcome,
+        result,
+        superseded,
     }
-    Ok(result)
 }
 
 fn persist(s: &AppState, chat_id: &str, out: &TurnOutcome) -> Result<(), UiError> {
@@ -343,28 +378,30 @@ fn persist(s: &AppState, chat_id: &str, out: &TurnOutcome) -> Result<(), UiError
 }
 
 /// Answers the chat's last user message again without storing it twice. An
-/// interrupted partial reply is removed first; a completed one is not. Notes
-/// are ignored: only sendable messages count as "last".
+/// interrupted partial reply is removed first; a completed one only when
+/// `regenerate` is set. Notes are ignored: only sendable messages count as
+/// "last".
 pub async fn retry_turn(
     s: &AppState,
     chat_id: &str,
     model_id: &str,
+    regenerate: bool,
     on_event: &(dyn Fn(EngineEvent) + Send + Sync),
 ) -> Result<TurnResult, UiError> {
     if s.store.get_chat(chat_id).map_err(local)?.is_none() {
         return Err(UiError::other("This chat no longer exists."));
     }
     let messages = s.store.sendable_messages(chat_id).map_err(local)?;
-    let partial = messages
+    let replaced = messages
         .last()
-        .filter(|m| m.role == "assistant" && m.interrupted);
-    let answered = &messages[..messages.len() - usize::from(partial.is_some())];
+        .filter(|m| m.role == "assistant" && (m.interrupted || regenerate));
+    let answered = &messages[..messages.len() - usize::from(replaced.is_some())];
     if answered.last().is_none_or(|m| m.role != "user") {
         return Err(UiError::other("There is nothing to retry in this chat."));
     }
-    if let Some(partial) = partial {
+    if let Some(replaced) = replaced {
         s.store
-            .delete_message(chat_id, &partial.id)
+            .delete_message(chat_id, &replaced.id)
             .map_err(local)?;
     }
     run_stored_turn(s, chat_id, model_id, on_event).await

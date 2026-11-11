@@ -190,16 +190,44 @@ export function sendMessage(
 
 /**
  * Answers the chat's last stored user message again without storing it twice
- * (an interrupted partial reply is removed first). Events as for `sendMessage`.
+ * (an interrupted partial reply is removed first; with `regenerate`, a
+ * completed one too). Events as for `sendMessage`.
  */
 export function retryTurn(
   chatId: string,
   modelId: string,
   onEvent: (event: EngineEvent) => void,
+  regenerate = false,
 ): Promise<TurnResult> {
   const channel = new Channel<EngineEvent>(onEvent);
-  return invoke<TurnResult>("retry_turn", { chatId, modelId, onEvent: channel });
+  return invoke<TurnResult>("retry_turn", { chatId, modelId, regenerate, onEvent: channel });
 }
+
+/** A user message taken back for editing; `removed` counts the rows deleted after it. */
+export interface TakenMessage {
+  text: string;
+  attachments: AttachmentInput[];
+  removed: number;
+}
+
+/** Deletes the user message and everything after it, returning it for the message box. */
+export const takeUserMessage = (chatId: string, messageId: string) =>
+  invoke<TakenMessage>("take_user_message", { chatId, messageId });
+
+/** How many rows editing this user message would remove after it. */
+export const rowsAfter = (chatId: string, messageId: string) =>
+  invoke<number>("rows_after", { chatId, messageId });
+
+/**
+ * Summarises the chat in one request on `modelId`; `keep` names what the
+ * summary must preserve. Only a completed summary changes the chat.
+ */
+export const compactChat = (chatId: string, modelId: string, keep: string | null = null) =>
+  invoke<TurnResult>("compact_chat", { chatId, modelId, keep });
+
+/** Writes the chat as Markdown to `path`, an absolute path from a save dialog. */
+export const exportChat = (chatId: string, path: string) =>
+  invoke<void>("export_chat", { chatId, path });
 
 export const stop = (chatId: string) => invoke<void>("stop", { chatId });
 

@@ -1,6 +1,6 @@
 use super::auth::{self, StorageChoice};
 use super::turn::{TurnResult, TurnStatus};
-use super::{chat_state, chats, models, turn};
+use super::{chat_state, chats, compact, export, models, turn};
 use crate::engine::{EngineEvent, UiError};
 use crate::openrouter::models::{ModelCache, ModelInfo};
 use crate::secrets::{KeyStore, SecretError, SessionStore, StorageKind};
@@ -534,9 +534,18 @@ async fn retry(
     chat_id: &str,
     model: &str,
 ) -> (Result<TurnResult, UiError>, Vec<EngineEvent>) {
+    retry_with(h, chat_id, model, false).await
+}
+
+async fn retry_with(
+    h: &Harness,
+    chat_id: &str,
+    model: &str,
+    regenerate: bool,
+) -> (Result<TurnResult, UiError>, Vec<EngineEvent>) {
     let events: Events = Arc::default();
     let sink = events.clone();
-    let r = turn::retry_turn(&h.state, chat_id, model, &move |e| {
+    let r = turn::retry_turn(&h.state, chat_id, model, regenerate, &move |e| {
         sink.lock().unwrap().push(e)
     })
     .await;
@@ -942,6 +951,22 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
     let activated = chat_state::activate_skill(&f.h.state, &skill_chat, "p:a", "m/a");
     assert!(activated.is_ok(), "{activated:?}");
     record(to(&activated));
+    // Edit, regenerate, compact and export, including the exported file.
+    let (r, events) = retry_with(&h, &id, "m/a", true).await;
+    record(to(&r));
+    record(to(&events));
+    send(&h, &id, "Again", "m/a", vec![]).await.0.unwrap();
+    let compacted = compact::compact_chat(&h.state, &id, "m/a", Some("k")).await;
+    assert_eq!(compacted, Ok(done()));
+    record(to(&compacted));
+    let file = h._dir.path().join("export.md");
+    let exported = export::export_chat(&h.state, &id, file.to_str().unwrap());
+    assert!(exported.is_ok(), "{exported:?}");
+    record(to(&exported));
+    record(Value::String(std::fs::read_to_string(&file).unwrap()));
+    let first = chats::get_messages(&h.state, &id).unwrap()[0].id.clone();
+    record(to(&chats::rows_after(&h.state, &id, &first)));
+    record(to(&chats::take_user_message(&h.state, &id, &first)));
     turn::stop(&h.state, &id);
     record(to(&auth::sign_out(&h.state)));
     record(to(&auth::auth_status(&h.state)));
@@ -2028,4 +2053,571 @@ async fn a_model_reporting_a_context_length_of_0_is_treated_as_fitting() {
             context_length: 0
         }
     );
+}
+
+// ---- edit and resend, regenerate, compact, export ----
+
+use crate::state::RunningTurn;
+use crate::store::StoredMessage;
+use tokio_util::sync::CancellationToken;
+
+const NO_CHAT: &str = "That chat no longer exists.";
+const SUMMARY_ASK: &str = "Summarise the conversation below so it can be continued later. \
+Keep decisions, file names, code that matters and open questions. Be brief.";
+
+/// Stores `(role, text)` rows in order; the role "note" stores a note.
+fn seed(h: &Harness, chat_id: &str, rows: &[(&str, &str)]) -> Vec<StoredMessage> {
+    rows.iter()
+        .map(|(role, text)| {
+            if *role == "note" {
+                h.state.store.append_note(chat_id, text)
+            } else {
+                h.state
+                    .store
+                    .append_message(chat_id, role, text, &[], false)
+            }
+            .unwrap()
+        })
+        .collect()
+}
+
+fn texts(h: &Harness, chat_id: &str) -> Vec<String> {
+    chats::get_messages(&h.state, chat_id)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.text)
+        .collect()
+}
+
+fn assistant(text: &str) -> (String, String) {
+    ("assistant".to_string(), text.to_string())
+}
+
+const FOUR: [(&str, &str); 4] = [
+    ("user", "Q1"),
+    ("assistant", "A1"),
+    ("user", "Q2"),
+    ("assistant", "A2"),
+];
+
+#[test]
+fn take_returns_the_message_deletes_it_and_later_rows_and_keeps_earlier_ones() {
+    let h = signed_in("http://unused.invalid");
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    let store = &h.state.store;
+    let one = att("one.txt", "text/plain", b"one");
+    let two = att("two.png", "image/png", &[1, 2, 3]);
+    store
+        .append_message(&chat.id, "user", "First", &[one.into()], false)
+        .unwrap();
+    store
+        .append_message(&chat.id, "assistant", "Reply", &[], false)
+        .unwrap();
+    let second = store
+        .append_message(&chat.id, "user", "Second", &[two.clone().into()], false)
+        .unwrap();
+    store
+        .append_message(&chat.id, "assistant", "Reply 2", &[], false)
+        .unwrap();
+    store.append_note(&chat.id, "Using p:a").unwrap();
+
+    let taken = chats::take_user_message(&h.state, &chat.id, &second.id).unwrap();
+    assert_eq!(
+        taken,
+        chats::TakenMessage {
+            text: "Second".into(),
+            attachments: vec![two],
+            removed: 2,
+        }
+    );
+    // The shape the message box sends.
+    assert_eq!(
+        to(&taken),
+        json!({
+            "text": "Second",
+            "attachments": [{"name": "two.png", "mime": "image/png", "data_base64": b64(&[1, 2, 3])}],
+            "removed": 2,
+        })
+    );
+    assert_eq!(texts(&h, &chat.id), ["First", "Reply"]);
+}
+
+#[test]
+fn take_works_for_an_earlier_user_message() {
+    let h = signed_in("http://unused.invalid");
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    let rows = seed(&h, &chat.id, &FOUR);
+    let taken = chats::take_user_message(&h.state, &chat.id, &rows[0].id).unwrap();
+    assert_eq!((taken.text.as_str(), taken.removed), ("Q1", 3));
+    assert!(taken.attachments.is_empty());
+    assert!(texts(&h, &chat.id).is_empty());
+}
+
+#[test]
+fn take_leaves_active_skills_active() {
+    let f = skills_fx("http://unused.invalid", &[("a", 10)], &[]);
+    let chat = chats::create_chat(&f.h.state, BIG).unwrap();
+    chat_state::activate_skill(&f.h.state, &chat.id, "p:a", BIG).unwrap();
+    let rows = seed(&f.h, &chat.id, &[("user", "Hi"), ("assistant", "Hello")]);
+    let taken = chats::take_user_message(&f.h.state, &chat.id, &rows[0].id).unwrap();
+    assert_eq!(taken.removed, 1);
+    assert_eq!(active_ids(&f.h, &chat.id), ["p:a"]);
+    assert_eq!(texts(&f.h, &chat.id), ["Using p:a"]);
+}
+
+#[test]
+fn take_is_refused_while_a_turn_runs_and_for_anything_but_a_user_message_of_that_chat() {
+    let h = signed_in("http://unused.invalid");
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    let elsewhere = chats::create_chat(&h.state, "m/a").unwrap();
+    let rows = seed(
+        &h,
+        &chat.id,
+        &[
+            ("user", "Hi"),
+            ("assistant", "Hello"),
+            ("note", "Using p:a"),
+        ],
+    );
+    let theirs = seed(&h, &elsewhere.id, &[("user", "Elsewhere")]);
+    let before = texts(&h, &chat.id);
+
+    h.state.turns().insert(
+        chat.id.clone(),
+        RunningTurn {
+            id: 99,
+            cancel: CancellationToken::new(),
+        },
+    );
+    assert_eq!(
+        chats::take_user_message(&h.state, &chat.id, &rows[0].id),
+        Err(other(
+            "Wait for the reply to finish, or stop it, before editing."
+        ))
+    );
+    h.state.turns().remove(&chat.id);
+
+    let cannot = Err(other("That message cannot be edited."));
+    for id in [&rows[1].id, &rows[2].id, &theirs[0].id, &"nope".to_string()] {
+        assert_eq!(chats::take_user_message(&h.state, &chat.id, id), cannot);
+        assert_eq!(
+            chats::rows_after(&h.state, &chat.id, id),
+            Err(other("That message cannot be edited."))
+        );
+    }
+    assert_eq!(
+        chats::take_user_message(&h.state, "nope", &rows[0].id),
+        Err(other(NO_CHAT))
+    );
+    assert_eq!(
+        chats::rows_after(&h.state, "nope", &rows[0].id),
+        Err(other(NO_CHAT))
+    );
+    assert_eq!(texts(&h, &chat.id), before);
+    assert_eq!(texts(&h, &elsewhere.id), ["Elsewhere"]);
+}
+
+#[test]
+fn rows_after_counts_messages_and_notes_after_the_message_and_deletes_nothing() {
+    let h = signed_in("http://unused.invalid");
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    let rows = seed(
+        &h,
+        &chat.id,
+        &[
+            ("user", "One"),
+            ("assistant", "R1"),
+            ("note", "N"),
+            ("user", "Two"),
+            ("assistant", "R2"),
+        ],
+    );
+    assert_eq!(chats::rows_after(&h.state, &chat.id, &rows[0].id), Ok(4));
+    assert_eq!(chats::rows_after(&h.state, &chat.id, &rows[3].id), Ok(1));
+    assert_eq!(texts(&h, &chat.id).len(), 5);
+}
+
+#[test]
+fn take_before_the_compaction_boundary_clears_the_summary_and_at_it_keeps_it() {
+    let h = signed_in("http://unused.invalid");
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    let store = &h.state.store;
+    let rows = seed(
+        &h,
+        &chat.id,
+        &[
+            ("user", "U1"),
+            ("assistant", "A1"),
+            ("user", "U2"),
+            ("assistant", "A2"),
+            ("user", "U3"),
+            ("assistant", "A3"),
+        ],
+    );
+    store.set_summary(&chat.id, "S", rows[4].seq).unwrap();
+    chats::take_user_message(&h.state, &chat.id, &rows[4].id).unwrap();
+    assert_eq!(
+        store.summary(&chat.id).unwrap(),
+        Some(("S".to_string(), rows[4].seq))
+    );
+    chats::take_user_message(&h.state, &chat.id, &rows[2].id).unwrap();
+    assert_eq!(store.summary(&chat.id).unwrap(), None);
+    let sendable: Vec<String> = store
+        .sendable_messages(&chat.id)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.text)
+        .collect();
+    assert_eq!(sendable, ["U1", "A1"]);
+}
+
+#[tokio::test]
+async fn regenerate_replaces_a_completed_reply_and_stores_no_second_user_message() {
+    let server = chat_server().await;
+    let h = signed_in(&server.uri());
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    send(&h, &chat.id, "Hi", "m/a", vec![]).await.0.unwrap();
+    let (r, events) = retry_with(&h, &chat.id, "m/a", true).await;
+    assert_eq!(r.unwrap(), done());
+    assert_eq!(events.last(), Some(&EngineEvent::Done));
+    assert_eq!(
+        roles_and_texts(&h, &chat.id),
+        vec![
+            ("user".into(), "Hi".into(), false),
+            ("assistant".into(), "Hello".into(), false)
+        ]
+    );
+    assert_eq!(sent(&last_body(&server).await), vec![user("Hi")]);
+    assert_eq!(chats::chat_usage(&h.state, &chat.id).unwrap().requests, 2);
+}
+
+#[tokio::test]
+async fn regenerate_with_another_model_writes_that_model_onto_the_chat() {
+    let server = chat_server().await;
+    let h = signed_in(&server.uri());
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    send(&h, &chat.id, "Hi", "m/a", vec![]).await.0.unwrap();
+    retry_with(&h, &chat.id, "m/b", true).await.0.unwrap();
+    assert_eq!(last_body(&server).await["model"], "m/b");
+    assert_eq!(chats::list_chats(&h.state).unwrap()[0].model_id, "m/b");
+}
+
+#[tokio::test]
+async fn retry_without_regenerate_on_a_completed_reply_still_has_nothing_to_retry() {
+    let server = chat_server().await;
+    let h = signed_in(&server.uri());
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    send(&h, &chat.id, "Hi", "m/a", vec![]).await.0.unwrap();
+    let before = roles_and_texts(&h, &chat.id);
+    let nothing = Err(other("There is nothing to retry in this chat."));
+    assert_eq!(retry_with(&h, &chat.id, "m/a", false).await.0, nothing);
+    assert_eq!(roles_and_texts(&h, &chat.id), before);
+    // Regenerating still needs a reply that answers a user message.
+    let empty = chats::create_chat(&h.state, "m/a").unwrap();
+    assert_eq!(retry_with(&h, &empty.id, "m/a", true).await.0, nothing);
+    let lone = chats::create_chat(&h.state, "m/a").unwrap();
+    seed(&h, &lone.id, &[("assistant", "Hello")]);
+    assert_eq!(retry_with(&h, &lone.id, "m/a", true).await.0, nothing);
+    assert_eq!(texts(&h, &lone.id), ["Hello"]);
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+async fn compact(
+    h: &Harness,
+    chat_id: &str,
+    model: &str,
+    keep: Option<&str>,
+) -> Result<TurnResult, UiError> {
+    compact::compact_chat(&h.state, chat_id, model, keep).await
+}
+
+#[tokio::test]
+async fn compact_refuses_a_chat_with_fewer_than_four_messages_and_sends_nothing() {
+    let server = chat_server().await;
+    let h = signed_in(&server.uri());
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    seed(
+        &h,
+        &chat.id,
+        &[
+            ("user", "Q1"),
+            ("assistant", "A1"),
+            ("note", "N"),
+            ("user", "Q2"),
+        ],
+    );
+    let before = texts(&h, &chat.id);
+    assert_eq!(
+        compact(&h, &chat.id, "m/a", None).await,
+        Err(other("This chat is too short to shorten."))
+    );
+    assert_eq!(compact(&h, "nope", "m/a", None).await, Err(other(NO_CHAT)));
+    assert!(server.received_requests().await.unwrap().is_empty());
+    assert_eq!(h.state.store.summary(&chat.id).unwrap(), None);
+    assert_eq!(texts(&h, &chat.id), before);
+}
+
+#[tokio::test]
+async fn compact_stores_the_summary_and_note_records_usage_and_later_turns_send_the_summary() {
+    let server = chat_server().await;
+    let h = signed_in(&server.uri());
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    let rows = seed(&h, &chat.id, &FOUR);
+    assert_eq!(compact(&h, &chat.id, "m/a", None).await, Ok(done()));
+    assert_eq!(
+        sent(&last_body(&server).await),
+        vec![
+            sys(SUMMARY_ASK),
+            user("Q1"),
+            assistant("A1"),
+            user("Q2"),
+            assistant("A2")
+        ]
+    );
+    assert_eq!(
+        h.state.store.summary(&chat.id).unwrap(),
+        Some(("Hello".to_string(), rows[3].seq + 1))
+    );
+    assert_eq!(notes(&h, &chat.id), ["Summarised above this line"]);
+    assert_eq!(
+        to(&chats::chat_usage(&h.state, &chat.id).unwrap()),
+        json!({"requests": 1, "cost_usd": 0.25})
+    );
+    assert!(h.state.turns().is_empty());
+
+    send(&h, &chat.id, "Next", "m/a", vec![]).await.0.unwrap();
+    let summary = sys("Summary of the earlier conversation:\n\nHello");
+    assert_eq!(
+        sent(&last_body(&server).await),
+        vec![summary.clone(), user("Next")]
+    );
+    // Compacting again folds the old summary into the new one.
+    send(&h, &chat.id, "More", "m/a", vec![]).await.0.unwrap();
+    compact(&h, &chat.id, "m/a", None).await.unwrap();
+    assert_eq!(
+        sent(&last_body(&server).await),
+        vec![
+            sys(SUMMARY_ASK),
+            summary,
+            user("Next"),
+            assistant("Hello"),
+            user("More"),
+            assistant("Hello")
+        ]
+    );
+}
+
+#[tokio::test]
+async fn compact_leaves_skill_messages_out_and_keeps_skills_active() {
+    let server = chat_server().await;
+    let f = skills_fx(&server.uri(), &[("a", 10)], &[]);
+    let chat = chats::create_chat(&f.h.state, BIG).unwrap();
+    chat_state::activate_skill(&f.h.state, &chat.id, "p:a", BIG).unwrap();
+    seed(&f.h, &chat.id, &FOUR);
+    compact(&f.h, &chat.id, BIG, None).await.unwrap();
+    let got = sent(&last_body(&server).await);
+    assert!(
+        got.iter()
+            .all(|(_, t)| !t.starts_with("Skill:") && t != SKILL_NOTE),
+        "{got:?}"
+    );
+    assert_eq!(got.len(), 5);
+    assert_eq!(got[0], sys(SUMMARY_ASK));
+    assert_eq!(active_ids(&f.h, &chat.id), ["p:a"]);
+}
+
+#[tokio::test]
+async fn compact_includes_the_keep_text() {
+    let server = chat_server().await;
+    let h = signed_in(&server.uri());
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    seed(&h, &chat.id, &FOUR);
+    compact(&h, &chat.id, "m/a", Some("the database decisions"))
+        .await
+        .unwrap();
+    assert_eq!(
+        sent(&last_body(&server).await)[0],
+        sys(&format!(
+            "{SUMMARY_ASK}\n\nMake sure to keep: the database decisions"
+        ))
+    );
+}
+
+#[tokio::test]
+async fn a_failed_compaction_changes_nothing() {
+    let server = MockServer::start().await;
+    mock(
+        &server,
+        "POST",
+        "/api/v1/chat/completions",
+        ResponseTemplate::new(500).set_body_string(r#"{"error":{"message":"boom"}}"#),
+    )
+    .await;
+    let h = signed_in(&server.uri());
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    seed(&h, &chat.id, &FOUR);
+    let before = texts(&h, &chat.id);
+    let r = compact(&h, &chat.id, "m/a", None).await.unwrap();
+    assert_eq!(r.status, TurnStatus::Failed);
+    assert_eq!(
+        r.error.map(|e| e.message),
+        Some("OpenRouter returned an error: boom".to_string())
+    );
+    assert_eq!(h.state.store.summary(&chat.id).unwrap(), None);
+    assert_eq!(texts(&h, &chat.id), before);
+    assert!(h.state.turns().is_empty());
+}
+
+#[tokio::test]
+async fn stop_cancels_a_compaction_and_nothing_changes() {
+    let server = MockServer::start().await;
+    mock(
+        &server,
+        "POST",
+        "/api/v1/chat/completions",
+        sse(PAID_REPLY).set_delay(Duration::from_millis(400)),
+    )
+    .await;
+    let h = Arc::new(signed_in(&server.uri()));
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    seed(&h, &chat.id, &FOUR);
+    let before = texts(&h, &chat.id);
+    let task = {
+        let (h, id) = (h.clone(), chat.id.clone());
+        tokio::spawn(async move { compact(&h, &id, "m/a", None).await })
+    };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while h.state.turns().is_empty() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    turn::stop(&h.state, &chat.id);
+    let r = task.await.unwrap().unwrap();
+    assert_eq!(
+        r,
+        TurnResult {
+            status: TurnStatus::Interrupted,
+            reason: Some("stopped".into()),
+            error: None,
+        }
+    );
+    assert_eq!(h.state.store.summary(&chat.id).unwrap(), None);
+    assert_eq!(texts(&h, &chat.id), before);
+    assert!(h.state.turns().is_empty());
+}
+
+#[tokio::test]
+async fn an_over_long_conversation_leaves_out_the_oldest_messages_and_says_so() {
+    let server = chat_server().await;
+    let h = signed_in(&server.uri());
+    // 60% of 100 tokens is 60 tokens, 240 characters.
+    cache_models(&h, &[("m/small", "Small", 100)]);
+    let long = "x".repeat(400);
+    let rows_of = [
+        ("user", long.as_str()),
+        ("assistant", "A1"),
+        ("user", "Q2"),
+        ("assistant", "A2"),
+        ("user", "Q3"),
+    ];
+    let chat = chats::create_chat(&h.state, "m/small").unwrap();
+    let rows = seed(&h, &chat.id, &rows_of);
+    compact(&h, &chat.id, "m/small", None).await.unwrap();
+    assert_eq!(
+        sent(&last_body(&server).await),
+        vec![
+            sys(SUMMARY_ASK),
+            assistant("A1"),
+            user("Q2"),
+            assistant("A2"),
+            user("Q3")
+        ]
+    );
+    assert_eq!(
+        h.state.store.summary(&chat.id).unwrap(),
+        Some((
+            "The oldest messages were too long to include in the summary.\n\nHello".to_string(),
+            rows[4].seq + 1
+        ))
+    );
+    // A model whose context length is unknown is treated as fitting.
+    let unknown = chats::create_chat(&h.state, "m/unknown").unwrap();
+    seed(&h, &unknown.id, &rows_of);
+    compact(&h, &unknown.id, "m/unknown", None).await.unwrap();
+    assert_eq!(sent(&last_body(&server).await)[1], user(&long));
+    assert_eq!(
+        h.state.store.summary(&unknown.id).unwrap().unwrap().0,
+        "Hello"
+    );
+}
+
+#[test]
+fn export_writes_title_roles_notes_attachments_and_the_summary() {
+    let h = signed_in("http://unused.invalid");
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    chats::rename_chat(&h.state, &chat.id, "My chat").unwrap();
+    let store = &h.state.store;
+    let atts: Vec<StoredAttachment> = vec![
+        att("notes.txt", "text/plain", b"n").into(),
+        att("pic.png", "image/png", &[1]).into(),
+    ];
+    store
+        .append_message(&chat.id, "user", "Hi", &atts, false)
+        .unwrap();
+    seed(
+        &h,
+        &chat.id,
+        &[
+            ("assistant", "Hello\n```rust\nfn x() {}\n```"),
+            ("note", "Using p:a"),
+        ],
+    );
+    let later = seed(&h, &chat.id, &[("note", "Summarised above this line")]);
+    store
+        .set_summary(&chat.id, "Short version", later[0].seq)
+        .unwrap();
+    seed(&h, &chat.id, &[("user", "Later"), ("assistant", "Sure")]);
+
+    let file = h._dir.path().join("out.md");
+    assert_eq!(
+        export::export_chat(&h.state, &chat.id, file.to_str().unwrap()),
+        Ok(())
+    );
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert_eq!(
+        content,
+        "# My chat\n\n\
+## You\n\nHi\n\nAttachments: notes.txt, pic.png\n\n\
+## m/a\n\nHello\n```rust\nfn x() {}\n```\n\n\
+> Using p:a\n\n\
+## Summary of earlier messages\n\nShort version\n\n\
+> Summarised above this line\n\n\
+## You\n\nLater\n\n\
+## m/a\n\nSure\n"
+    );
+}
+
+#[test]
+fn export_to_an_unwritable_or_relative_path_is_a_ui_error() {
+    let h = signed_in("http://unused.invalid");
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    seed(&h, &chat.id, &[("user", "Hi")]);
+    let cannot = Err(other("Could not save the file. Choose another location."));
+    let missing = h._dir.path().join("missing").join("out.md");
+    for path in [
+        missing.to_str().unwrap(),
+        h._dir.path().to_str().unwrap(),
+        "relative-export.md",
+    ] {
+        assert_eq!(export::export_chat(&h.state, &chat.id, path), cannot);
+    }
+    assert!(!missing.exists());
+    let abs = h._dir.path().join("x.md");
+    assert_eq!(
+        export::export_chat(&h.state, "nope", abs.to_str().unwrap()),
+        Err(other(NO_CHAT))
+    );
+    assert!(!abs.exists());
 }

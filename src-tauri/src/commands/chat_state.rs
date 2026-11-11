@@ -15,6 +15,7 @@ use crate::openrouter::models::{ModelCache, ModelInfo};
 use crate::skills::MAX_BODY_CHARS;
 use crate::skills::library::SkillView;
 use crate::state::AppState;
+use crate::store::StoredMessage;
 use serde::Serialize;
 
 /// Sent ahead of the skill bodies whenever any active skill is sent.
@@ -24,9 +25,9 @@ pub const MAX_ACTIVE_SKILLS: usize = 3;
 
 /// What an image attachment counts for in `chat_fullness`, in characters.
 const IMAGE_CHARS: usize = 1_000;
-const CHARS_PER_TOKEN: usize = 4;
+pub(super) const CHARS_PER_TOKEN: usize = 4;
 
-const NO_CHAT: &str = "That chat no longer exists.";
+pub(super) const NO_CHAT: &str = "That chat no longer exists.";
 const NOT_AVAILABLE: &str = "This skill is not available. Check it in Skills.";
 const TOO_MANY: &str = "A chat can have three skills active. Remove one first.";
 const TOO_LONG_TO_RUN: &str = "This skill is too long to run in a chat.";
@@ -80,7 +81,7 @@ fn too_long_for(total_chars: usize, model: &ModelInfo) -> bool {
     (total_chars / CHARS_PER_TOKEN) as u64 > model.context_length / 2
 }
 
-fn require_chat(s: &AppState, chat_id: &str) -> Result<(), UiError> {
+pub(super) fn require_chat(s: &AppState, chat_id: &str) -> Result<(), UiError> {
     match s.store.get_chat(chat_id).map_err(local)? {
         Some(_) => Ok(()),
         None => Err(UiError::other(NO_CHAT)),
@@ -91,7 +92,7 @@ fn require_chat(s: &AppState, chat_id: &str) -> Result<(), UiError> {
 /// the fullness meter go through this: a model missing from the cache, or
 /// one reporting a context length of 0 (OpenRouter omitted it), is unknown,
 /// so every skill fits it and its fullness is 0/0.
-fn sized_model(s: &AppState, model_id: &str) -> Option<ModelInfo> {
+pub(super) fn sized_model(s: &AppState, model_id: &str) -> Option<ModelInfo> {
     ModelCache::load(&s.model_cache_file())?
         .into_iter()
         .find(|m| m.id == model_id && m.context_length > 0)
@@ -244,6 +245,24 @@ pub fn deactivate_skill(s: &AppState, chat_id: &str, skill_id: &str) -> Result<C
     state(s, chat_id, &model_id)
 }
 
+/// A message's text and decoded text attachments in characters, plus
+/// `image_chars` for each image.
+pub(super) fn message_chars(m: &StoredMessage, image_chars: usize) -> usize {
+    chars(&m.text)
+        + m.attachments
+            .iter()
+            .map(|a| {
+                if is_image(a) {
+                    image_chars
+                } else {
+                    decode(a)
+                        .and_then(|b| String::from_utf8(b).ok())
+                        .map_or(0, |t| chars(&t))
+                }
+            })
+            .sum::<usize>()
+}
+
 /// How much of `model_id`'s context the next turn would use: the fixed note
 /// and fitting skill bodies, the summary, every sendable message's text and
 /// decoded text attachments, 1,000 characters per image, and the draft, at
@@ -270,16 +289,7 @@ pub fn chat_fullness(
         total += chars(&summary);
     }
     for m in s.store.sendable_messages(chat_id).map_err(local)? {
-        total += chars(&m.text);
-        for a in &m.attachments {
-            total += if is_image(a) {
-                IMAGE_CHARS
-            } else {
-                decode(a)
-                    .and_then(|b| String::from_utf8(b).ok())
-                    .map_or(0, |t| chars(&t))
-            };
-        }
+        total += message_chars(&m, IMAGE_CHARS);
     }
     let tokens = total as f64 / CHARS_PER_TOKEN as f64;
     Ok(Fullness {

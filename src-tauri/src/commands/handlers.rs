@@ -4,10 +4,10 @@
 
 use super::auth::{AuthStatus, AuthUrl, StorageChoice};
 use super::chat_state::{ChatState, Fullness};
-use super::chats::ChatUsage;
+use super::chats::{ChatUsage, TakenMessage};
 use super::skills::SkillsStatus;
 use super::turn::{AttachmentInput, TurnResult};
-use super::{auth, chat_state, chats, models, skills, turn};
+use super::{auth, chat_state, chats, compact, export, models, skills, turn};
 use crate::auth::callback::PRODUCTION_TIMEOUT;
 use crate::engine::{EngineEvent, UiError};
 use crate::openrouter::key_info::KeyStatus;
@@ -135,12 +135,42 @@ pub async fn retry_turn(
     state: S<'_>,
     chat_id: String,
     model_id: String,
+    regenerate: bool,
     on_event: Channel<EngineEvent>,
 ) -> Result<TurnResult, UiError> {
     let emit = move |e: EngineEvent| {
         let _ = on_event.send(e);
     };
-    turn::retry_turn(&state, &chat_id, &model_id, &emit).await
+    turn::retry_turn(&state, &chat_id, &model_id, regenerate, &emit).await
+}
+
+#[tauri::command]
+pub async fn take_user_message(
+    state: S<'_>,
+    chat_id: String,
+    message_id: String,
+) -> Result<TakenMessage, UiError> {
+    chats::take_user_message(&state, &chat_id, &message_id)
+}
+
+#[tauri::command]
+pub async fn rows_after(state: S<'_>, chat_id: String, message_id: String) -> Result<u32, UiError> {
+    chats::rows_after(&state, &chat_id, &message_id)
+}
+
+#[tauri::command]
+pub async fn compact_chat(
+    state: S<'_>,
+    chat_id: String,
+    model_id: String,
+    keep: Option<String>,
+) -> Result<TurnResult, UiError> {
+    compact::compact_chat(&state, &chat_id, &model_id, keep.as_deref()).await
+}
+
+#[tauri::command]
+pub async fn export_chat(state: S<'_>, chat_id: String, path: String) -> Result<(), UiError> {
+    export::export_chat(&state, &chat_id, &path)
 }
 
 #[tauri::command]

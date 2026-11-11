@@ -1,0 +1,148 @@
+//! Shortening a chat: one request summarises the conversation, and from then
+//! on the summary is sent in place of the summarised messages.
+
+use super::chat_state::{CHARS_PER_TOKEN, message_chars, require_chat, sized_model};
+use super::chats::local;
+use super::turn::{TurnResult, TurnStatus, preamble, run_registered, system, wire};
+use crate::engine::{TurnOutcome, TurnRequest, UiError};
+use crate::state::AppState;
+use crate::store::StoredMessage;
+
+const SUMMARY_ASK: &str = "Summarise the conversation below so it can be continued later. Keep decisions, file names, code that matters and open questions. Be brief.";
+const LEFT_OUT: &str = "The oldest messages were too long to include in the summary.\n\n";
+const TOO_SHORT: &str = "This chat is too short to shorten.";
+const SUMMARISED_NOTE: &str = "Summarised above this line";
+const MIN_MESSAGES: usize = 4;
+/// The conversation sent for summary may use this share of the context.
+const FIT_PERCENT: u64 = 60;
+
+/// What is summarised: the existing summary (if any) and the sendable
+/// messages, oldest first. Images are not sent with the summary request.
+struct Conversation {
+    summary: Option<String>,
+    messages: Vec<StoredMessage>,
+    left_out: bool,
+}
+
+impl Conversation {
+    fn chars(&self) -> usize {
+        self.summary.as_deref().map_or(0, |t| t.chars().count())
+            + self
+                .messages
+                .iter()
+                .map(|m| message_chars(m, 0))
+                .sum::<usize>()
+    }
+
+    /// Leaves out the oldest parts, the existing summary first, until the
+    /// rest fits in `max_tokens`. The newest message is always kept.
+    fn fit(&mut self, max_tokens: u64) {
+        while (self.chars() / CHARS_PER_TOKEN) as u64 > max_tokens {
+            if self.summary.take().is_none() {
+                if self.messages.len() <= 1 {
+                    break;
+                }
+                self.messages.remove(0);
+            }
+            self.left_out = true;
+        }
+    }
+}
+
+/// Asks `model_id` to summarise the chat in one request, without the skill
+/// messages. Only a completed, non-empty summary changes the chat: it is
+/// stored with the boundary just past the last summarised message and the
+/// note "Summarised above this line" is added. Usage is recorded whenever a
+/// request was made. Runs as the chat's turn, so `stop` cancels it.
+pub async fn compact_chat(
+    s: &AppState,
+    chat_id: &str,
+    model_id: &str,
+    keep: Option<&str>,
+) -> Result<TurnResult, UiError> {
+    require_chat(s, chat_id)?;
+    let messages = s.store.sendable_messages(chat_id).map_err(local)?;
+    if messages.len() < MIN_MESSAGES {
+        return Err(UiError::other(TOO_SHORT));
+    }
+    let boundary = messages.last().expect("at least four messages").seq + 1;
+    let mut conversation = Conversation {
+        summary: s
+            .store
+            .summary(chat_id)
+            .map_err(local)?
+            .map(|(text, _)| text),
+        messages,
+        left_out: false,
+    };
+    if let Some(model) = sized_model(s, model_id) {
+        conversation.fit(model.context_length * FIT_PERCENT / 100);
+    }
+
+    let mut ask = SUMMARY_ASK.to_string();
+    if let Some(keep) = keep.map(str::trim).filter(|k| !k.is_empty()) {
+        ask.push_str(&format!("\n\nMake sure to keep: {keep}"));
+    }
+    let mut wire_messages = vec![system(ask)];
+    wire_messages.extend(preamble(&[], conversation.summary.as_deref()));
+    wire_messages.extend(
+        conversation
+            .messages
+            .iter()
+            .map(|m| wire(m, false))
+            .filter(|w| !w.parts.is_empty()),
+    );
+    let request = TurnRequest {
+        model_id: model_id.to_string(),
+        messages: wire_messages,
+    };
+    let ran = run_registered(s, chat_id, request, &|_| {}).await;
+
+    // A turn that started in the chat meanwhile cancelled this one; should the
+    // summary have arrived anyway, it no longer describes the chat.
+    let result = if ran.superseded && ran.result.status == TurnStatus::Done {
+        TurnResult::interrupted("stopped".to_string())
+    } else {
+        ran.result
+    };
+    let text = ran.outcome.text.trim();
+    let summary = (result.status == TurnStatus::Done
+        && !ran.outcome.interrupted
+        && !text.is_empty())
+    .then(|| {
+        if conversation.left_out {
+            format!("{LEFT_OUT}{text}")
+        } else {
+            text.to_string()
+        }
+    });
+    // The request was made, so a failure to store is reported as a failed
+    // turn, not as a compaction that never ran.
+    let stored = record_usage(s, chat_id, &ran.outcome).and_then(|()| match &summary {
+        Some(summary) => store_summary(s, chat_id, summary, boundary),
+        None => Ok(()),
+    });
+    Ok(match stored {
+        Ok(()) => result,
+        Err(e) => TurnResult::failed(e),
+    })
+}
+
+fn record_usage(s: &AppState, chat_id: &str, out: &TurnOutcome) -> Result<(), UiError> {
+    if out.requests > 0 {
+        s.store
+            .record_usage(chat_id, out.requests, out.cost_usd)
+            .map_err(local)?;
+    }
+    Ok(())
+}
+
+fn store_summary(s: &AppState, chat_id: &str, summary: &str, boundary: i64) -> Result<(), UiError> {
+    s.store
+        .set_summary(chat_id, summary, boundary)
+        .map_err(local)?;
+    s.store
+        .append_note(chat_id, SUMMARISED_NOTE)
+        .map_err(local)?;
+    Ok(())
+}

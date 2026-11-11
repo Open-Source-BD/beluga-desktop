@@ -16,6 +16,7 @@ pub fn run() {
     use commands::handlers as h;
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             let state = state::AppState::open(
@@ -50,6 +51,10 @@ pub fn run() {
             h::month_spend,
             h::send_message,
             h::retry_turn,
+            h::take_user_message,
+            h::rows_after,
+            h::compact_chat,
+            h::export_chat,
             h::stop,
             h::skills_status,
             h::list_packs,
