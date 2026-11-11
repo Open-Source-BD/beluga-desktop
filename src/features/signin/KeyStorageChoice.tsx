@@ -1,4 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
+import { APP_NAME } from "../../app/brand";
 
 interface Props {
   busy: boolean;
@@ -41,7 +42,7 @@ export default function KeyStorageChoice({ busy, error, onChoose }: Props) {
       >
         <h2 id="keydlg-title">This computer has no keychain service</h2>
         <p id="keydlg-body">
-          Beluga can keep your key until you quit, or save it in a file only
+          {APP_NAME} can keep your key until you quit, or save it in a file only
           your account can read. A file is less protected than a keychain.
         </p>
         {error && (
