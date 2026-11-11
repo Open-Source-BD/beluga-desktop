@@ -6,7 +6,8 @@ export interface CommandContext {
   openSettings(): void;
   showUsage(): void;
   showHelp(): void;
-  compact(): void;
+  /** `keep` names what the summary must preserve. */
+  compact(keep?: string): void;
   exportChat(): void;
 }
 
@@ -14,7 +15,8 @@ export interface Command {
   /** With its leading "/". */
   name: string;
   description: string;
-  run(ctx: CommandContext): void;
+  /** `rest` is any text typed after the command name. */
+  run(ctx: CommandContext, rest: string): void;
 }
 
 export const commands: Command[] = [
@@ -29,7 +31,7 @@ export const commands: Command[] = [
   {
     name: "/compact",
     description: "Shorten this chat to save requests and cost",
-    run: (c) => c.compact(),
+    run: (c, rest) => c.compact(rest || undefined),
   },
   { name: "/export", description: "Save this chat as a Markdown file", run: (c) => c.exportChat() },
   { name: "/settings", description: "Open Settings", run: (c) => c.openSettings() },

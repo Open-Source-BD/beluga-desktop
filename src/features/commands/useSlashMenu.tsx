@@ -64,7 +64,7 @@ export function useSlashMenu({ skills, ctx, control }: Options) {
       box.setText(row.name + (/^\s/.test(rest) ? rest : ` ${rest}`), row.name.length + 1);
     } else if (row.group === "Commands") {
       box.setText("");
-      commands.find((c) => c.name === row.name)?.run(ctx);
+      commands.find((c) => c.name === row.name)?.run(ctx, text.slice(end).trim());
     } else {
       void box.submit(text.slice(end).trim() || START, { skill: row.id });
     }

@@ -12,6 +12,8 @@ import { formatChatUsage } from "../gauge/allowance";
 import { useAllowance } from "../gauge/useAllowance";
 import Thread from "../chat/Thread";
 import { useChat } from "../chat/useChat";
+import { resolveSlash } from "../commands/resolveSlash";
+import { commands } from "../commands/registry";
 import { useCommandActions } from "../commands/useCommandActions";
 import { useSlashMenu } from "../commands/useSlashMenu";
 import ActiveSkills from "../skills/ActiveSkills";
@@ -105,6 +107,17 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     attachments: AttachmentInput[],
     intent?: SendIntent,
   ) => {
+    if (!intent) {
+      const r = resolveSlash(text, skillList.rows);
+      if (r.kind === "command") {
+        commands.find((c) => c.name === r.name)?.run(actions.ctx, r.rest);
+        return;
+      }
+      if (r.kind === "skill") {
+        intent = { skill: r.id };
+        text = r.rest || "Start.";
+      }
+    }
     if (!modelId || creating) return;
     let id = selectedId;
     if (!id) {
@@ -131,6 +144,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
       }
       await refreshActive(id, modelId);
     }
+    actions.clearAlert();
     chat.send(text, attachments, modelId, id);
   };
 

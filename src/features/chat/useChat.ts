@@ -55,7 +55,7 @@ export interface UseChat extends ChatState {
    * cancels it); `onOutcome` hears how it ended, so a failure is reported by
    * the caller and does not become a thread error with a Retry.
    */
-  compact(modelId: string, onOutcome: (outcome: CompactOutcome) => void): void;
+  compact(modelId: string, onOutcome: (outcome: CompactOutcome) => void, keep?: string): void;
   /**
    * Answers again. A message the core rejected is sent anew; otherwise the
    * stored last user message is answered without being stored twice.
@@ -210,12 +210,12 @@ export function useChat(
   );
 
   const compact = useCallback<UseChat["compact"]>(
-    (modelId, onOutcome) => {
+    (modelId, onOutcome, keep) => {
       if (!chatId) return;
       const id = chatId;
       start(id, modelId, null, async () => {
         try {
-          const result = await compactChat(id, modelId);
+          const result = keep ? await compactChat(id, modelId, keep) : await compactChat(id, modelId);
           onOutcome({ result });
           if (result.status !== "failed") return result;
         } catch (e) {

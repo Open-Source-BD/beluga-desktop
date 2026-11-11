@@ -17,7 +17,7 @@ interface Options {
   title: string | undefined;
   modelId: string | null;
   status: ChatStatus;
-  compact: (modelId: string, onOutcome: (o: CompactOutcome) => void) => void;
+  compact: (modelId: string, onOutcome: (o: CompactOutcome) => void, keep?: string) => void;
   keyStatus: KeyStatus | null;
   usage: ChatUsage | null;
   monthSpend: number;
@@ -35,10 +35,12 @@ export function useCommandActions(o: Options): {
   ctx: CommandContext;
   panels: ReactNode;
   showAlert: (message: string) => void;
+  clearAlert: () => void;
 } {
   const [panel, setPanel] = useState<Panel>(null);
   const [alert, setAlert] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const keep = useRef<string | undefined>(undefined);
   const latest = useRef(o);
   latest.current = o;
 
@@ -78,8 +80,9 @@ export function useCommandActions(o: Options): {
         begin();
         setPanel("help");
       },
-      compact: () => {
+      compact: (keepText) => {
         begin();
+        keep.current = keepText;
         const id = needChat();
         if (!id) return;
         if (latest.current.status === "streaming") setAlert(WAIT);
@@ -111,7 +114,7 @@ export function useCommandActions(o: Options): {
           () => {},
         );
       }
-    });
+    }, keep.current);
   };
   const close = () => setPanel(null);
 
@@ -163,5 +166,5 @@ export function useCommandActions(o: Options): {
     </>
   );
 
-  return { ctx, panels, showAlert: setAlert };
+  return { ctx, panels, showAlert: setAlert, clearAlert: () => setAlert(null) };
 }

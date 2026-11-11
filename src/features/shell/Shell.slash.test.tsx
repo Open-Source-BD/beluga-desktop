@@ -157,6 +157,63 @@ describe("Shell slash menu", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "Remove my-style" })).toBeNull());
   });
 
+  it("a tab-completed skill name followed by text activates it and sends the text", async () => {
+    ipc.activateSkill.mockResolvedValue(EMPTY_STATE);
+    render(<Shell />);
+    await userEvent.type(await box(), "/brai{Tab}a login page{Enter}");
+    await waitFor(() => expect(ipc.sendMessage).toHaveBeenCalled());
+    expect(ipc.activateSkill).toHaveBeenCalledWith("c1", "superpowers:brainstorming", "test/model");
+    expect(ipc.sendMessage).toHaveBeenCalledWith("c1", "a login page", [], "test/model", expect.any(Function));
+  });
+
+  it("a hand-typed skill name followed by text activates it and sends the text", async () => {
+    ipc.activateSkill.mockResolvedValue(EMPTY_STATE);
+    render(<Shell />);
+    await userEvent.type(await box(), "/my-style fix this{Enter}");
+    await waitFor(() => expect(ipc.sendMessage).toHaveBeenCalled());
+    expect(ipc.activateSkill).toHaveBeenCalledWith("c1", "my-style", "test/model");
+    expect(ipc.sendMessage).toHaveBeenCalledWith("c1", "fix this", [], "test/model", expect.any(Function));
+  });
+
+  it("a rejected activation from typed text keeps the whole text in the box", async () => {
+    ipc.activateSkill.mockRejectedValue({ kind: "other", message: "Nope.", retryable: false });
+    render(<Shell />);
+    await userEvent.type(await box(), "/my-style fix this{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Nope.");
+    expect(await box()).toHaveValue("/my-style fix this");
+    expect(ipc.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("/compact with text passes it as the keep text, after confirmation", async () => {
+    ipc.listChats.mockResolvedValue([CHAT]);
+    ipc.compactChat.mockResolvedValue(done);
+    render(<Shell />);
+    await userEvent.click(await screen.findByText("Login page"));
+    await userEvent.type(await box(), "/compact keep the database decisions{Enter}");
+    expect(ipc.compactChat).not.toHaveBeenCalled();
+    await userEvent.click(await screen.findByRole("button", { name: "Shorten" }));
+    expect(ipc.compactChat).toHaveBeenCalledWith("c1", "test/model", "keep the database decisions");
+    expect(ipc.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("a path that is not a skill or command is sent unchanged", async () => {
+    render(<Shell />);
+    await userEvent.type(await box(), "/usr/local/bin is on my PATH{Enter}");
+    await waitFor(() =>
+      expect(ipc.sendMessage).toHaveBeenCalledWith("c1", "/usr/local/bin is on my PATH", [], "test/model", expect.any(Function)),
+    );
+    expect(ipc.activateSkill).not.toHaveBeenCalled();
+  });
+
+  it("an earlier alert is cleared by the next successful send", async () => {
+    render(<Shell />);
+    await userEvent.type(await box(), "/compact{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Open or start a chat first.");
+    await userEvent.type(await box(), "hello{Enter}");
+    await waitFor(() => expect(ipc.sendMessage).toHaveBeenCalled());
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("with no match, Enter sends the literal text", async () => {
     render(<Shell />);
     await userEvent.type(await box(), "/zzzz{Enter}");
