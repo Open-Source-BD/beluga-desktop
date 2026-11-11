@@ -9,7 +9,34 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Create the draft release once, so the parallel builds below all attach to
+  # the same release instead of racing to create their own.
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.create.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: create
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          TAG="v$VERSION"
+          ID=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.tag_name==\"$TAG\" and .draft) | .id" | head -1)
+          if [ -z "$ID" ]; then
+            ID=$(gh api "repos/$GITHUB_REPOSITORY/releases" -X POST \
+              -f tag_name="$TAG" \
+              -f name="Beluga $TAG (early preview)" \
+              -f body="Early preview. Installers are not code-signed yet, so macOS and Windows show a warning the first time you open the app. See the README for how to open it." \
+              -F draft=true -F prerelease=true --jq .id)
+          fi
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: create-release
     permissions:
       contents: write
     strategy:
@@ -58,10 +85,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__
-          releaseName: "Beluga v__VERSION__ (early preview)"
-          releaseBody: |
-            Early preview. Installers are not code-signed yet, so macOS and Windows show a warning the first time you open the app. See the README for how to open it.
-          releaseDraft: true
-          prerelease: true
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
