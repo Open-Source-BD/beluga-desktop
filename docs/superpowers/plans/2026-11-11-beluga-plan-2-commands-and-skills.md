@@ -391,20 +391,28 @@ The tool: for each bundled pack, download at the pinned commit into a temp folde
 
 | Command | Arguments | Returns |
 |---|---|---|
-| `take_last_user_message` | `chat_id` | `Result<TakenMessage { text, attachments: Vec<AttachmentInput> }, UiError>`; deletes that message and everything after it |
+| `take_user_message` | `chat_id, message_id` | `Result<TakenMessage { text, attachments: Vec<AttachmentInput>, removed: u32 }, UiError>`; deletes that message and everything after it; `removed` counts the deleted rows after it |
+| `rows_after` | `chat_id, message_id` | `u32` (how many rows an edit would remove, for the confirmation) |
+| `retry_turn` (changed) | adds `regenerate: bool` | as before; with `regenerate` true a trailing assistant reply is deleted even when it completed normally |
 | `compact_chat` | `chat_id, model_id, keep: Option<String>` | `Result<TurnResult, UiError>` |
 | `export_chat` | `chat_id, path` | `Result<(), UiError>`; writes Markdown to `path` |
 
-  - `take_last_user_message` refuses while a turn is running in that chat ("Wait for the reply to finish, or stop it, before editing.") and when the chat has no user message ("There is nothing to edit in this chat.").
+  - `take_user_message` refuses while a turn is running in that chat ("Wait for the reply to finish, or stop it, before editing.") and when `message_id` is not a user message of that chat ("That message cannot be edited.").
+  - `retry_turn` with `regenerate: false` behaves exactly as today. With `regenerate: true` and a last row that is a completed assistant reply, that reply is deleted and the turn re-run with the given model; the "nothing to retry" rule still applies when the last row is not an assistant reply preceded by a user message.
   - `compact_chat`: refused under four sendable messages ("This chat is too short to shorten."). Sends one non-streamed-to-UI request through the engine whose messages are a system message "Summarise the conversation below so it can be continued later. Keep decisions, file names, code that matters and open questions. Be brief." (plus "Make sure to keep: {keep}" when given) followed by the conversation without skill messages. If the conversation exceeds 60% of the model's context by the Task 7 estimate, the oldest messages are left out until it fits and the stored summary is prefixed with "The oldest messages were too long to include in the summary.\n\n". On `done`, stores the summary with `sent_from_seq` = one past the last summarised message, records usage, and appends the note "Summarised above this line". On any other outcome nothing changes.
   - `export_chat` Markdown: `# {title}`, then per row `## You` / `## {model id}` / `> {note text}` blocks in order, attachments listed by name, the summary (if any) under `## Summary of earlier messages`. Notes and pre-compaction messages are included.
 
 - [ ] **Step 1: Write the failing tests.**
 
 ```rust
-// take: returns the last user text and attachments and deletes it and later rows; earlier rows stay
+// take: returns that user message's text and attachments, deletes it and later rows, reports removed; earlier rows stay
+// take: works for an earlier user message, not only the latest
 // take: active skills are still active afterwards
-// take: refused while a turn is running; refused with no user message (exact copy)
+// take: refused while a turn is running; refused for an assistant message id or another chat's id (exact copy)
+// rows_after counts messages and notes after the given message
+// retry regenerate=true replaces a completed reply with a fresh one and stores no second user message
+// retry regenerate=true with another model id writes that model onto the chat
+// retry regenerate=false on a completed reply still returns "There is nothing to retry in this chat."
 // compact: fewer than four messages refused (exact copy), no request made
 // compact: success stores the summary, appends the note, records one request of usage; the next turn sends summary + later messages only
 // compact: the summary request contains no "Skill:" system message even when a skill is active; the skill is still active after
@@ -505,7 +513,7 @@ The tool: for each bundled pack, download at the pinned commit into a temp folde
 - Modify: `src/features/chat/{Composer.tsx,Thread.tsx,useChat.ts}`, `src/features/shell/Shell.tsx`
 
 **Interfaces:**
-- Consumes: `listPacks`, `chatState`, `activateSkill`, `deactivateSkill`, `takeLastUserMessage` (Task 14 uses it), existing `Shell` handlers.
+- Consumes: `listPacks`, `chatState`, `activateSkill`, `deactivateSkill`, existing `Shell` handlers.
 - Produces:
   - `matchRows(query: string, rows: Row[]): Row[]` with `Row { id, name, description, source, group: "Commands" | "Skills" }`. Order: name matches at the start of the name or of a word in it (split on `:`, `-`, `_`), then description-word matches; original order within each rank.
   - `<PopMenu rows groups active onPick onClose footer />`: `role="listbox"`, rows `role="option"` with `aria-selected`, Up/Down/Enter/Tab/Esc, click outside closes.
@@ -602,27 +610,27 @@ Behaviour: Installed lists packs as cards (collapsed shows the first three skill
 - [ ] **Step 3:** Implement to the mockup's "The Skills screen".
 - [ ] **Step 4:** Run all tests, `tsc`, `pnpm build`. Expected: pass. Commit: `feat(ui): skills screen with add, extra packs and licenses`.
 
-### Task 14: Chat habits, README and version
+### Task 14: Chat habits
 
 **Files:**
-- Create: `src/features/chat/{Fullness.tsx,Queued.tsx}` and tests
-- Modify: `src/features/chat/{Composer.tsx,Thread.tsx,useChat.ts}`, `src/features/shell/Shell.tsx`, `README.md`, `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` (version `0.2.0`)
+- Create: `src/features/chat/{Fullness.tsx,Queued.tsx,ConfirmEdit.tsx}` and tests
+- Modify: `src/features/chat/{Composer.tsx,Thread.tsx,useChat.ts}`, `src/features/shell/Shell.tsx`
 
 **Interfaces:**
-- Consumes: `takeLastUserMessage`, `chatFullness`, `stop`, `useChat`.
+- Consumes: `takeUserMessage`, `rowsAfter`, `chatFullness`, `stop`, `useChat`.
 
 Behaviour and exact copy:
-- A pencil button "Edit message" on the latest user message only, hidden while a reply is running. It calls `takeLastUserMessage`, reloads the thread, and puts the text and attachment chips back in the message box. If the text began with a `/skill-id ` that is active, only the rest returns.
+- A pencil button "Edit message" on every user message, shown on hover or focus, hidden while a reply is running. On the latest user message it acts at once. On an earlier one it first calls `rowsAfter` and shows a dialog, exact copy: "Editing this message removes the {n} messages after it." with "Edit and remove" and "Cancel". It then calls `takeUserMessage`, reloads the thread, and puts the text and attachment chips back in the message box. If the text began with a `/skill-id ` that is active, only the rest returns.
 - The message box stays enabled during a reply. Sending then queues one message shown above the box as "Queued: {first 80 characters}" with a "Remove queued message" button; it is sent when the reply settles as `done`, and kept (not sent) when the reply fails or is interrupted. A second send replaces it. Attachments queue with it.
 - Esc stops the reply when no menu is open and a reply is running; otherwise it does nothing new.
 - The header shows "Chat is {n}% full", recomputed after each turn, on model change, on skill change and (debounced 300 ms) while typing. From 70 it uses the amber text colour and adds "Use /compact to shorten it".
-- README: Features table gains rows for the `/` menu, `@` files, the Skills screen and the bundled packs (name each pack with its license and link); the Privacy section says GitHub is contacted only when the user installs or adds skills from it; the Roadmap marks this stage released as 0.2 and renumbers the rest; a "Bundled skill packs" section credits every pack's repository and license.
 
 - [ ] **Step 1: Write the failing tests.**
 
 ```ts
-// the pencil shows only on the latest user message and not while streaming
-// editing calls takeLastUserMessage, reloads, and restores text and chips to the box
+// the pencil shows on every user message on hover or focus and not while streaming
+// editing the latest calls takeUserMessage at once, reloads, and restores text and chips to the box
+// editing an earlier message shows the dialog with the count from rowsAfter; Cancel changes nothing; "Edit and remove" calls takeUserMessage
 // a leading "/pack:skill " for an active skill is stripped from the restored text
 // sending during a reply queues; the queued line shows the first 80 characters; a second send replaces it
 // the queued message is sent after "done" and kept after "failed" and "interrupted"
@@ -633,5 +641,57 @@ Behaviour and exact copy:
 ```
 
 - [ ] **Step 2:** Run `pnpm test`. Expected: fail.
-- [ ] **Step 3:** Implement, then update the README and bump the three version fields.
-- [ ] **Step 4:** Run every check: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, `pnpm exec tsc --noEmit`, `pnpm test`, `pnpm build`, `cargo build`. Expected: pass. Commit: `feat(chat): edit and resend, queued message, Esc to stop and fullness meter; 0.2.0`.
+- [ ] **Step 3:** Implement.
+- [ ] **Step 4:** Run `pnpm test`, `tsc`, `pnpm build`. Expected: pass. Commit: `feat(chat): edit and resend, queued message, Esc to stop and fullness meter`.
+
+### Task 15: Message actions, message box habits, README and version
+
+**Files:**
+- Create: `src/features/chat/{MessageActions.tsx,CodeBlock.tsx,JumpToLatest.tsx,drafts.ts,paste.ts}` and tests
+- Modify: `src/features/chat/{Thread.tsx,Markdown.tsx,Composer.tsx,EmptyChat.tsx,useChat.ts,chat.css}`, `src/features/shell/Shell.tsx`, `src/features/settings/Settings.tsx`, `src/features/commands/Help.tsx`, `src/lib/ipc.ts` (the `regenerate` argument), `README.md`, `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` (version `0.2.0`)
+
+**Interfaces:**
+- Consumes: `retryTurn(chatId, modelId, onEvent, regenerate)`, `takeUserMessage`, the model picker's open handler, `classifyFile`/`readAttachment`, `listPacks`.
+- Produces:
+  - `<MessageActions role message isLatest onCopy onRetry onRetryWithModel onEdit />`
+  - `useChat` gains `regenerate(modelId?: string)`.
+  - `drafts.ts`: `loadDraft(chatId): string`, `saveDraft(chatId, text): void`, `clearDraft(chatId): void` over `localStorage` keys `draft:{chatId}` (new chat: `draft:new`), each access in try/catch.
+  - `paste.ts`: `PASTE_AS_FILE_CHARS = 4000`; `pastedTextAttachment(text: string): AttachmentInput` named "Pasted text.txt" (a second one in the same message is "Pasted text 2.txt").
+
+Behaviour and exact copy:
+- Reply row: buttons "Copy" and "Retry". Always visible on the latest reply; on older replies it appears on hover or keyboard focus within the message. "Copy" copies the reply's Markdown source and reads "Copied" for two seconds. "Retry" (latest reply only, hidden while a reply is running) opens a menu with "Retry", "Retry with another model…" and the line "Uses one request". "Retry" calls `regenerate()`. "Retry with another model…" opens the model picker; choosing a model sets it for the chat and calls `regenerate(modelId)`.
+- User message row, on hover or focus: "Copy" and "Edit message" (Task 14's pencil moves into this row).
+- Code blocks render through `CodeBlock`: a header with the language name (or "text") and a "Copy code" button that reads "Copied" for two seconds. The code stays in JetBrains Mono.
+- Each message has a `title` and an accessible description with its local date and time.
+- Clipboard writes go through `navigator.clipboard.writeText`; on failure the button reads "Could not copy".
+- Keys: Up arrow in an empty message box triggers Edit on the latest user message. A Settings switch labelled "Send with Cmd/Ctrl+Enter" (stored in `localStorage` key `sendWithModifier`) makes Enter insert a new line and Cmd/Ctrl+Enter send. `/help` lists: Enter, Shift+Enter, Cmd/Ctrl+Enter, Up arrow, Esc, `/`, `@`, Cmd/Ctrl+N.
+- Pasting text of 4,000 characters or more adds a chip through `pastedTextAttachment` and leaves the box unchanged; the chip has a "Put in the message" button that removes the chip and inserts the text at the caret. Pasting an image attaches it. Dropping files on the conversation area attaches them and shows a drop outline while dragging. All use the Composer's existing limits and refusals.
+- Drafts: the box loads the chat's draft when a chat is selected, saves on change (debounced 300 ms), and clears on a successful send.
+- "Jump to latest" appears above the message box when the thread is not following (the existing `shouldFollow` rule) and scrolls to the end.
+- Empty chat starter actions, exact labels and secondary lines from `docs/superpowers/mockups/design-v3.html`: "Plan a feature before writing it" / "asks you questions, then writes a step-by-step plan" → `superpowers:brainstorming`; "Find and fix a bug" / "reproduces it first, then fixes the cause" → `superpowers:systematic-debugging`; "Review my recent changes" / "checks for mistakes and security problems" → `superpowers:requesting-code-review`. Picking one puts `/{skill id} ` in the message box and focuses it; it sends nothing. An action whose skill is off, broken or missing is not shown.
+- README: the Features table gains rows for the `/` menu, `@` files, the Skills screen, message actions and the bundled packs; the Privacy section says GitHub is contacted only when the user installs or adds skills from it; the Roadmap marks this stage released as 0.2 and renumbers the rest; a "Bundled skill packs" section credits every pack's repository and license.
+
+- [ ] **Step 1: Write the failing tests.**
+
+```ts
+// the reply row is always rendered for the latest reply and only on hover/focus for older ones
+// Copy writes the Markdown source to the clipboard and shows "Copied" then "Copy"; a clipboard failure shows "Could not copy"
+// Retry is offered only on the latest reply and not while streaming; the menu shows the exact three lines
+// "Retry" calls retryTurn with regenerate true and the chat's model
+// "Retry with another model…" opens the picker; choosing a model calls retryTurn with that model and regenerate true
+// user messages show Copy and Edit message on hover/focus
+// a fenced block renders the language label and "Copy code" copies exactly the code text
+// each message exposes its local time
+// Up arrow in an empty box starts Edit on the latest user message; with text in the box it moves the caret as usual
+// with sendWithModifier on, Enter adds a new line and Cmd/Ctrl+Enter sends
+// pasting 3,999 characters goes into the box; pasting 4,000 adds a "Pasted text.txt" chip and leaves the box unchanged
+// "Put in the message" removes the chip and inserts the text
+// pasting an image attaches it; dropping two files attaches both; a refused file shows the existing message
+// a draft is restored when returning to a chat and cleared after a successful send; storage errors are ignored
+// "Jump to latest" shows only when not following and scrolls to the end
+// starter actions fill the box with "/superpowers:brainstorming " and send nothing; an off skill hides its action
+```
+
+- [ ] **Step 2:** Run `pnpm test`. Expected: fail.
+- [ ] **Step 3:** Implement, then update the README and bump the three version fields to `0.2.0`.
+- [ ] **Step 4:** Run every check: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, `pnpm exec tsc --noEmit`, `pnpm test`, `pnpm build`, `cargo build`. Expected: pass. Commit: `feat(chat): message actions, paste and drop, drafts and starter actions; 0.2.0`.

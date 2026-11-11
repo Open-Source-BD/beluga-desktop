@@ -157,10 +157,31 @@ Network: installing from GitHub contacts `github.com`, `codeload.github.com` and
 
 ## Chat habits
 
-- **Edit and resend.** A pencil on the user's most recent message puts its text back in the message box. Sending replaces that message and everything after it. Only the latest user message can be edited; there are no branches. **(my call: simplest form)**
+- **Edit and resend.** A pencil on any of the user's own messages puts its text and attachments back in the message box. Sending replaces that message and everything after it; there are no branches or kept versions. Editing the latest message needs no confirmation. Editing an earlier one asks first: "Editing this message removes the {n} messages after it." with "Edit and remove" and "Cancel". **(owner asked for edit; no branching is my call)**
 - **Type while it replies.** The message box stays usable during a reply. Sending queues one message, shown above the box as "Queued: …" with a remove button; it is sent when the reply ends. A second send replaces the queued one.
 - **Esc** stops the current reply (same as the Stop button) when the `/` or `@` menu is not open.
 - **How full the chat is.** The header shows "Chat is 12% full", an estimate from the characters that would be sent (messages, attachments, active skills) divided by four, against the model's context length. From 70% it turns amber and adds "Use /compact to shorten it". Above 100% sending is still allowed; the existing "chat is too long" error covers the failure.
+
+## Message actions
+
+The owner asked for copy, edit and retry on chat items. Research on the reference apps was thin (no official documentation of these controls was found), so the set below follows the common pattern and is **my call** in its details.
+
+- **Under each reply:** Copy, and Retry. The row is always visible on the latest reply and appears on hover or keyboard focus for older ones.
+  - **Copy** copies the reply as Markdown source. The button reads "Copied" for two seconds.
+  - **Retry** is offered on the latest reply only. It opens a small menu: "Retry" and "Retry with another model…" (which opens the model picker, then retries). The old reply is replaced, not kept; this costs one request, and the menu says "Uses one request".
+- **On each of the user's messages:** Copy and Edit (above). Shown on hover or focus.
+- **Code blocks:** a header with the language name and a "Copy code" button.
+- **Time:** hovering a message shows when it was sent.
+- Not in this step: kept versions with a switcher, thumbs up and down, read aloud, quoting a selection, a collapsible thinking section.
+
+## Message box
+
+- **Keys.** Enter sends and Shift+Enter makes a new line. A Settings switch "Send with Cmd/Ctrl+Enter" swaps them. Up arrow in an empty message box edits the latest user message. `/help` lists the shortcuts.
+- **Long paste.** Pasting 4,000 characters or more adds it as an attachment chip named "Pasted text.txt" instead of filling the box, with a "Put in the message" action on the chip that inserts it inline. Normal attachment limits apply.
+- **Pasting and dropping files.** Pasting an image, or dropping files anywhere on the conversation, attaches them through the same path as the Attach button, with the same refusals.
+- **Drafts.** Unsent text is remembered per chat and restored when the user returns to it. Attachments in a draft are not kept across a restart.
+- **Jump to latest.** When the user has scrolled up, a "Jump to latest" button appears above the message box.
+- **Starter actions.** The empty chat shows the three actions from the first approved mockup, now real: "Plan a feature before writing it" (runs `superpowers:brainstorming`), "Find and fix a bug" (runs `superpowers:systematic-debugging`), "Review my recent changes" (runs `superpowers:requesting-code-review`). Each puts the skill in the message box as `/skill ` for the user to finish and send; it does not send by itself. An action whose skill is switched off is not shown.
 
 ## Constraints carried over
 
