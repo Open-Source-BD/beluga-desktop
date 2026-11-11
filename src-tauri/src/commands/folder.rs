@@ -91,25 +91,24 @@ pub fn attach_folder_file(
             listing.as_bytes(),
         ));
     }
-    let size = std::fs::metadata(&real)
-        .map_err(|_| not_attachable(&name))?
-        .len();
+    // The same resolved path is checked and read; a pipe or device is never
+    // opened for reading, and the read itself is bounded.
+    let is_file = std::fs::metadata(&real).is_ok_and(|m| m.is_file());
+    if !is_file {
+        return Err(not_attachable(&name));
+    }
     let ext = real
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase())
         .unwrap_or_default();
     if IMAGE_TYPES.contains(&ext.as_str()) {
-        if size > MAX_IMAGE_BYTES as u64 {
-            return Err(too_large(&name));
-        }
-        let bytes = folder::read_file(&root, path).map_err(outside)?;
+        let bytes =
+            folder::read_regular(&real, MAX_IMAGE_BYTES as u64).ok_or_else(|| too_large(&name))?;
         let kind = if ext == "jpg" { "jpeg" } else { ext.as_str() };
         return Ok(attachment(name, &format!("image/{kind}"), &bytes));
     }
-    if size > MAX_TEXT_BYTES as u64 {
-        return Err(too_large(&name));
-    }
-    let bytes = folder::read_file(&root, path).map_err(outside)?;
+    let bytes =
+        folder::read_regular(&real, MAX_TEXT_BYTES as u64).ok_or_else(|| too_large(&name))?;
     if bytes.contains(&0) || std::str::from_utf8(&bytes).is_err() {
         return Err(not_attachable(&name));
     }

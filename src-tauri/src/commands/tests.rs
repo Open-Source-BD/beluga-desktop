@@ -2867,3 +2867,27 @@ fn attach_folder_file_on_a_directory_returns_its_listing() {
     assert_eq!(root.name, format!("{name}/ listing.txt"));
     assert_eq!(decoded(&root), b"sub/a.txt\t3");
 }
+
+#[cfg(unix)]
+#[test]
+fn attach_folder_file_refuses_a_fifo_promptly() {
+    let h = signed_out("http://unused");
+    let (id, dir) = folder_chat(&h);
+    let fifo = dir.path().join("pipe.txt");
+    let made = std::process::Command::new("mkfifo").arg(&fifo).status();
+    if !made.is_ok_and(|s| s.success()) {
+        return;
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let state = h.state.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(folder::attach_folder_file(&state, &id, "pipe.txt"));
+    });
+    let got = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("attach hung on a FIFO");
+    assert_eq!(
+        got,
+        Err(UiError::other("pipe.txt is not a text file or image."))
+    );
+}

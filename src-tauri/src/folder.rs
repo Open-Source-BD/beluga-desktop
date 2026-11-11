@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 pub const MAX_WALKED_FILES: usize = 5_000;
 /// Lines in a folder's listing attachment before it is cut.
 pub const MAX_LISTING_LINES: usize = 500;
+/// Entries of any kind walked in one listing before it is cut.
+pub const MAX_WALKED_ENTRIES: usize = 50_000;
 pub const OUTSIDE: &str = "That file is outside the folder.";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -41,6 +43,8 @@ fn walk(base: &Path, max_files: usize) -> (Vec<FileEntry>, bool) {
         .require_git(false)
         .git_global(false)
         .git_exclude(false)
+        .parents(false)
+        .ignore(false)
         .follow_links(false)
         .sort_by_file_name(|a, b| a.cmp(b))
         .filter_entry(|e| {
@@ -58,6 +62,9 @@ fn walk(base: &Path, max_files: usize) -> (Vec<FileEntry>, bool) {
             continue;
         }
         let Some(kind) = e.file_type() else { continue };
+        if entries.len() >= MAX_WALKED_ENTRIES && (kind.is_dir() || kind.is_file()) {
+            return (entries, true);
+        }
         let Ok(rel) = e.path().strip_prefix(base) else {
             continue;
         };
@@ -162,9 +169,30 @@ pub fn resolve(root: &Path, rel: &str) -> Result<PathBuf, String> {
     }
 }
 
+/// Reads at most `limit` bytes from `reader`; `None` when it holds more.
+pub fn read_bounded<R: std::io::Read>(reader: R, limit: u64) -> Option<Vec<u8>> {
+    use std::io::Read as _;
+    let mut out = Vec::new();
+    reader.take(limit + 1).read_to_end(&mut out).ok()?;
+    (out.len() as u64 <= limit).then_some(out)
+}
+
+/// Reads the regular file at an already resolved `real` path, at most
+/// `limit` bytes. Anything else (a pipe, a device, a longer file) is `None`.
+pub fn read_regular(real: &Path, limit: u64) -> Option<Vec<u8>> {
+    let file = std::fs::File::open(real).ok()?;
+    if !file.metadata().ok()?.is_file() {
+        return None;
+    }
+    read_bounded(file, limit)
+}
+
+/// The largest file `read_file` returns: the biggest attachment allowed.
+const MAX_READ_BYTES: u64 = 5_000_000;
+
 pub fn read_file(root: &Path, rel: &str) -> Result<Vec<u8>, String> {
     let path = resolve(root, rel)?;
-    std::fs::read(path).map_err(|_| OUTSIDE.to_string())
+    read_regular(&path, MAX_READ_BYTES).ok_or_else(|| OUTSIDE.to_string())
 }
 
 /// One `path<TAB>bytes` line per file under the directory `rel` (paths
@@ -395,6 +423,37 @@ mod tests {
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
         assert!(paths(&l).contains(&"ok.txt"));
         assert!(!paths(&l).contains(&"locked/inner.txt"));
+    }
+
+    #[test]
+    fn read_bounded_refuses_a_reader_longer_than_the_limit() {
+        let long = vec![7u8; 11];
+        assert_eq!(read_bounded(&long[..], 10), None);
+        assert_eq!(read_bounded(&long[..10], 10), Some(vec![7u8; 10]));
+        assert_eq!(read_bounded(&b""[..], 10), Some(vec![]));
+    }
+
+    #[test]
+    fn a_gitignore_in_a_parent_or_an_ignore_file_does_not_hide_files() {
+        let d = tempfile::tempdir().unwrap();
+        put(d.path(), ".gitignore", "*.txt\n");
+        put(d.path(), ".ignore", "*.md\n");
+        put(d.path(), "chosen/a.txt", "x");
+        put(d.path(), "chosen/b.md", "x");
+        put(d.path(), "chosen/c.rs", "x");
+        let l = list_files(&d.path().join("chosen"), "", 50);
+        assert_eq!(paths(&l), ["a.txt", "b.md", "c.rs"]);
+    }
+
+    #[test]
+    fn the_walk_stops_at_50000_entries_of_any_kind() {
+        let d = tempfile::tempdir().unwrap();
+        for i in 0..50_100 {
+            fs::create_dir(d.path().join(format!("d{i:05}"))).unwrap();
+        }
+        let l = list_files(d.path(), "", 50);
+        assert!(l.cut);
+        assert_eq!(l.total, MAX_WALKED_ENTRIES);
     }
 
     #[test]
