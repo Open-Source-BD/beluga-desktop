@@ -17,6 +17,8 @@ interface Props {
   totals?: Record<string, number>;
   /** Distinguishes option ids when more than one menu exists. */
   idPrefix?: string;
+  /** Accessible name of the list. */
+  label?: string;
 }
 
 interface KeyActions {
@@ -66,6 +68,7 @@ export default function PopMenu({
   footer,
   totals,
   idPrefix = "pop",
+  label = "Commands and skills",
 }: Props) {
   const root = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
@@ -94,7 +97,7 @@ export default function PopMenu({
       <div
         role="listbox"
         id={`${idPrefix}-listbox`}
-        aria-label="Commands and skills"
+        aria-label={label}
         tabIndex={-1}
         className="pop-list"
         onKeyDown={onKeyDown}

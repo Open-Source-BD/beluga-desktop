@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { APP_NAME } from "../../app/brand";
 import type { ChatSummary } from "../../lib/ipc";
+import FolderGroup from "../mentions/FolderGroup";
 import ConfirmDelete from "./ConfirmDelete";
 import {
   GearIcon,
@@ -18,6 +19,10 @@ interface Props {
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
   onOpenSettings: () => void;
+  /** The open chat's folder; null when it has none. */
+  folder?: string | null;
+  onOpenFolder?: () => void;
+  onCloseFolder?: () => void;
   footer?: ReactNode;
 }
 
@@ -29,6 +34,9 @@ export default function Sidebar({
   onRename,
   onDelete,
   onOpenSettings,
+  folder = null,
+  onOpenFolder,
+  onCloseFolder,
   footer,
 }: Props) {
   const [editing, setEditing] = useState<string | null>(null);
@@ -52,6 +60,9 @@ export default function Sidebar({
         <PlusIcon />
         New chat
       </button>
+      {onOpenFolder && (
+        <FolderGroup folder={folder} onOpen={onOpenFolder} onClose={() => onCloseFolder?.()} />
+      )}
       <nav className="side-list" aria-label="Chats">
         <div className="grp">Earlier</div>
         <ul>

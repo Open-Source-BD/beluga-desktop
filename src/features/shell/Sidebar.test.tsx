@@ -70,4 +70,19 @@ describe("Sidebar", () => {
     render(<Sidebar {...props()} footer={<span>gauge</span>} />);
     expect(screen.getByText("gauge")).toBeInTheDocument();
   });
+
+  it("shows the folder name with Change and Close folder, or an Open a folder button", async () => {
+    const p = { ...props(), folder: "\\\\?\\C:\\Users\\me\\app", onOpenFolder: vi.fn(), onCloseFolder: vi.fn() };
+    const { rerender } = render(<Sidebar {...p} />);
+    expect(screen.getByText("Folder")).toBeInTheDocument();
+    expect(screen.getByText("app")).toHaveAttribute("title", "C:\\Users\\me\\app");
+    await userEvent.click(screen.getByRole("button", { name: "Change" }));
+    expect(p.onOpenFolder).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole("button", { name: "Close folder" }));
+    expect(p.onCloseFolder).toHaveBeenCalledTimes(1);
+    rerender(<Sidebar {...p} folder={null} />);
+    expect(screen.queryByRole("button", { name: "Close folder" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Open a folder" }));
+    expect(p.onOpenFolder).toHaveBeenCalledTimes(2);
+  });
 });
