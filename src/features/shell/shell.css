@@ -1,0 +1,193 @@
+.shell {
+  display: grid;
+  grid-template-columns: 232px 1fr;
+  height: 100vh;
+  background: var(--ice);
+}
+.side {
+  background: var(--floe);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  padding: 14px 10px 12px;
+  min-height: 0;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px 14px;
+  font-family: "Bricolage Grotesque Variable", sans-serif;
+  font-weight: 600;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+}
+.brand svg {
+  flex: none;
+}
+.btn,
+.newc,
+.row-main,
+.row-act,
+.settings,
+.send {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.newc {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--white);
+  border: 1px solid var(--line);
+  font-weight: 500;
+}
+.side-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.side-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.grp {
+  font-size: 12px;
+  color: var(--mid);
+  padding: 16px 10px 4px;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 7px;
+  min-width: 0;
+}
+.row.on {
+  background: var(--sel);
+  font-weight: 500;
+}
+.row-main {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  background: none;
+  border: 0;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row-act {
+  flex: none;
+  display: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  color: var(--mid);
+}
+.row:hover .row-act,
+.row:focus-within .row-act {
+  display: grid;
+}
+.row-act:hover {
+  background: var(--sel);
+  color: var(--deep);
+}
+.rename {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 5px 8px;
+  border: 1px solid var(--field-line);
+  border-radius: 6px;
+  background: var(--white);
+  color: var(--deep);
+}
+.settings {
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 10px;
+  gap: 8px;
+  background: none;
+  border: 0;
+  color: var(--text2);
+  text-align: left;
+}
+.settings svg {
+  color: var(--mid);
+}
+.side-footer {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.head {
+  height: 46px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--line);
+}
+.head .ttl {
+  font-weight: 600;
+}
+.usage {
+  margin-left: auto;
+  color: var(--mid);
+  font-size: 13px;
+}
+
+.btn {
+  font-weight: 500;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--white);
+}
+.btn.danger {
+  background: var(--btn);
+  color: var(--on-btn);
+  border-color: var(--btn);
+}
+.scrim {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--shadow);
+  z-index: 10;
+}
+.dialog {
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px;
+  max-width: 340px;
+}
+.dialog p {
+  margin: 0 0 16px;
+  font-weight: 500;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

@@ -21,6 +21,13 @@ vi.mock("../lib/ipc", () => ({
   signInWithKey: vi.fn(),
   resolveKeyStorage: vi.fn(),
   openAuthUrl: vi.fn(),
+  listChats: vi.fn(async () => []),
+  getMessages: vi.fn(async () => []),
+  createChat: vi.fn(),
+  renameChat: vi.fn(),
+  deleteChat: vi.fn(),
+  sendMessage: vi.fn(),
+  stop: vi.fn(),
 }));
 
 beforeEach(() => {
@@ -43,7 +50,7 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the shell placeholder when signed in", async () => {
+  it("shows the shell when signed in", async () => {
     ipc.authStatus.mockResolvedValue({ signed_in: true, storage: "keychain" });
     render(<App />);
     expect(await screen.findByTestId("shell")).toBeInTheDocument();

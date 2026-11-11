@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import Shell from "../features/shell/Shell";
 import SignIn from "../features/signin/SignIn";
 import { authStatus, onAuthRevoked } from "../lib/ipc";
 
@@ -44,6 +45,5 @@ export default function App() {
       />
     );
   }
-  // Task 10 replaces this placeholder with the real shell.
-  return <div data-testid="shell" />;
+  return <Shell onSignInAgain={() => setSignedIn(false)} />;
 }
