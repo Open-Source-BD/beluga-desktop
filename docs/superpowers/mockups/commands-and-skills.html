@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beluga commands and skills</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ice:#F4F7F9;--floe:#E9EEF2;--line:#D5DEE5;--deep:#0F2B3C;--mid:#56707F;
+    --sonar:#0E7C8B;--amber-soft:#FBF1E2;--white:#FFFFFF;
+    --page:#C9D5DD;--text2:#2C4656;--frame:#AFC0CB;--dot:#C3CFD8;--sel:#DAE3E9;--tick-used:#C6D2DA;
+    --ask-line:#E3C79E;--ask-ink:#6D3F10;--ask-pre-line:#EAD7B8;--field-line:#BFCCD5;--ph:#8296A2;
+    --btn:#0F2B3C;--on-btn:#FFFFFF;--on-accent:#FFFFFF;--pitch:#0F2B3C;--shadow:rgba(15,43,60,.45);
+    color-scheme:light;
+  }
+  @media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ice:#0F1C24;--floe:#0A151B;--line:#213540;--deep:#E3ECF1;--mid:#8AA1AE;
+    --sonar:#45B9C7;--amber-soft:#2A2115;--white:#16272F;
+    --page:#04090C;--text2:#A9BDC8;--frame:#2A3F4B;--dot:#2A3F4B;--sel:#1C2F3A;--tick-used:#243741;
+    --ask-line:#5C4525;--ask-ink:#F0C48A;--ask-pre-line:#4A3A22;--field-line:#2F4552;--ph:#6F8794;
+    --btn:#E3ECF1;--on-btn:#0F1C24;--on-accent:#04222A;--pitch:#13303F;--shadow:rgba(0,0,0,.7);
+    color-scheme:dark;
+  }}
+  :root[data-theme="dark"]{
+    --ice:#0F1C24;--floe:#0A151B;--line:#213540;--deep:#E3ECF1;--mid:#8AA1AE;
+    --sonar:#45B9C7;--amber-soft:#2A2115;--white:#16272F;
+    --page:#04090C;--text2:#A9BDC8;--frame:#2A3F4B;--dot:#2A3F4B;--sel:#1C2F3A;--tick-used:#243741;
+    --ask-line:#5C4525;--ask-ink:#F0C48A;--ask-pre-line:#4A3A22;--field-line:#2F4552;--ph:#6F8794;
+    --btn:#E3ECF1;--on-btn:#0F1C24;--on-accent:#04222A;--pitch:#13303F;--shadow:rgba(0,0,0,.7);
+    color-scheme:dark;
+  }
+  .mode{position:sticky;top:12px;z-index:5;display:flex;align-items:center;gap:12px;width:max-content;margin:0 0 22px auto;padding:6px 6px 6px 14px;border-radius:12px;background:var(--ice);border:1px solid var(--frame);box-shadow:0 10px 24px -16px var(--shadow)}
+  .mode span{color:var(--mid);font-size:13px}
+  .seg{display:flex;background:var(--floe);border-radius:8px;padding:3px;gap:2px}
+  .seg button{font:inherit;font-size:13px;font-weight:500;padding:5px 12px;border-radius:6px;border:0;background:transparent;color:var(--mid);cursor:pointer}
+  .seg button[aria-pressed="true"]{background:var(--white);color:var(--deep);box-shadow:0 0 0 1px var(--line)}
+  .seg button:focus-visible{outline:2px solid var(--sonar);outline-offset:1px}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:var(--deep);font-family:"Hanken Grotesk",system-ui,sans-serif;font-size:14px;line-height:1.5;padding:40px 24px 80px}
+  .page{max-width:1120px;margin:0 auto}
+  .intro h1{font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:34px;letter-spacing:-.02em;margin:0 0 8px;line-height:1.1}
+  .intro p{margin:0 0 6px;max-width:68ch;color:var(--text2)}
+  .cap{font-family:"Bricolage Grotesque",sans-serif;font-weight:500;font-size:20px;letter-spacing:-.01em;margin:48px 0 4px}
+  .capsub{margin:0 0 14px;color:var(--text2);max-width:70ch}
+
+  /* window frame */
+  .win{background:var(--ice);border-radius:12px;overflow:hidden;box-shadow:0 24px 60px -20px var(--shadow);border:1px solid var(--frame)}
+  .bar{height:38px;display:flex;align-items:center;padding:0 14px;gap:7px;background:var(--floe);border-bottom:1px solid var(--line)}
+  .dot{width:11px;height:11px;border-radius:50%;background:var(--dot)}
+  .bar .t{margin-left:10px;font-size:12.5px;color:var(--mid)}
+  .app{display:grid;grid-template-columns:232px 1fr;height:600px}
+
+  /* sidebar */
+  .side{background:var(--floe);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:14px 10px 12px;min-height:0}
+  .brand{display:flex;align-items:center;gap:8px;padding:2px 8px 14px;font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:17px;letter-spacing:-.01em}
+  .brand svg{flex:none}
+  .newc{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:var(--white);border:1px solid var(--line);font-weight:500}
+  .newc kbd{margin-left:auto;font:inherit;font-size:11.5px;color:var(--mid)}
+  .grp{font-size:12px;color:var(--mid);padding:16px 10px 4px}
+  .row{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .row.on{background:var(--sel);font-weight:500}
+  .row svg{flex:none;color:var(--mid)}
+  .row .n{margin-left:auto;font-size:12px;color:var(--mid)}
+  .gauge{margin-top:auto;padding:12px 10px 2px;border-top:1px solid var(--line)}
+  .gauge b{font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:22px;letter-spacing:-.02em}
+  .gauge .of{color:var(--mid)}
+  .ticks{display:grid;grid-template-columns:repeat(25,1fr);gap:3px 2px;margin:8px 0 8px}
+  .ticks i{height:9px;border-radius:2px;background:var(--sonar)}
+  .ticks i.u{background:var(--tick-used)}
+  .gauge small{display:block;color:var(--mid);font-size:12px;line-height:1.45}
+
+  /* main */
+  .main{display:flex;flex-direction:column;min-width:0;min-height:0}
+  .head{height:46px;display:flex;align-items:center;gap:10px;padding:0 20px;border-bottom:1px solid var(--line)}
+  .head .ttl{font-weight:600}
+  .head .proj{color:var(--mid)}
+  .head .cost{margin-left:auto;color:var(--mid);font-size:13px}
+  .head .cost b{color:var(--deep);font-weight:600}
+
+  .thread{flex:1;overflow:hidden;padding:26px 0 0;display:flex;flex-direction:column;gap:16px}
+  .col{width:min(680px,100% - 48px);margin:0 auto}
+  .me{align-self:flex-end;background:var(--sel);padding:9px 14px;border-radius:16px 16px 4px 16px;max-width:520px;margin-right:calc((100% - min(680px,100% - 48px))/2)}
+  .skill{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sonar);font-weight:500;margin-bottom:4px}
+  .steps{border-left:2px solid var(--line);margin:2px 0 0 4px;padding-left:14px;display:grid;gap:3px;color:var(--mid);font-size:13px}
+  .steps span code{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--deep)}
+  .ask{border:1px solid var(--ask-line);background:var(--amber-soft);border-radius:10px;padding:12px 14px}
+  .ask .q{font-weight:600;color:var(--ask-ink)}
+  .ask pre{margin:8px 0 10px;background:var(--white);border:1px solid var(--ask-pre-line);border-radius:7px;padding:8px 10px;font-family:"JetBrains Mono",monospace;font-size:12.5px;overflow:hidden}
+  .btns{display:flex;gap:8px;flex-wrap:wrap}
+  .b{font:inherit;font-weight:500;font-size:13px;padding:6px 12px;border-radius:7px;border:1px solid var(--line);background:var(--white);color:var(--deep)}
+  .b.p{background:var(--btn);color:var(--on-btn);border-color:var(--btn)}
+
+  .composer{width:min(680px,100% - 48px);margin:14px auto 18px;background:var(--white);border:1px solid var(--field-line);border-radius:14px;padding:12px 12px 8px;box-shadow:0 6px 18px -12px rgba(15,43,60,.5)}
+  .composer .ph{color:var(--ph);padding:0 4px 14px}
+  .ctl{display:flex;align-items:center;gap:6px}
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:7px;font-size:12.5px;color:var(--deep);background:var(--ice);border:1px solid var(--line)}
+  .chip .free{color:var(--sonar);font-weight:600}
+  .send{margin-left:auto;width:30px;height:30px;border-radius:8px;background:var(--btn);display:grid;place-items:center}
+
+  /* empty state */
+  .empty{flex:1;display:flex;flex-direction:column;justify-content:center;padding-bottom:40px}
+  .hello{font-family:"Bricolage Grotesque",sans-serif;font-weight:500;font-size:40px;letter-spacing:-.025em;line-height:1.05;margin:0 0 6px}
+  .hello-sub{color:var(--mid);margin:0 0 22px}
+  .empty .composer{margin:0 auto 14px}
+  .starts{display:grid;gap:2px}
+  .starts a{display:flex;gap:12px;align-items:baseline;padding:8px 10px;border-radius:8px;color:inherit;text-decoration:none}
+  .starts a:first-child{background:var(--floe)}
+  .starts .w{font-weight:500}
+  .starts .s{color:var(--mid);font-size:13px}
+
+  /* sign in */
+  .signin{display:grid;grid-template-columns:1fr 1fr;height:460px}
+  .pitch{background:var(--pitch);color:#E6EFF3;padding:40px 40px 32px;display:flex;flex-direction:column}
+  .pitch h2{font-family:"Bricolage Grotesque",sans-serif;font-weight:500;font-size:38px;letter-spacing:-.025em;line-height:1.05;margin:auto 0 12px;color:#fff}
+  .pitch p{margin:0;color:#A9C0CC;max-width:36ch}
+  .pitch .brand{color:#fff;padding:0}
+  .form{padding:40px;display:flex;flex-direction:column;justify-content:center;gap:12px;background:var(--ice)}
+  .form h3{font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:21px;letter-spacing:-.01em;margin:0}
+  .form p{margin:0 0 6px;color:var(--mid);max-width:38ch}
+  .big{font:inherit;font-weight:600;font-size:14.5px;padding:12px 16px;border-radius:10px;border:0;background:var(--sonar);color:var(--on-accent);text-align:center}
+  .alt{font:inherit;font-weight:500;padding:11px 16px;border-radius:10px;border:1px solid var(--field-line);background:var(--white);color:var(--deep);text-align:center}
+  .fine{font-size:12.5px;color:var(--mid);margin-top:6px}
+
+  .notes{margin-top:44px;background:var(--ice);border:1px solid var(--frame);border-radius:12px;padding:22px 26px}
+  .notes h3{font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:18px;margin:0 0 8px}
+  .notes ul{margin:0;padding-left:18px;max-width:78ch}
+  .notes li{margin:4px 0}
+  @media (max-width:760px){.app{grid-template-columns:1fr}.side{display:none}.signin{grid-template-columns:1fr;height:auto}}
+
+  /* popover menus */
+  .stage{flex:1;display:flex;flex-direction:column;justify-content:flex-end;min-height:0;padding-top:20px}
+  .pop{width:min(680px,100% - 48px);margin:0 auto 8px;background:var(--white);border:1px solid var(--field-line);border-radius:12px;box-shadow:0 14px 34px -18px var(--shadow);overflow:hidden}
+  .pop .hd{display:flex;justify-content:space-between;padding:8px 12px 6px;font-size:12px;color:var(--mid)}
+  .opt{display:grid;grid-template-columns:190px 1fr auto;gap:12px;align-items:baseline;padding:7px 12px}
+  .opt.on{background:var(--sel)}
+  .opt .nm{font-family:"JetBrains Mono",monospace;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .opt .ds{color:var(--mid);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .opt .src{font-size:11.5px;color:var(--mid)}
+  .opt .nm b{color:var(--sonar);font-weight:500}
+  .sep{height:1px;background:var(--line);margin:4px 0}
+  .ft{display:flex;gap:14px;padding:7px 12px;border-top:1px solid var(--line);font-size:12px;color:var(--mid)}
+  .typed{color:var(--deep);padding:0 4px 14px}
+  .typed i{display:inline-block;width:1.5px;height:15px;background:var(--sonar);vertical-align:-2px;margin-left:1px}
+  .filechip{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:6px;background:var(--floe);border:1px solid var(--line);font-size:12.5px;margin:0 6px 10px 4px}
+  .fopt{display:grid;grid-template-columns:18px 1fr auto;gap:10px;align-items:center;padding:6px 12px}
+  .fopt.on{background:var(--sel)}
+  .fopt .p{color:var(--mid);font-size:12px}
+  /* skills screen */
+  .page2{flex:1;overflow:hidden;padding:26px 34px}
+  .page2 h2{font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:26px;letter-spacing:-.02em;margin:0 0 4px}
+  .page2 .lede{color:var(--mid);margin:0 0 18px;max-width:60ch}
+  .tabs{display:flex;gap:22px;border-bottom:1px solid var(--line);margin-bottom:14px}
+  .tabs span{padding:8px 0;color:var(--mid)}
+  .tabs span.on{color:var(--deep);font-weight:600;box-shadow:0 2px 0 var(--sonar)}
+  .tabs .add{margin-left:auto;align-self:center}
+  .pack{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:var(--white)}
+  .pack .ph{display:flex;align-items:center;gap:10px;padding:10px 14px}
+  .pack .ph b{font-weight:600}
+  .pack .meta{color:var(--mid);font-size:12.5px}
+  .pack .ph .sw{margin-left:auto}
+  .sw{width:34px;height:20px;border-radius:999px;background:var(--tick-used);position:relative;flex:none}
+  .sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--white)}
+  .sw.on{background:var(--sonar)}
+  .sw.on::after{left:16px}
+  .sk{display:grid;grid-template-columns:200px 1fr auto;gap:12px;align-items:center;padding:7px 14px;border-top:1px solid var(--line)}
+  .sk .nm{font-family:"JetBrains Mono",monospace;font-size:12.5px}
+  .sk .ds{color:var(--mid);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .more{padding:7px 14px;border-top:1px solid var(--line);color:var(--sonar);font-size:13px}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="mode" role="group" aria-label="Appearance"><span>Appearance</span><div class="seg">
+    <button data-m="system" aria-pressed="true">System</button><button data-m="light" aria-pressed="false">Light</button><button data-m="dark" aria-pressed="false">Dark</button></div></div>
+
+  <div class="intro">
+    <h1>Commands, mentions and skills</h1>
+    <p>Three additions to the app you approved, in the same look. Layout only; wording and the skill names shown are examples.</p>
+  </div>
+
+  <div class="cap">Typing / in the message box</div>
+  <p class="capsub">One list holding the app's own commands and every skill that is switched on. Typing narrows it, Enter runs the highlighted row. Skills from a pack show the pack's name first.</p>
+  <div class="win"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="t">Beluga</span></div>
+    <div class="app"><aside class="side">
+        <div class="brand"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 14c0-5 4-9 9.5-9 4.5 0 8.5 3 8.5 7 0 3-2.5 5-6 5H9l-4 3 .8-3.6C4 15.8 3 15 3 14Z" fill="currentColor"/><circle cx="15.5" cy="10.5" r="1.1" style="fill:var(--floe)"/></svg>Beluga</div>
+        <div class="newc"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New chat<kbd>⌘N</kbd></div>
+        <div class="grp">Folder</div>
+        <div class="row "><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>my-shop-app</div>
+        <div class="grp">Earlier</div>
+        <div class="row">Fix cart total rounding</div>
+        <div class="row">Explain React hooks</div>
+        <div class="grp">Library</div>
+        <div class="row "><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><path d="M17 14v6M14 17h6" stroke-linecap="round"/></svg>Skills<span class="n">38 on</span></div>
+        <div class="row">Settings</div>
+        <div class="gauge"><div><b>38</b> <span class="of">of 50 free requests left</span></div><small>Resets at 06:00.<br>Spent this month: $0.00</small></div>
+      </aside>
+      <section class="main">
+        <div class="head"><span class="ttl">Add a login page</span><span class="cost">This chat <b>7 requests</b>, $0.00</span></div>
+        <div class="stage">
+          <div class="pop">
+            <div class="hd"><span>Commands</span><span>3 of 9</span></div>
+            <div class="opt"><span class="nm">/model</span><span class="ds">Switch the model for this chat</span><span class="src">Beluga</span></div>
+            <div class="opt"><span class="nm">/compact</span><span class="ds">Shorten this chat to save requests and cost</span><span class="src">Beluga</span></div>
+            <div class="opt"><span class="nm">/usage</span><span class="ds">Show free requests left and what this chat has cost</span><span class="src">Beluga</span></div>
+            <div class="sep"></div>
+            <div class="hd"><span>Skills</span><span>4 of 38</span></div>
+            <div class="opt on"><span class="nm">/<b>superpowers:</b>brainstorming</span><span class="ds">Work out what to build before building it</span><span class="src">superpowers</span></div>
+            <div class="opt"><span class="nm">/<b>superpowers:</b>writing-plans</span><span class="ds">Turn a design into a step-by-step plan</span><span class="src">superpowers</span></div>
+            <div class="opt"><span class="nm">/frontend-design</span><span class="ds">Guidance for distinctive, intentional interfaces</span><span class="src">Anthropic</span></div>
+            <div class="opt"><span class="nm">/my-commit-style</span><span class="ds">How I like commit messages written</span><span class="src">Added by you</span></div>
+            <div class="ft"><span>↑↓ move</span><span>Enter run</span><span>Esc close</span><span style="margin-left:auto">Manage skills</span></div>
+          </div>
+          <div class="composer" style="margin-top:0">
+            <div class="typed">/<i></i></div><div class="ctl"><span class="chip">Attach</span><span class="chip">Gemma 4 31B <span class="free">Free</span></span><span class="send"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" style="stroke:var(--on-btn)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg></span></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div class="cap">Typing @ in the message box</div>
+  <p class="capsub">Lists files from the folder you opened. Picking one attaches its contents and shows it as a chip, so the model reads the real file and not your description of it.</p>
+  <div class="win"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="t">Beluga</span></div>
+    <div class="app"><aside class="side">
+        <div class="brand"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 14c0-5 4-9 9.5-9 4.5 0 8.5 3 8.5 7 0 3-2.5 5-6 5H9l-4 3 .8-3.6C4 15.8 3 15 3 14Z" fill="currentColor"/><circle cx="15.5" cy="10.5" r="1.1" style="fill:var(--floe)"/></svg>Beluga</div>
+        <div class="newc"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New chat<kbd>⌘N</kbd></div>
+        <div class="grp">Folder</div>
+        <div class="row on"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>my-shop-app</div>
+        <div class="grp">Earlier</div>
+        <div class="row">Fix cart total rounding</div>
+        <div class="row">Explain React hooks</div>
+        <div class="grp">Library</div>
+        <div class="row "><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><path d="M17 14v6M14 17h6" stroke-linecap="round"/></svg>Skills<span class="n">38 on</span></div>
+        <div class="row">Settings</div>
+        <div class="gauge"><div><b>38</b> <span class="of">of 50 free requests left</span></div><small>Resets at 06:00.<br>Spent this month: $0.00</small></div>
+      </aside>
+      <section class="main">
+        <div class="head"><span class="ttl">Add a login page</span><span class="proj">my-shop-app</span><span class="cost">This chat <b>7 requests</b>, $0.00</span></div>
+        <div class="stage">
+          <div class="pop">
+            <div class="hd"><span>Files in my-shop-app matching "rou"</span><span>3 of 212</span></div>
+            <div class="fopt on"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3h8l4 4v14H6Z"/><path d="M14 3v4h4"/></svg><span>routes.ts <span class="p">src/</span></span><span class="p">1.2 KB</span></div>
+            <div class="fopt"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3h8l4 4v14H6Z"/><path d="M14 3v4h4"/></svg><span>Router.test.tsx <span class="p">src/app/</span></span><span class="p">3.4 KB</span></div>
+            <div class="fopt"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg><span>routes/ <span class="p">src/pages/</span></span><span class="p">folder, lists its files</span></div>
+            <div class="ft"><span>↑↓ move</span><span>Enter attach</span><span>Esc close</span></div>
+          </div>
+          <div class="composer" style="margin-top:0">
+            <div><span class="filechip"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3h8l4 4v14H6Z"/><path d="M14 3v4h4"/></svg> src/App.tsx</span></div>
+            <div class="typed">Why does the login link 404? @rou<i></i></div><div class="ctl"><span class="chip">Attach</span><span class="chip">Gemma 4 31B <span class="free">Free</span></span><span class="send"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" style="stroke:var(--on-btn)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg></span></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div class="cap">The Skills screen</div>
+  <p class="capsub">Everything installed, grouped by pack, with a switch for each pack and each skill. Add your own from a folder, a ZIP or a GitHub link. Discover lists the verified packs you can install with one click.</p>
+  <div class="win"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="t">Beluga</span></div>
+    <div class="app"><aside class="side">
+        <div class="brand"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 14c0-5 4-9 9.5-9 4.5 0 8.5 3 8.5 7 0 3-2.5 5-6 5H9l-4 3 .8-3.6C4 15.8 3 15 3 14Z" fill="currentColor"/><circle cx="15.5" cy="10.5" r="1.1" style="fill:var(--floe)"/></svg>Beluga</div>
+        <div class="newc"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New chat<kbd>⌘N</kbd></div>
+        <div class="grp">Folder</div>
+        <div class="row "><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>my-shop-app</div>
+        <div class="grp">Earlier</div>
+        <div class="row">Fix cart total rounding</div>
+        <div class="row">Explain React hooks</div>
+        <div class="grp">Library</div>
+        <div class="row on"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><path d="M17 14v6M14 17h6" stroke-linecap="round"/></svg>Skills<span class="n">38 on</span></div>
+        <div class="row">Settings</div>
+        <div class="gauge"><div><b>38</b> <span class="of">of 50 free requests left</span></div><small>Resets at 06:00.<br>Spent this month: $0.00</small></div>
+      </aside>
+      <section class="main">
+        <div class="page2">
+          <h2>Skills</h2>
+          <p class="lede">Skills are instructions Beluga follows for a kind of task. 38 are on. Fewer is better on small free models.</p>
+          <div class="tabs"><span class="on">Installed</span><span>Discover</span><button class="b p add">Add a skill</button></div>
+          <div class="pack">
+            <div class="ph"><b>superpowers</b><span class="meta">15 skills, 12 on · MIT · built in</span><span class="sw on"></span></div>
+            <div class="sk"><span class="nm">brainstorming</span><span class="ds">Work out what to build before building it</span><span class="sw on"></span></div>
+            <div class="sk"><span class="nm">writing-plans</span><span class="ds">Turn a design into a step-by-step plan</span><span class="sw on"></span></div>
+            <div class="sk"><span class="nm">dispatching-parallel-agents</span><span class="ds">Needs parallel helpers, not available yet</span><span class="sw"></span></div>
+            <div class="more">Show all 15</div>
+          </div>
+          <div class="pack">
+            <div class="ph"><b>frontend-design</b><span class="meta">1 skill, on · Apache-2.0 · built in</span><span class="sw on"></span></div>
+          </div>
+          <div class="pack">
+            <div class="ph"><b>Added by you</b><span class="meta">2 skills, 2 on</span><span class="sw on"></span></div>
+            <div class="sk"><span class="nm">my-commit-style</span><span class="ds">How I like commit messages written</span><span class="sw on"></span></div>
+            <div class="sk"><span class="nm">team-code-style</span><span class="ds">Naming and formatting rules for my team</span><span class="sw on"></span></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+<script>
+  document.querySelectorAll('.seg button').forEach(function(b){
+    b.addEventListener('click',function(){
+      var m=b.dataset.m, r=document.documentElement;
+      if(m==='system'){r.removeAttribute('data-theme')}else{r.setAttribute('data-theme',m)}
+      document.querySelectorAll('.seg button').forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false')});
+    });
+  });
+</script>
+</body>
+</html>
