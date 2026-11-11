@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::{SkillEntry, acts_on_computer, parse_skill};
+use super::{ParsedSkill, SkillEntry, acts_on_computer, parse_skill};
 
 /// Largest file copied besides `SKILL.md` itself.
 const MAX_FILE_BYTES: u64 = 256_000;
@@ -315,6 +315,77 @@ fn walk_all(dir: &Path, rel: &str, files: &mut Vec<(PathBuf, String)>, skipped: 
     }
 }
 
+/// One skill folder as copied: the files beside its `SKILL.md` (relative
+/// to the folder, `/` separators) and its parsed `SKILL.md`, or why it is
+/// broken.
+#[derive(Debug)]
+pub struct CopiedSkill {
+    pub files: Vec<String>,
+    pub parsed: Option<ParsedSkill>,
+    pub broken: Option<String>,
+}
+
+/// Copies one skill folder, `src_dir`, into `dest_dir`: its `SKILL.md` and,
+/// unless it is the pack root (`in_pack == "."`), every other file of an
+/// allowed text type, at most 256,000 bytes, not a link and not left out by
+/// `leave_out`. `in_pack` is the folder's path inside pack `pack_id`; it
+/// bounds path lengths and prefixes what is pushed to `skipped`.
+/// `folder_name` names the skill when its `SKILL.md` gives no name. Nothing
+/// outside `src_dir` is read.
+pub fn copy_skill_dir(
+    pack_id: &str,
+    leave_out: &[String],
+    in_pack: &str,
+    src_dir: &Path,
+    dest_dir: &Path,
+    folder_name: &str,
+    skipped: &mut Vec<String>,
+) -> Result<CopiedSkill, String> {
+    let is_root = in_pack == ".";
+    let skill_in_pack = if is_root {
+        SKILL_FILE.to_string()
+    } else {
+        format!("{in_pack}/{SKILL_FILE}")
+    };
+    let mut out = CopiedSkill {
+        files: Vec::new(),
+        parsed: None,
+        broken: None,
+    };
+    if !is_root {
+        collect_files(
+            pack_id,
+            leave_out,
+            in_pack,
+            src_dir,
+            "",
+            &mut out.files,
+            skipped,
+        );
+    }
+    if too_long(pack_id, &skill_in_pack) {
+        skipped.push(skill_in_pack);
+        out.broken = Some("The skill's path is too long.".to_string());
+        return Ok(out);
+    }
+    let skill_src = src_dir.join(SKILL_FILE);
+    copy_file(&skill_src, &dest_dir.join(SKILL_FILE))?;
+    match fs::read(&skill_src) {
+        Err(e) => out.broken = Some(format!("Could not read the skill file: {e}")),
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Err(_) => out.broken = Some("The skill file is not valid text.".to_string()),
+            Ok(text) => match parse_skill(&text, folder_name) {
+                Ok(p) => out.parsed = Some(p),
+                Err(reason) => out.broken = Some(reason),
+            },
+        },
+    }
+    for f in &out.files {
+        copy_file(&src_dir.join(f), &dest_dir.join(f))?;
+    }
+    Ok(out)
+}
+
 /// Copies the selected skills of `src_root` into `dest` and writes
 /// `dest/pack.json`. `overrides` maps skill id to the acts-on-computer mark
 /// and wins over the text scan. `dest` must be missing or an empty folder.
@@ -349,51 +420,24 @@ pub fn copy_pack(
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default()
         };
-        let skill_in_pack = if is_root {
-            SKILL_FILE.to_string()
+        let dest_dir = if is_root {
+            dest.to_path_buf()
         } else {
-            format!("{dir}/{SKILL_FILE}")
+            dest.join(&rel)
         };
-
-        let mut files = Vec::new();
-        if !is_root {
-            collect_files(
-                &spec.id,
-                &spec.leave_out,
-                &dir,
-                &src_dir,
-                "",
-                &mut files,
-                &mut skipped,
-            );
-        }
-        let skill_src = src_dir.join(SKILL_FILE);
-        let mut broken = None;
-        let mut parsed = None;
-        if too_long(&spec.id, &skill_in_pack) {
-            skipped.push(skill_in_pack.clone());
-            broken = Some("The skill's path is too long.".to_string());
-        } else {
-            copy_file(&skill_src, &dest.join(&skill_in_pack))?;
-            match fs::read(&skill_src) {
-                Err(e) => broken = Some(format!("Could not read the skill file: {e}")),
-                Ok(bytes) => match String::from_utf8(bytes) {
-                    Err(_) => broken = Some("The skill file is not valid text.".to_string()),
-                    Ok(text) => match parse_skill(&text, &folder_name) {
-                        Ok(p) => parsed = Some(p),
-                        Err(reason) => broken = Some(reason),
-                    },
-                },
-            }
-            for f in &files {
-                let to = if is_root {
-                    f.clone()
-                } else {
-                    format!("{dir}/{f}")
-                };
-                copy_file(&src_dir.join(f), &dest.join(to))?;
-            }
-        }
+        let CopiedSkill {
+            files,
+            parsed,
+            broken,
+        } = copy_skill_dir(
+            &spec.id,
+            &spec.leave_out,
+            &dir,
+            &src_dir,
+            &dest_dir,
+            &folder_name,
+            &mut skipped,
+        )?;
 
         let mut name = parsed
             .as_ref()

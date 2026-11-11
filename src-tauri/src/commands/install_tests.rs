@@ -947,3 +947,338 @@ async fn install_extra_pack_refuses_claude_red_without_acknowledgement_and_unkno
     // Nothing was downloaded for any refusal.
     assert!(server.received_requests().await.unwrap().is_empty());
 }
+
+// ---- fix round 1 ----
+
+/// Every file name under `dir`, relative, with `/` separators.
+fn all_files(dir: &Path) -> Vec<String> {
+    fn walk(dir: &Path, rel: &str, out: &mut Vec<String>) {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in rd.flatten() {
+            let here = format!("{rel}{}", e.file_name().to_string_lossy());
+            out.push(here.clone());
+            if e.file_type().unwrap().is_dir() {
+                walk(&e.path(), &format!("{here}/"), out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, "", &mut out);
+    out
+}
+
+#[tokio::test]
+async fn a_single_skill_folder_never_reads_or_reports_its_parent() {
+    let h = local();
+    let parent = tempfile::tempdir().unwrap();
+    let p = parent.path();
+    put(p, "LICENSE", b"parent license");
+    put(p, "NOTICE.md", &[0xff, 0xfe, 0x00]);
+    put(p, "THIRD_PARTY_NOTICES.txt", &vec![b'a'; 300_000]);
+    put(p, "licenses/x.pdf", b"%PDF");
+    put(p, "licenses/deep/LICENSE.txt", b"deep");
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink("/etc/hosts", p.join("LICENSE-link")).unwrap();
+        // Unreadable: opening it would fail and be reported.
+        put(p, "LICENSE.secret", b"secret");
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(
+            p.join("LICENSE.secret"),
+            std::fs::Permissions::from_mode(0o000),
+        )
+        .unwrap();
+    }
+    let folder = p.join("tool");
+    skill(&folder, ".", "tool");
+    put(&folder, "guide.md", b"guide");
+    put(&folder, "big.md", &vec![b'a'; 300_000]);
+
+    let preview = preview_folder(&h, &folder).await.unwrap().unwrap();
+    // Only paths inside the chosen folder are reported.
+    assert_eq!(preview.skipped, ["tool/big.md"]);
+    let staged = all_files(&skills_dir(&h).join(".staging"));
+    for f in &staged {
+        let up = f.to_ascii_uppercase();
+        assert!(
+            !up.contains("LICENSE") && !up.contains("NOTICE") && !f.contains("x.pdf"),
+            "parent file staged: {f}"
+        );
+    }
+    assert!(
+        staged.iter().any(|f| f.ends_with("tool/guide.md")),
+        "{staged:?}"
+    );
+    let pack = install::confirm_add(&h.state, &preview.token).unwrap();
+    assert_eq!(names(&pack), ["tool"]);
+}
+
+const NO_NAME: &[u8] = b"# Handy\n\nDoes handy things.\n";
+
+#[tokio::test]
+async fn the_fallback_name_of_a_single_skill_folder_is_its_own_name() {
+    let h = local();
+    let parent = tempfile::tempdir().unwrap();
+    let folder = parent.path().join("My Tool");
+    put(&folder, "SKILL.md", NO_NAME);
+    let preview = preview_folder(&h, &folder).await.unwrap().unwrap();
+    assert_eq!(preview.skills[0].name, "my-tool");
+}
+
+#[tokio::test]
+async fn the_fallback_name_of_a_zip_whose_root_is_a_skill_is_the_zip_name() {
+    let h = local();
+    let src = tempfile::tempdir().unwrap();
+    let file = zip_file(src.path(), &[("SKILL.md", NO_NAME), ("ref.md", b"r")]);
+    let named = src.path().join("Handy Helper.zip");
+    std::fs::rename(&file, &named).unwrap();
+    *h.dialogs.zip.lock().unwrap() = Some(named);
+    let preview = install::preview_add(&h.state, AddSource::Zip)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(preview.skills.len(), 1);
+    assert_eq!(preview.skills[0].name, "handy-helper");
+    install::confirm_add(&h.state, &preview.token).unwrap();
+    let d = super::skills::get_skill(&h.state, "handy-helper").unwrap();
+    assert_eq!(d.files, ["ref.md"]);
+}
+
+#[tokio::test]
+async fn the_fallback_name_of_a_repository_whose_root_is_a_skill_is_the_repository_name() {
+    let server = MockServer::start().await;
+    let top = format!("o-r-{SHA}");
+    github(
+        &server,
+        targz(&[
+            (&format!("{top}/SKILL.md"), NO_NAME),
+            (&format!("{top}/notes.md"), b"n"),
+        ]),
+    )
+    .await;
+    let h = signed_in(&server.uri());
+    let preview = install::preview_add(
+        &h.state,
+        AddSource::Github {
+            url: "https://github.com/o/r.git".into(),
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(preview.skills.len(), 1);
+    assert_eq!(preview.skills[0].name, "r");
+}
+
+#[tokio::test]
+async fn an_add_of_more_than_ten_skills_stores_them_all_off() {
+    let h = local();
+    let src = tempfile::tempdir().unwrap();
+    for i in 0..11 {
+        skill(src.path(), &format!("s{i}"), &format!("s{i}"));
+    }
+    let preview = preview_folder(&h, src.path()).await.unwrap().unwrap();
+    assert_eq!(preview.skills.len(), 11);
+    assert!(preview.skills.iter().all(|s| !s.on && !s.available));
+    let pack = install::confirm_add(&h.state, &preview.token).unwrap();
+    assert_eq!(pack.skills.len(), 11);
+    assert!(pack.skills.iter().all(|s| !s.on));
+    for s in &pack.skills {
+        assert_eq!(
+            h.state.store.switch(&s.id).unwrap(),
+            Some(false),
+            "{}",
+            s.id
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_add_of_ten_or_fewer_skills_starts_on() {
+    let h = local();
+    let src = tempfile::tempdir().unwrap();
+    for i in 0..3 {
+        skill(src.path(), &format!("s{i}"), &format!("s{i}"));
+    }
+    let preview = preview_folder(&h, src.path()).await.unwrap().unwrap();
+    assert!(preview.skills.iter().all(|s| s.on && s.available));
+    let pack = install::confirm_add(&h.state, &preview.token).unwrap();
+    assert!(pack.skills.iter().all(|s| s.on));
+}
+
+#[tokio::test]
+async fn replacing_a_switched_off_skill_keeps_it_off_and_the_preview_says_so() {
+    let h = local();
+    let one = tempfile::tempdir().unwrap();
+    skill(one.path(), "w", "w");
+    skill(one.path(), "v", "v");
+    add_folder(&h, one.path()).await;
+    super::skills::set_skill_on(&h.state, "w", false).unwrap();
+
+    let preview = preview_folder(&h, one.path()).await.unwrap().unwrap();
+    let on: Vec<_> = preview
+        .skills
+        .iter()
+        .map(|s| (s.id.as_str(), s.on))
+        .collect();
+    assert_eq!(on, [("v", true), ("w", false)]);
+    let pack = install::confirm_add(&h.state, &preview.token).unwrap();
+    let on: Vec<_> = pack.skills.iter().map(|s| (s.id.as_str(), s.on)).collect();
+    assert_eq!(on, [("v", true), ("w", false)]);
+}
+
+#[tokio::test]
+async fn a_github_link_to_a_listed_pack_is_refused_without_a_request() {
+    let server = MockServer::start().await;
+    let h = signed_in(&server.uri());
+    for url in [
+        "https://github.com/SnailSploit/Claude-Red",
+        "https://github.com/snailsploit/claude-red.git",
+        "https://github.com/SNAILSPLOIT/CLAUDE-RED/tree/main/Skills/web",
+        "https://github.com/obra/superpowers/tree/main/skills/brainstorming",
+        "https://github.com/vercel-labs/agent-skills",
+    ] {
+        let r = install::preview_add(&h.state, AddSource::Github { url: url.into() }).await;
+        assert_eq!(
+            r,
+            Err(err(
+                "That pack is already listed in Skills. Install it from there."
+            )),
+            "{url}"
+        );
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+/// A harness whose GitHub client accepts redirects only to `allowed`.
+fn redirect_harness(
+    server: &MockServer,
+    allowed: Vec<String>,
+) -> (Arc<AppState>, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let http = HttpClients::from_builder_for(
+        || reqwest::Client::builder().no_proxy(),
+        HttpTimeouts::PRODUCTION,
+        allowed,
+    )
+    .unwrap();
+    let state = AppState::new(
+        http,
+        server.uri(),
+        Arc::new(SessionStore::default()),
+        Store::in_memory().unwrap(),
+        dir.path().to_path_buf(),
+        dir.path().join("none"),
+        Arc::new(NoEvents),
+        Arc::new(FakeDialogs::default()),
+    )
+    .with_github(crate::state::GithubBases {
+        api: server.uri(),
+        codeload: server.uri(),
+    });
+    (Arc::new(state), dir)
+}
+
+fn redirect_to(location: &str) -> ResponseTemplate {
+    ResponseTemplate::new(302).insert_header("location", location)
+}
+
+#[tokio::test]
+async fn github_redirects_to_another_host_are_not_followed() {
+    let server = MockServer::start().await;
+    let elsewhere = MockServer::start().await;
+    github(&elsewhere, repo_archive()).await;
+    mock_get(
+        &server,
+        "/repos/o/r",
+        redirect_to(&format!("{}/repos/o/r", elsewhere.uri())),
+    )
+    .await;
+    let (state, _dir) = redirect_harness(&server, vec![server.uri()]);
+    let r = install::preview_add(
+        &state,
+        AddSource::Github {
+            url: "https://github.com/o/r".into(),
+        },
+    )
+    .await;
+    assert_eq!(
+        r,
+        Err(err(
+            "Could not download from GitHub. Check your connection and the link."
+        ))
+    );
+    assert!(elsewhere.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn github_redirects_on_an_allowed_host_are_followed_up_to_five_hops() {
+    // Five hops: followed.
+    let server = MockServer::start().await;
+    github(&server, repo_archive()).await;
+    let hops = ["/repos/o/r/commits/v2", "/h1", "/h2", "/h3", "/h4"];
+    for (i, from) in hops.iter().enumerate() {
+        let to = hops
+            .get(i + 1)
+            .copied()
+            .unwrap_or("/repos/o/r/commits/main");
+        mock_get(&server, from, redirect_to(&format!("{}{to}", server.uri()))).await;
+    }
+    let (state, _dir) = redirect_harness(&server, vec![server.uri()]);
+    let r = install::preview_add(
+        &state,
+        AddSource::Github {
+            url: "https://github.com/o/r/tree/v2".into(),
+        },
+    )
+    .await;
+    assert!(matches!(r, Ok(Some(_))), "{r:?}");
+    let paths: Vec<_> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.url.path().to_string())
+        .collect();
+    assert!(paths.contains(&"/h4".to_string()), "{paths:?}");
+
+    // Six hops: stopped.
+    let server = MockServer::start().await;
+    github(&server, repo_archive()).await;
+    let hops = ["/repos/o/r/commits/v2", "/h1", "/h2", "/h3", "/h4", "/h5"];
+    for (i, from) in hops.iter().enumerate() {
+        let to = hops
+            .get(i + 1)
+            .copied()
+            .unwrap_or("/repos/o/r/commits/main");
+        mock_get(&server, from, redirect_to(&format!("{}{to}", server.uri()))).await;
+    }
+    let (state, _dir) = redirect_harness(&server, vec![server.uri()]);
+    let r = install::preview_add(
+        &state,
+        AddSource::Github {
+            url: "https://github.com/o/r/tree/v2".into(),
+        },
+    )
+    .await;
+    assert_eq!(
+        r,
+        Err(err(
+            "Could not download from GitHub. Check your connection and the link."
+        ))
+    );
+}
+
+#[test]
+fn the_production_github_client_allows_only_the_three_github_hosts_over_https() {
+    assert_eq!(
+        crate::state::GITHUB_ORIGINS,
+        [
+            "https://github.com",
+            "https://api.github.com",
+            "https://codeload.github.com"
+        ]
+    );
+}

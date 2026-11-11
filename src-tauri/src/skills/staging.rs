@@ -51,6 +51,8 @@ impl Drop for Stage {
 pub struct StagedAdd {
     pub token: String,
     pub stage: Stage,
+    /// The staged skills' ids (their folder names).
+    pub names: Vec<String>,
 }
 
 /// Moves `new` to `dest`, first moving an existing `dest` aside to `old`.

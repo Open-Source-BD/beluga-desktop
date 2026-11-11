@@ -2,9 +2,10 @@
 //! removing the extra packs. Local paths only ever come from a system dialog
 //! the core opens; an add is previewed, then confirmed by token.
 
+use super::blocking;
 use crate::engine::UiError;
 use crate::skills::archive::{Limits, download_github_archive, unpack_zip};
-use crate::skills::github::{parse_github_url, resolve_commit};
+use crate::skills::github::{GithubLink, parse_github_url, resolve_commit};
 use crate::skills::install::{self as packs, ExtraPack};
 use crate::skills::library::{PackView, SkillView};
 use crate::skills::staging::{Stage, StagedAdd};
@@ -30,24 +31,29 @@ pub struct AddPreview {
 
 const NOT_AVAILABLE: &str = "This pack is not available. Check it in Skills.";
 const NOT_A_LINK: &str = "That is not a GitHub link.";
+const ALREADY_LISTED: &str = "That pack is already listed in Skills. Install it from there.";
 const EXPIRED: &str = "That add has expired. Start again.";
 const ACCEPT_FIRST: &str = "Read and accept the notice before installing this pack.";
 const COULD_NOT_STAGE: &str = "Could not add those skills on this computer.";
 const BAD_ZIP: &str = "That ZIP file could not be read.";
 /// A local ZIP may unpack to at most 100 MB.
 const ZIP_TOTAL_BYTES: u64 = 100 * 1024 * 1024;
+/// An add of more skills than this stores them all switched off.
+const FEW_ON: usize = 10;
 
 fn switches(_: crate::store::StoreError) -> UiError {
     UiError::other("Could not save your skill settings on this computer.")
 }
 
-/// Runs blocking work (a dialog, file copying) off the async workers.
-async fn off_thread<T: Send + 'static>(
-    f: impl FnOnce() -> T + Send + 'static,
-) -> Result<T, UiError> {
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|_| UiError::other("That did not finish. Try again."))
+/// Removes a stage's folder off the async workers.
+async fn discard(stage: Option<impl Send + 'static>) {
+    if let Some(stage) = stage {
+        let _ = blocking(move || {
+            drop(stage);
+            Ok(())
+        })
+        .await;
+    }
 }
 
 fn pack_view(s: &AppState, id: &str) -> Result<PackView, UiError> {
@@ -107,48 +113,76 @@ pub fn remove_pack(s: &AppState, id: &str) -> Result<(), UiError> {
         .map_err(switches)
 }
 
+/// True when `owner/repo` is a pack the lock lists, bundled or not: those
+/// are installed from Skills, where any notice they need is shown.
+fn listed_in_lock(s: &AppState, link: &GithubLink) -> bool {
+    let wanted = link.repo_path().to_ascii_lowercase();
+    s.library.lock_specs().iter().any(|p| {
+        let repo = p.repo.to_ascii_lowercase();
+        repo.strip_suffix(".git").unwrap_or(&repo) == wanted
+    })
+}
+
 /// Stages the skills found at `source`; `None` when the user cancels the
 /// dialog. Any earlier preview is discarded first.
 pub async fn preview_add(s: &AppState, source: AddSource) -> Result<Option<AddPreview>, UiError> {
-    drop(s.staged_add().take());
+    let earlier = s.staged_add().take();
+    discard(earlier).await;
     let new_stage = || Stage::new(&s.skills_dir()).map_err(|_| UiError::other(COULD_NOT_STAGE));
-    let (stage, root) = match source {
+    // The stage, the folder to look in, and the name a skill at its root
+    // falls back to: the chosen folder, ZIP file or repository, never a
+    // staging folder's name.
+    let (stage, root, fallback) = match source {
         AddSource::Folder => {
             let dialogs = s.dialogs.clone();
-            let Some(picked) = off_thread(move || dialogs.pick_folder()).await? else {
+            let Some(picked) = blocking(move || Ok(dialogs.pick_folder())).await? else {
                 return Ok(None);
             };
             let real = std::fs::canonicalize(&picked)
                 .ok()
                 .filter(|p| p.is_dir())
                 .ok_or_else(|| UiError::other(NO_SKILLS))?;
-            (new_stage()?, real)
+            let name = real
+                .file_name()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+            (new_stage()?, real, name)
         }
         AddSource::Zip => {
             let dialogs = s.dialogs.clone();
-            let Some(picked) = off_thread(move || dialogs.pick_zip()).await? else {
+            let Some(picked) = blocking(move || Ok(dialogs.pick_zip())).await? else {
                 return Ok(None);
             };
+            let name = picked
+                .file_stem()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
             let stage = new_stage()?;
-            let dest = stage.join("unzipped");
-            let to = dest.clone();
             let limits = Limits {
                 max_total_bytes: ZIP_TOTAL_BYTES,
                 ..Limits::default()
             };
-            off_thread(move || unpack_zip(&picked, &to, &limits))
-                .await?
-                .map_err(|_| UiError::other(BAD_ZIP))?;
-            (stage, dest)
+            // On failure the stage is dropped on the blocking thread.
+            let stage =
+                blocking(
+                    move || match unpack_zip(&picked, &stage.join("unzipped"), &limits) {
+                        Ok(()) => Ok(stage),
+                        Err(_) => Err(UiError::other(BAD_ZIP)),
+                    },
+                )
+                .await?;
+            let root = stage.join("unzipped");
+            (stage, root, name)
         }
         AddSource::Github { url } => {
             let link = parse_github_url(&url).ok_or_else(|| UiError::other(NOT_A_LINK))?;
+            if listed_in_lock(s, &link) {
+                return Err(UiError::other(ALREADY_LISTED));
+            }
             let failed = || UiError::other(packs::DOWNLOAD_FAILED);
             let sha = resolve_commit(&s.github_http, &s.github.api, &link)
                 .await
                 .map_err(|_| failed())?;
             let stage = new_stage()?;
-            let top = download_github_archive(
+            let downloaded = download_github_archive(
                 &s.github_http,
                 &s.github.codeload,
                 &link.repo_path(),
@@ -156,38 +190,65 @@ pub async fn preview_add(s: &AppState, source: AddSource) -> Result<Option<AddPr
                 &stage.join("download"),
                 &Limits::default(),
             )
-            .await
-            .map_err(|_| failed())?;
-            let mut root = top;
-            if let Some(sub) = &link.sub_path {
-                root.extend(sub.split('/'));
-            }
-            (stage, root)
+            .await;
+            let Ok(mut root) = downloaded else {
+                discard(Some(stage)).await;
+                return Err(failed());
+            };
+            let name = match &link.sub_path {
+                Some(sub) => {
+                    root.extend(sub.split('/'));
+                    sub.rsplit('/').next().unwrap_or(sub).to_string()
+                }
+                None => link.repo.clone(),
+            };
+            (stage, root, name)
         }
     };
-    let work = stage.path().to_path_buf();
-    let staged = off_thread(move || yours::stage_add(&root, &work)).await??;
+    let (staged, stage) = blocking(move || {
+        yours::stage_add(&root, &fallback, stage.path()).map(|staged| (staged, stage))
+    })
+    .await?;
+    let names: Vec<String> = staged.skills.iter().map(|e| e.id.clone()).collect();
+    // What confirming will do: a stored switch is kept; otherwise a large
+    // add starts off and a small one on.
+    let few = names.len() <= FEW_ON;
+    let pack_on = s
+        .store
+        .switch(&format!("pack/{YOURS}"))
+        .ok()
+        .flatten()
+        .unwrap_or(true);
     let token = uuid::Uuid::new_v4().simple().to_string();
     let preview = AddPreview {
         token: token.clone(),
         skills: staged
             .skills
             .iter()
-            .map(|e| SkillView {
-                id: e.id.clone(),
-                name: e.name.clone(),
-                description: e.description.clone(),
-                on: true,
-                acts_on_computer: e.acts_on_computer,
-                broken: e.broken.clone(),
-                body_chars: e.body_chars,
-                available: e.broken.is_none(),
+            .map(|e| {
+                let stored = s.store.switch(&e.id).ok().flatten();
+                let on = e.broken.is_none() && stored.unwrap_or(few);
+                SkillView {
+                    id: e.id.clone(),
+                    name: e.name.clone(),
+                    description: e.description.clone(),
+                    on,
+                    acts_on_computer: e.acts_on_computer,
+                    broken: e.broken.clone(),
+                    body_chars: e.body_chars,
+                    available: on && pack_on,
+                }
             })
             .collect(),
         skipped: staged.skipped,
     };
     // Replaces (and so removes) any preview that finished meanwhile.
-    *s.staged_add() = Some(StagedAdd { token, stage });
+    let replaced = s.staged_add().replace(StagedAdd {
+        token,
+        stage,
+        names,
+    });
+    discard(replaced).await;
     Ok(Some(preview))
 }
 
@@ -204,16 +265,33 @@ fn take_staged(s: &AppState, token: &str) -> Result<StagedAdd, UiError> {
 }
 
 /// Moves the staged skills into "Added by you". The staged copy is removed
-/// whether or not this succeeds.
+/// whether or not this succeeds. Blocks on file moves; run it off the
+/// async workers.
 pub fn confirm_add(s: &AppState, token: &str) -> Result<PackView, UiError> {
     let add = take_staged(s, token)?;
-    {
+    // A large add is stored off, except skills that already have a switch.
+    let mut set_off = Vec::new();
+    if add.names.len() > FEW_ON {
+        for name in &add.names {
+            if s.store.switch(name).map_err(switches)?.is_none() {
+                s.store.set_switch(name, false).map_err(switches)?;
+                set_off.push(name);
+            }
+        }
+    }
+    let committed = {
         let _held = s.skills_write();
         yours::commit_add(
             &add.stage.join(STAGED_SKILLS),
             &s.skills_dir().join(YOURS),
             add.stage.path(),
-        )?;
+        )
+    };
+    if let Err(e) = committed {
+        for name in set_off {
+            let _ = s.store.delete_switch(name);
+        }
+        return Err(e);
     }
     drop(add);
     s.library.reload();

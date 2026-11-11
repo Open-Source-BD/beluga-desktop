@@ -28,6 +28,13 @@ pub struct GithubBases {
     pub codeload: String,
 }
 
+/// The only origins the GitHub client follows a redirect to.
+pub const GITHUB_ORIGINS: [&str; 3] = [
+    "https://github.com",
+    "https://api.github.com",
+    "https://codeload.github.com",
+];
+
 impl GithubBases {
     pub fn production() -> Self {
         Self {
@@ -172,18 +179,50 @@ impl HttpClients {
         Self::from_builder(reqwest::Client::builder, timeouts)
     }
 
-    /// `base` makes the starting builder for each client.
+    /// `base` makes the starting builder for each client. The GitHub client
+    /// follows redirects only to `GITHUB_ORIGINS`.
     pub fn from_builder(
         base: impl Fn() -> reqwest::ClientBuilder,
         t: HttpTimeouts,
+    ) -> reqwest::Result<Self> {
+        let origins = GITHUB_ORIGINS.iter().map(|o| o.to_string()).collect();
+        Self::from_builder_for(base, t, origins)
+    }
+
+    /// Like `from_builder`, with the origins (`scheme://host[:port]`) the
+    /// GitHub client may follow a redirect to; tests pass a mock server's.
+    pub fn from_builder_for(
+        base: impl Fn() -> reqwest::ClientBuilder,
+        t: HttpTimeouts,
+        github_origins: Vec<String>,
     ) -> reqwest::Result<Self> {
         let limited = || base().connect_timeout(t.connect).read_timeout(t.read);
         Ok(Self {
             stream: limited().build()?,
             api: limited().timeout(t.request).build()?,
-            github: limited().user_agent(crate::brand::APP_NAME).build()?,
+            github: limited()
+                .user_agent(crate::brand::APP_NAME)
+                .redirect(github_redirects(github_origins))
+                .build()?,
         })
     }
+}
+
+/// Most redirects the GitHub client follows for one request.
+const MAX_GITHUB_REDIRECTS: usize = 5;
+
+/// Follows a redirect only to one of `origins`, at most five times; any
+/// other redirect is returned as is, which callers treat as a failure.
+fn github_redirects(origins: Vec<String>) -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(move |attempt| {
+        let origin = attempt.url().origin().ascii_serialization();
+        // `previous` holds every URL requested so far, the first included.
+        if attempt.previous().len() > MAX_GITHUB_REDIRECTS || !origins.contains(&origin) {
+            attempt.stop()
+        } else {
+            attempt.follow()
+        }
+    })
 }
 
 pub struct RunningTurn {

@@ -18,3 +18,12 @@ pub mod turn;
 mod install_tests;
 #[cfg(test)]
 mod tests;
+
+/// Runs blocking work (a dialog, file moves) off the async workers.
+pub(crate) async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, crate::engine::UiError> + Send + 'static,
+) -> Result<T, crate::engine::UiError> {
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|_| crate::engine::UiError::other("That did not finish. Try again."))?
+}

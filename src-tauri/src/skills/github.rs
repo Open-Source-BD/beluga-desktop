@@ -51,6 +51,7 @@ pub fn parse_github_url(url: &str) -> Option<GithubLink> {
     let segs: Vec<&str> = rest.split('/').collect();
     let owner = *segs.first()?;
     let repo = *segs.get(1)?;
+    let repo = repo.strip_suffix(".git").unwrap_or(repo);
     if !safe_segment(owner) {
         return None;
     }
@@ -63,7 +64,7 @@ pub fn parse_github_url(url: &str) -> Option<GithubLink> {
         })
     };
     match segs.len() {
-        2 => link(repo.strip_suffix(".git").unwrap_or(repo), None, None),
+        2 => link(repo, None, None),
         n if n >= 4 && segs[2] == "tree" && safe_segment(segs[3]) => {
             let sub = segs[4..].join("/");
             if sub.is_empty() {
@@ -79,8 +80,9 @@ pub fn parse_github_url(url: &str) -> Option<GithubLink> {
 }
 
 /// GETs `url` with the app's name as `User-Agent` and no credential, reading
-/// at most `MAX_API_BYTES`.
-async fn get_small(http: &reqwest::Client, url: &str, accept: &str) -> Result<Vec<u8>, ()> {
+/// at most `MAX_API_BYTES`. The error says what went wrong, for logs and
+/// tests; the user sees one fixed message.
+async fn get_small(http: &reqwest::Client, url: &str, accept: &str) -> Result<Vec<u8>, String> {
     use futures_util::StreamExt;
     let resp = http
         .get(url)
@@ -88,28 +90,28 @@ async fn get_small(http: &reqwest::Client, url: &str, accept: &str) -> Result<Ve
         .header(reqwest::header::ACCEPT, accept)
         .send()
         .await
-        .map_err(|_| ())?;
+        .map_err(|_| "could not reach GitHub".to_string())?;
     if !resp.status().is_success() {
-        return Err(());
+        return Err(format!("GitHub answered {}", resp.status().as_u16()));
     }
     let mut body = Vec::new();
     let mut stream = resp.bytes_stream();
     while let Some(chunk) = stream.next().await {
-        body.extend_from_slice(&chunk.map_err(|_| ())?);
+        body.extend_from_slice(&chunk.map_err(|_| "the reply was interrupted".to_string())?);
         if body.len() > MAX_API_BYTES {
-            return Err(());
+            return Err("the reply is too large".to_string());
         }
     }
     Ok(body)
 }
 
 /// The commit SHA the link points at, resolving the default branch first
-/// when the link names no ref. `Err` for any failure.
+/// when the link names no ref. `Err` describes the failure.
 pub async fn resolve_commit(
     http: &reqwest::Client,
     api_base: &str,
     link: &GithubLink,
-) -> Result<String, ()> {
+) -> Result<String, String> {
     let base = format!(
         "{}/repos/{}/{}",
         api_base.trim_end_matches('/'),
@@ -120,10 +122,13 @@ pub async fn resolve_commit(
         Some(r) => r.clone(),
         None => {
             let body = get_small(http, &base, "application/vnd.github+json").await?;
-            let v: serde_json::Value = serde_json::from_slice(&body).map_err(|_| ())?;
-            let branch = v["default_branch"].as_str().ok_or(())?;
+            let v: serde_json::Value = serde_json::from_slice(&body)
+                .map_err(|_| "the repository reply is not valid".to_string())?;
+            let branch = v["default_branch"]
+                .as_str()
+                .ok_or("the repository has no default branch")?;
             if !safe_segment(branch) {
-                return Err(());
+                return Err("the default branch name is not supported".to_string());
             }
             branch.to_string()
         }
@@ -135,13 +140,13 @@ pub async fn resolve_commit(
     )
     .await?;
     let sha = String::from_utf8(body)
-        .map_err(|_| ())?
+        .map_err(|_| "the commit reply is not text".to_string())?
         .trim()
         .to_ascii_lowercase();
     if sha.len() == 40 && sha.chars().all(|c| c.is_ascii_hexdigit()) {
         Ok(sha)
     } else {
-        Err(())
+        Err("the commit reply is not a SHA".to_string())
     }
 }
 
@@ -172,6 +177,14 @@ mod tests {
             (
                 "https://github.com/o/r/tree/main/skills/x",
                 link("o", "r", Some("main"), Some("skills/x")),
+            ),
+            (
+                "https://github.com/o/r.git/tree/main",
+                link("o", "r", Some("main"), None),
+            ),
+            (
+                "https://github.com/o/r.git/tree/main/a",
+                link("o", "r", Some("main"), Some("a")),
             ),
             (
                 "https://github.com/o/r/tree/main/skills/x/",

@@ -8,7 +8,9 @@ use super::chats::{ChatUsage, TakenMessage};
 use super::install::{AddPreview, AddSource};
 use super::skills::SkillsStatus;
 use super::turn::{AttachmentInput, TurnResult};
-use super::{auth, chat_state, chats, compact, export, folder, install, models, skills, turn};
+use super::{
+    auth, blocking, chat_state, chats, compact, export, folder, install, models, skills, turn,
+};
 use crate::auth::callback::PRODUCTION_TIMEOUT;
 use crate::engine::{EngineEvent, UiError};
 use crate::folder::FileList;
@@ -171,15 +173,6 @@ pub async fn compact_chat(
     compact::compact_chat(&state, &chat_id, &model_id, keep.as_deref()).await
 }
 
-/// The dialog blocks until the user answers, so it runs off the async workers.
-async fn blocking<T: Send + 'static>(
-    f: impl FnOnce() -> Result<T, UiError> + Send + 'static,
-) -> Result<T, UiError> {
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|_| UiError::other("That did not finish. Try again."))?
-}
-
 #[tauri::command]
 pub async fn export_chat_with_dialog(
     state: S<'_>,
@@ -322,7 +315,8 @@ pub async fn install_extra_pack(
 
 #[tauri::command]
 pub async fn remove_pack(state: S<'_>, id: String) -> Result<(), UiError> {
-    install::remove_pack(&state, &id)
+    let s = state.inner().clone();
+    blocking(move || install::remove_pack(&s, &id)).await
 }
 
 /// Opens the folder or ZIP dialog itself (off the async workers) for those sources.
@@ -333,15 +327,18 @@ pub async fn preview_add(state: S<'_>, source: AddSource) -> Result<Option<AddPr
 
 #[tauri::command]
 pub async fn confirm_add(state: S<'_>, token: String) -> Result<PackView, UiError> {
-    install::confirm_add(&state, &token)
+    let s = state.inner().clone();
+    blocking(move || install::confirm_add(&s, &token)).await
 }
 
 #[tauri::command]
 pub async fn cancel_add(state: S<'_>, token: String) -> Result<(), UiError> {
-    install::cancel_add(&state, &token)
+    let s = state.inner().clone();
+    blocking(move || install::cancel_add(&s, &token)).await
 }
 
 #[tauri::command]
 pub async fn remove_skill(state: S<'_>, id: String) -> Result<(), UiError> {
-    install::remove_skill(&state, &id)
+    let s = state.inner().clone();
+    blocking(move || install::remove_skill(&s, &id)).await
 }

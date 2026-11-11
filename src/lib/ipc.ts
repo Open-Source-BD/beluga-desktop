@@ -314,6 +314,10 @@ export type AddSource =
 /** Skills found and staged by `previewAdd`; confirm or cancel with `token`. */
 export interface AddPreview {
   token: string;
+  /**
+   * `on` is what confirming will do: a skill's stored switch is kept; otherwise
+   * an add of more than 10 skills starts them all off, a smaller one on.
+   */
   skills: SkillView[];
   /** Files left out, relative to the source. */
   skipped: string[];
@@ -328,7 +332,10 @@ export const installExtraPack = (id: string, acknowledged: boolean) =>
 /** Removes an installed extra pack; built-in packs and "yours" are refused. */
 export const removePack = (id: string) => invoke<void>("remove_pack", { id });
 
-/** Stages the skills found at `source`; `null` when the user cancels the dialog. */
+/**
+ * Stages the skills found at `source`; `null` when the user cancels the dialog.
+ * A GitHub link to a pack already listed in Skills is refused.
+ */
 export const previewAdd = (source: AddSource) =>
   invoke<AddPreview | null>("preview_add", { source });
 

@@ -7,7 +7,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::pack::{
-    PackManifest, PackSpec, copy_pack, has_skill_md, select_skill_dirs, tree_checksum,
+    PackManifest, PackSpec, copy_pack, copy_skill_dir, has_skill_md, select_skill_dirs,
+    tree_checksum,
 };
 use super::staging::{swap_back, swap_into, tree_bytes};
 use super::{SkillEntry, acts_on_computer, parse_skill};
@@ -101,67 +102,75 @@ fn under(root: &Path, rel: &str) -> PathBuf {
 
 /// Finds the skills in `source` and copies their text files into
 /// `work/skills/<name>/`, applying the add limits. The source itself is the
-/// skill when it has a `SKILL.md`; otherwise every non-hidden folder with
-/// one, up to four levels down. Only `copy_pack` reads the source.
-pub fn stage_add(source: &Path, work: &Path) -> Result<Staged, UiError> {
-    // copy_pack does not copy the extra files of a pack-root skill, so a
-    // source that is itself a skill is selected by name from its parent.
-    let (root, select) = if has_skill_md(source) {
-        let name = source
-            .file_name()
-            .and_then(|n| n.to_str())
-            .filter(|n| !n.contains('*'))
-            .ok_or_else(|| other(NO_SKILLS))?;
-        let parent = source.parent().ok_or_else(|| other(NO_SKILLS))?;
-        (parent.to_path_buf(), vec![name.to_string()])
+/// skill when it has a `SKILL.md`, named `fallback_name` unless its
+/// `SKILL.md` names it; otherwise every non-hidden folder with one, up to
+/// four levels down. Nothing outside `source` is read, and `skipped` lists
+/// only paths inside it.
+pub fn stage_add(source: &Path, fallback_name: &str, work: &Path) -> Result<Staged, UiError> {
+    let copy = work.join("copy");
+    // Each skill found: its name, its copied folder and the files beside SKILL.md.
+    let mut found: Vec<(String, PathBuf, Vec<String>)> = Vec::new();
+    let mut skipped = Vec::new();
+    if has_skill_md(source) {
+        let in_pack = match fallback_name {
+            "" | "." | ".." => "skill",
+            name => name,
+        };
+        let c = copy_skill_dir(YOURS, &[], in_pack, source, &copy, in_pack, &mut skipped)
+            .map_err(|_| other(COULD_NOT_ADD))?;
+        let name = c.parsed.map_or_else(|| in_pack.to_string(), |p| p.name);
+        found.push((name, copy.clone(), c.files));
     } else {
         let depths: Vec<String> = DEPTHS.iter().map(|d| d.to_string()).collect();
-        let found = select_skill_dirs(source, &depths, &[])
+        let select: Vec<String> = select_skill_dirs(source, &depths, &[])
             .into_iter()
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .filter(|d| d.split('/').all(literal_ok))
             .collect();
-        (source.to_path_buf(), found)
-    };
-    if select.is_empty() {
-        return Err(other(NO_SKILLS));
+        if select.is_empty() {
+            return Err(other(NO_SKILLS));
+        }
+        if select.len() > MAX_SKILLS {
+            return Err(other(TOO_MANY));
+        }
+        let spec = PackSpec {
+            id: YOURS.to_string(),
+            title: String::new(),
+            repo: String::new(),
+            commit: String::new(),
+            select,
+            exclude: Vec::new(),
+            license: String::new(),
+            bundled: false,
+            about: String::new(),
+            checksum: String::new(),
+            leave_out: Vec::new(),
+        };
+        let manifest =
+            copy_pack(source, &spec, &copy, &HashMap::new()).map_err(|_| other(COULD_NOT_ADD))?;
+        skipped = manifest.skipped;
+        found = manifest
+            .skills
+            .into_iter()
+            .map(|e| (e.name, under(&copy, &e.dir), e.files))
+            .collect();
     }
-    if select.len() > MAX_SKILLS {
-        return Err(other(TOO_MANY));
-    }
-    let spec = PackSpec {
-        id: YOURS.to_string(),
-        title: String::new(),
-        repo: String::new(),
-        commit: String::new(),
-        select,
-        exclude: Vec::new(),
-        license: String::new(),
-        bundled: false,
-        about: String::new(),
-        checksum: String::new(),
-        leave_out: Vec::new(),
-    };
-    let copy = work.join("copy");
-    let manifest =
-        copy_pack(&root, &spec, &copy, &HashMap::new()).map_err(|_| other(COULD_NOT_ADD))?;
 
     let out = work.join(STAGED_SKILLS);
     fs::create_dir_all(&out).map_err(|_| other(COULD_NOT_ADD))?;
     let mut taken = HashSet::new();
-    for e in &manifest.skills {
-        let from = under(&copy, &e.dir);
-        // A SKILL.md copy_pack had to skip (path too long) is in `skipped`.
+    for (name, from, files) in &found {
+        // A SKILL.md that had to be skipped (path too long) is in `skipped`.
         if !from.join(SKILL_FILE).is_file() {
             continue;
         }
-        let to = out.join(unique(sanitize_name(&e.name), &mut taken));
-        for f in std::iter::once(SKILL_FILE).chain(e.files.iter().map(String::as_str)) {
+        let to = out.join(unique(sanitize_name(name), &mut taken));
+        for f in std::iter::once(SKILL_FILE).chain(files.iter().map(String::as_str)) {
             let target = under(&to, f);
             let copied = target
                 .parent()
                 .map_or(Ok(()), fs::create_dir_all)
-                .and_then(|_| fs::copy(under(&from, f), &target));
+                .and_then(|_| fs::copy(under(from, f), &target));
             copied.map_err(|_| other(COULD_NOT_ADD))?;
         }
     }
@@ -175,7 +184,7 @@ pub fn stage_add(source: &Path, work: &Path) -> Result<Staged, UiError> {
     names.sort();
     Ok(Staged {
         skills: names.iter().map(|n| entry_for(&out, n)).collect(),
-        skipped: manifest.skipped,
+        skipped,
     })
 }
 
