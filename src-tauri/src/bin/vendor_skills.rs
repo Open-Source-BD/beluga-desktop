@@ -3,6 +3,7 @@
 //! ```text
 //! cargo run --manifest-path src-tauri/Cargo.toml --features vendor-tool --bin vendor-skills
 //! cargo run --manifest-path src-tauri/Cargo.toml --features vendor-tool --bin vendor-skills -- --check
+//! cargo run --manifest-path src-tauri/Cargo.toml --features vendor-tool --bin vendor-skills -- --extras
 //! ```
 //!
 //! Without arguments it downloads each bundled pack's GitHub archive at its
@@ -10,6 +11,9 @@
 //! into `src-tauri/resources/skills/<id>/` with `copy_pack`, and records each
 //! pack's checksum in the lock file. `--check` downloads nothing: it re-reads
 //! the vendored tree and fails if any checksum differs from the lock.
+//! `--extras` downloads each pack that is not bundled at its pinned commit,
+//! copies it with `copy_pack` into a temporary folder only, and records its
+//! checksum in the lock; nothing of those packs enters the repository.
 //!
 //! Pack contents are untrusted data. This tool only downloads, unpacks and
 //! copies files; it never runs anything from a pack.
@@ -22,7 +26,7 @@ use std::time::Duration;
 
 use beluga_desktop_lib::skills::archive::{Limits, download_github_archive};
 use beluga_desktop_lib::skills::pack::{
-    PackSpec, copy_pack, load_lock, read_manifest, tree_checksum,
+    PackManifest, PackSpec, copy_pack, load_lock, read_manifest, tree_checksum,
 };
 
 const CODELOAD: &str = "https://codeload.github.com";
@@ -98,51 +102,82 @@ fn check() -> Result<(), String> {
     }
 }
 
-/// Downloads and copies every bundled pack, writing the lock after each.
-async fn vendor() -> Result<(), String> {
-    let mut packs = read_lock()?;
-    let overrides = read_overrides()?;
-    let http = reqwest::Client::builder()
+fn http_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(15))
         .read_timeout(Duration::from_secs(60))
         .user_agent("vendor-skills")
         .build()
-        .map_err(|e| format!("Could not set up the HTTP client: {e}"))?;
-    let limits = Limits::default();
+        .map_err(|e| format!("Could not set up the HTTP client: {e}"))
+}
+
+/// Downloads `spec` at its commit into a temporary folder and copies its
+/// text files into `dest` with `copy_pack`.
+async fn fetch_and_copy(
+    http: &reqwest::Client,
+    spec: &PackSpec,
+    dest: &Path,
+    overrides: &HashMap<String, bool>,
+) -> Result<PackManifest, String> {
+    println!("{}: downloading {} at {}", spec.id, spec.repo, spec.commit);
+    let tmp = tempfile::TempDir::new().map_err(|e| format!("No temporary folder: {e}"))?;
+    let download = tmp.path().join("download");
+    let src = download_github_archive(
+        http,
+        CODELOAD,
+        &spec.repo,
+        &spec.commit,
+        &download,
+        &Limits::default(),
+    )
+    .await
+    .map_err(|e| format!("{}: {e}", spec.id))?;
+    let manifest =
+        copy_pack(&src, spec, dest, overrides).map_err(|e| format!("{}: {e}", spec.id))?;
+    println!(
+        "{}: {} skills, {} files skipped",
+        spec.id,
+        manifest.skills.len(),
+        manifest.skipped.len()
+    );
+    Ok(manifest)
+}
+
+/// Records the checksum of every pack that is not bundled, copying each into
+/// a temporary folder that is then deleted.
+async fn extras() -> Result<(), String> {
+    let mut packs = read_lock()?;
+    let http = http_client()?;
+    for i in 0..packs.len() {
+        if packs[i].bundled {
+            continue;
+        }
+        let tmp = tempfile::TempDir::new().map_err(|e| format!("No temporary folder: {e}"))?;
+        let manifest =
+            fetch_and_copy(&http, &packs[i], &tmp.path().join("pack"), &HashMap::new()).await?;
+        packs[i].checksum = manifest.checksum;
+        write_lock(&packs)?;
+    }
+    Ok(())
+}
+
+/// Downloads and copies every bundled pack, writing the lock after each.
+async fn vendor() -> Result<(), String> {
+    let mut packs = read_lock()?;
+    let overrides = read_overrides()?;
+    let http = http_client()?;
     fs::create_dir_all(skills_dir()).map_err(|e| format!("Could not create the folder: {e}"))?;
 
     for i in 0..packs.len() {
         if !packs[i].bundled {
             continue;
         }
-        let spec = packs[i].clone();
-        println!("{}: downloading {} at {}", spec.id, spec.repo, spec.commit);
-        let tmp = tempfile::TempDir::new().map_err(|e| format!("No temporary folder: {e}"))?;
-        let download = tmp.path().join("download");
-        let src = download_github_archive(
-            &http,
-            CODELOAD,
-            &spec.repo,
-            &spec.commit,
-            &download,
-            &limits,
-        )
-        .await
-        .map_err(|e| format!("{}: {e}", spec.id))?;
-
-        let dest = skills_dir().join(&spec.id);
+        let dest = skills_dir().join(&packs[i].id);
         if dest.exists() {
             fs::remove_dir_all(&dest)
                 .map_err(|e| format!("Could not clear {}: {e}", dest.display()))?;
         }
-        let manifest =
-            copy_pack(&src, &spec, &dest, &overrides).map_err(|e| format!("{}: {e}", spec.id))?;
-        println!(
-            "{}: {} skills, {} files skipped",
-            spec.id,
-            manifest.skills.len(),
-            manifest.skipped.len()
-        );
+        let manifest = fetch_and_copy(&http, &packs[i], &dest, &overrides).await?;
         packs[i].checksum = manifest.checksum;
         write_lock(&packs)?;
     }
@@ -169,7 +204,8 @@ async fn main() -> ExitCode {
     let result = match args.as_slice() {
         [] => vendor().await,
         [flag] if flag == "--check" => check(),
-        _ => Err("usage: vendor-skills [--check]".to_string()),
+        [flag] if flag == "--extras" => extras().await,
+        _ => Err("usage: vendor-skills [--check | --extras]".to_string()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

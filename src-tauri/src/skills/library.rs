@@ -108,6 +108,23 @@ impl Library {
         lib
     }
 
+    /// Every pack the lock file lists, bundled or not, in lock order.
+    pub fn lock_specs(&self) -> &[PackSpec] {
+        &self.lock
+    }
+
+    /// True for the id of a bundled pack: one the lock marks as bundled, or
+    /// one found in the bundled skills folder.
+    pub fn is_builtin(&self, id: &str) -> bool {
+        self.lock.iter().any(|p| p.bundled && p.id == id)
+            || self
+                .loaded
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .any(|p| p.origin == PackOrigin::BuiltIn && p.id == id)
+    }
+
     /// Reads every `pack.json` again, e.g. after an install.
     pub fn reload(&self) {
         let packs = self.read_all();

@@ -1,4 +1,5 @@
 use super::auth::{self, StorageChoice};
+use super::install::{self, AddSource};
 use super::turn::{TurnResult, TurnStatus};
 use super::{chat_state, chats, compact, export, folder, models, turn};
 use crate::engine::{EngineEvent, UiError};
@@ -12,7 +13,7 @@ use std::time::Duration;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-const KEY: &str = "sk-or-v1-secret-key-0123456789";
+pub(super) const KEY: &str = "sk-or-v1-secret-key-0123456789";
 const KEY_FREE: &str = include_str!("../../tests/fixtures/key_free.json");
 const MODELS: &str = include_str!("../../tests/fixtures/models.json");
 
@@ -64,9 +65,10 @@ impl KeyStore for NoKeychain {
 /// Answers the system dialogs without a GUI: `pick` and `save` are what the
 /// user "chooses" next (`None` is a cancel).
 #[derive(Default)]
-struct FakeDialogs {
-    pick: Mutex<Option<std::path::PathBuf>>,
-    save: Mutex<Option<std::path::PathBuf>>,
+pub(super) struct FakeDialogs {
+    pub(super) pick: Mutex<Option<std::path::PathBuf>>,
+    pub(super) save: Mutex<Option<std::path::PathBuf>>,
+    pub(super) zip: Mutex<Option<std::path::PathBuf>>,
     asked_names: Mutex<Vec<String>>,
 }
 
@@ -78,13 +80,16 @@ impl crate::dialogs::Dialogs for FakeDialogs {
         self.asked_names.lock().unwrap().push(file_name.to_string());
         self.save.lock().unwrap().clone()
     }
+    fn pick_zip(&self) -> Option<std::path::PathBuf> {
+        self.zip.lock().unwrap().clone()
+    }
 }
 
-struct Harness {
-    state: Arc<AppState>,
+pub(super) struct Harness {
+    pub(super) state: Arc<AppState>,
     events: Arc<Recorder>,
-    dialogs: Arc<FakeDialogs>,
-    _dir: tempfile::TempDir,
+    pub(super) dialogs: Arc<FakeDialogs>,
+    pub(super) _dir: tempfile::TempDir,
 }
 
 fn harness_with(origin: &str, keys: Arc<dyn KeyStore>) -> Harness {
@@ -95,8 +100,9 @@ fn harness_timed(origin: &str, keys: Arc<dyn KeyStore>, timeouts: HttpTimeouts) 
     harness_full(origin, keys, timeouts, None)
 }
 
-/// `builtin_skills` defaults to a folder that does not exist.
-fn harness_full(
+/// `builtin_skills` defaults to a folder that does not exist. GitHub
+/// requests go to `origin` too, so one mock server answers both.
+pub(super) fn harness_full(
     origin: &str,
     keys: Arc<dyn KeyStore>,
     timeouts: HttpTimeouts,
@@ -107,16 +113,22 @@ fn harness_full(
     let http =
         HttpClients::from_builder(|| reqwest::Client::builder().no_proxy(), timeouts).unwrap();
     let dialogs = Arc::new(FakeDialogs::default());
-    let state = Arc::new(AppState::new(
-        http,
-        origin.to_string(),
-        keys,
-        Store::in_memory().unwrap(),
-        dir.path().to_path_buf(),
-        builtin_skills.unwrap_or_else(|| dir.path().join("no-bundled-skills")),
-        events.clone(),
-        dialogs.clone(),
-    ));
+    let state = Arc::new(
+        AppState::new(
+            http,
+            origin.to_string(),
+            keys,
+            Store::in_memory().unwrap(),
+            dir.path().to_path_buf(),
+            builtin_skills.unwrap_or_else(|| dir.path().join("no-bundled-skills")),
+            events.clone(),
+            dialogs.clone(),
+        )
+        .with_github(crate::state::GithubBases {
+            api: origin.to_string(),
+            codeload: origin.to_string(),
+        }),
+    );
     Harness {
         state,
         events,
@@ -125,7 +137,7 @@ fn harness_full(
     }
 }
 
-fn signed_in(origin: &str) -> Harness {
+pub(super) fn signed_in(origin: &str) -> Harness {
     let keys = SessionStore::default();
     keys.set(KEY).unwrap();
     harness_with(origin, Arc::new(keys))
@@ -1012,6 +1024,40 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
         &h.state, &id, "My chat",
     )));
     record(Value::String(std::fs::read_to_string(&file).unwrap()));
+    // Adding skills and the extra packs, with GitHub on the mock server.
+    record(to(&install::extra_packs(&h.state)));
+    record(to(
+        &install::install_extra_pack(&h.state, "vercel", true).await
+    ));
+    record(to(&install::install_extra_pack(
+        &h.state,
+        "claude-red",
+        false,
+    )
+    .await));
+    record(to(&install::remove_pack(&h.state, "vercel")));
+    let skill_src = tempfile::tempdir().unwrap();
+    std::fs::write(
+        skill_src.path().join("SKILL.md"),
+        "---\nname: mine\ndescription: Mine.\n---\nBody.\n",
+    )
+    .unwrap();
+    *h.dialogs.pick.lock().unwrap() = Some(skill_src.path().to_path_buf());
+    let preview = install::preview_add(&h.state, AddSource::Folder).await;
+    record(to(&preview));
+    let token = preview.unwrap().unwrap().token;
+    let added = install::confirm_add(&h.state, &token);
+    assert!(added.is_ok(), "{added:?}");
+    record(to(&added));
+    record(to(&install::cancel_add(&h.state, &token)));
+    record(to(&install::remove_skill(&h.state, "mine")));
+    record(to(&install::preview_add(
+        &h.state,
+        AddSource::Github {
+            url: "https://github.com/o/r".into(),
+        },
+    )
+    .await));
     let first = chats::get_messages(&h.state, &id).unwrap()[0].id.clone();
     record(to(&chats::rows_after(&h.state, &id, &first)));
     record(to(&chats::take_user_message(&h.state, &id, &first)));
@@ -1024,8 +1070,8 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
         record(json!([name, payload]));
     }
 
-    // 24 command results plus at least one event.
-    assert!(outputs.len() >= 25, "{}", outputs.len());
+    // 33 command results plus at least one event.
+    assert!(outputs.len() >= 34, "{}", outputs.len());
     for out in &outputs {
         assert!(!out.contains(KEY), "key leaked in {out}");
     }

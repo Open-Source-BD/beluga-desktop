@@ -9,9 +9,12 @@ pub mod compact;
 pub mod export;
 pub mod folder;
 pub mod handlers;
+pub mod install;
 pub mod models;
 pub mod skills;
 pub mod turn;
 
+#[cfg(test)]
+mod install_tests;
 #[cfg(test)]
 mod tests;

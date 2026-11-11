@@ -5,6 +5,7 @@ use crate::dialogs::Dialogs;
 use crate::engine::{DirectEngine, Engine};
 use crate::secrets::{FileStore, KeyStore, KeychainStore, SecretError, StorageKind};
 use crate::skills::library::Library;
+use crate::skills::staging::{self, StagedAdd};
 use crate::store::Store;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -17,8 +18,24 @@ pub const OPENROUTER_ORIGIN: &str = "https://openrouter.ai";
 const KEY_FILE: &str = "key";
 const DB_FILE: &str = "chats.db";
 const MODEL_CACHE_FILE: &str = "models.json";
-/// Under the app data directory: `packs/<id>/` and `yours/`.
+/// Under the app data directory: `packs/<id>/`, `yours/` and `.staging/`.
 const SKILLS_DIR: &str = "skills";
+
+/// Where GitHub requests go: the real hosts in production, a mock in tests.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubBases {
+    pub api: String,
+    pub codeload: String,
+}
+
+impl GithubBases {
+    pub fn production() -> Self {
+        Self {
+            api: "https://api.github.com".to_string(),
+            codeload: "https://codeload.github.com".to_string(),
+        }
+    }
+}
 
 /// Delivers named events to the web view.
 pub trait EventSink: Send + Sync {
@@ -142,9 +159,12 @@ impl HttpTimeouts {
 
 /// `stream` carries chat replies; `api` carries the single requests (code
 /// exchange, key status, model list) and also has the total-request limit.
+/// `github` carries skill downloads: the app's name as `User-Agent`, no
+/// total limit (an archive can take a while), and never a credential.
 pub struct HttpClients {
     pub stream: reqwest::Client,
     pub api: reqwest::Client,
+    pub github: reqwest::Client,
 }
 
 impl HttpClients {
@@ -161,6 +181,7 @@ impl HttpClients {
         Ok(Self {
             stream: limited().build()?,
             api: limited().timeout(t.request).build()?,
+            github: limited().user_agent(crate::brand::APP_NAME).build()?,
         })
     }
 }
@@ -183,6 +204,13 @@ pub struct AppState {
     pub data_dir: PathBuf,
     /// Every installed skill: bundled, installed and the user's own.
     pub library: Library,
+    /// For GitHub only; see `HttpClients::github`.
+    pub github_http: reqwest::Client,
+    pub github: GithubBases,
+    /// The add the user is previewing, if any.
+    pub staged_add: Mutex<Option<StagedAdd>>,
+    /// Held while anything is moved into or out of the skills folder.
+    pub skills_write: Mutex<()>,
     pub events: Arc<dyn EventSink>,
     /// Opens the system folder and save dialogs.
     pub dialogs: Arc<dyn Dialogs>,
@@ -213,6 +241,8 @@ impl AppState {
             api_base(&origin),
             keys.clone(),
         ));
+        // Staged data from an earlier run is never resumed.
+        staging::clean(&data_dir.join(SKILLS_DIR));
         Self {
             http: http.stream,
             api_http: http.api,
@@ -221,6 +251,10 @@ impl AppState {
             store,
             engine,
             library: Library::load(&builtin_skills, &data_dir.join(SKILLS_DIR)),
+            github_http: http.github,
+            github: GithubBases::production(),
+            staged_add: Mutex::new(None),
+            skills_write: Mutex::new(()),
             data_dir,
             events,
             dialogs,
@@ -254,6 +288,25 @@ impl AppState {
             events,
             dialogs,
         ))
+    }
+
+    /// Points GitHub requests elsewhere (tests).
+    pub fn with_github(mut self, bases: GithubBases) -> Self {
+        self.github = bases;
+        self
+    }
+
+    /// `<app data>/skills`.
+    pub fn skills_dir(&self) -> PathBuf {
+        self.data_dir.join(SKILLS_DIR)
+    }
+
+    pub fn staged_add(&self) -> MutexGuard<'_, Option<StagedAdd>> {
+        lock(&self.staged_add)
+    }
+
+    pub fn skills_write(&self) -> MutexGuard<'_, ()> {
+        lock(&self.skills_write)
     }
 
     pub fn api_base(&self) -> String {

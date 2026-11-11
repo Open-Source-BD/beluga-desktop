@@ -1,10 +1,14 @@
 //! Skills: SKILL.md parsing and the acts-on-your-computer text scan.
 
 pub mod archive;
+pub mod github;
+pub mod install;
 pub mod library;
 pub mod pack;
 pub mod parse;
 pub mod scan;
+pub mod staging;
+pub mod yours;
 
 use serde::{Deserialize, Serialize};
 

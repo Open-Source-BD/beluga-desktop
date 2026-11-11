@@ -60,7 +60,7 @@ pub struct PackManifest {
 
 /// True when `dir` holds a regular file named exactly `SKILL.md`
 /// (compared on the listed name, so case-insensitive disks do not match).
-fn has_skill_md(dir: &Path) -> bool {
+pub fn has_skill_md(dir: &Path) -> bool {
     let Ok(rd) = fs::read_dir(dir) else {
         return false;
     };

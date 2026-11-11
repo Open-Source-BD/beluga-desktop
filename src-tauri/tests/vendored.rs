@@ -351,3 +351,17 @@ fn no_skill_id_is_duplicated_across_all_packs() {
         }
     }
 }
+
+#[test]
+fn every_pack_in_the_lock_has_a_checksum() {
+    let packs = lock();
+    assert_eq!(packs.len(), 18);
+    for p in packs {
+        assert_eq!(p.checksum.len(), 64, "{} has no recorded checksum", p.id);
+        assert!(
+            p.checksum.chars().all(|c| c.is_ascii_hexdigit()),
+            "{}",
+            p.id
+        );
+    }
+}

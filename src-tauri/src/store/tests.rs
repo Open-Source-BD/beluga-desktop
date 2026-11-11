@@ -399,6 +399,27 @@ fn switches_roundtrip_and_unknown_is_none() {
 }
 
 #[test]
+fn delete_switch_and_delete_switches_under_forget_only_what_they_name() {
+    let s = store();
+    for id in ["pack/x", "x:a", "x:b", "xy:a", "x_:a", "a"] {
+        s.set_switch(id, true).unwrap();
+    }
+    s.delete_switch("a").unwrap();
+    s.delete_switches_under("x:").unwrap();
+    s.delete_switch("pack/x").unwrap();
+    for gone in ["a", "x:a", "x:b", "pack/x"] {
+        assert_eq!(s.switch(gone).unwrap(), None, "{gone}");
+    }
+    // A prefix is matched exactly, never as a LIKE pattern.
+    for kept in ["xy:a", "x_:a"] {
+        assert_eq!(s.switch(kept).unwrap(), Some(true), "{kept}");
+    }
+    s.delete_switches_under("x_").unwrap();
+    assert_eq!(s.switch("x_:a").unwrap(), None);
+    assert_eq!(s.switch("xy:a").unwrap(), Some(true));
+}
+
+#[test]
 fn deleting_a_chat_still_cascades() {
     let dir = tempfile::tempdir().unwrap();
     let s = Store::open(&v1_file(&dir)).unwrap();

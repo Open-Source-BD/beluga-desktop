@@ -293,6 +293,53 @@ export const setPackOn = (id: string, on: boolean) =>
 export const skillFile = (id: string, file: string) =>
   invoke<AttachmentInput>("skill_file", { id, file });
 
+/** A pack that is not bundled and can be installed from GitHub. */
+export interface ExtraPack {
+  id: string;
+  title: string;
+  about: string;
+  license: string;
+  repo: string;
+  installed: boolean;
+  /** Install only after the user accepts a notice (pass `acknowledged`). */
+  needs_warning: boolean;
+}
+
+/** Where an add comes from. For a folder or a ZIP the core opens the dialog. */
+export type AddSource =
+  | { kind: "folder" }
+  | { kind: "zip" }
+  | { kind: "github"; url: string };
+
+/** Skills found and staged by `previewAdd`; confirm or cancel with `token`. */
+export interface AddPreview {
+  token: string;
+  skills: SkillView[];
+  /** Files left out, relative to the source. */
+  skipped: string[];
+}
+
+export const extraPacks = () => invoke<ExtraPack[]>("extra_packs");
+
+/** Downloads the pack at its pinned commit; all its skills start off. */
+export const installExtraPack = (id: string, acknowledged: boolean) =>
+  invoke<PackView>("install_extra_pack", { id, acknowledged });
+
+/** Removes an installed extra pack; built-in packs and "yours" are refused. */
+export const removePack = (id: string) => invoke<void>("remove_pack", { id });
+
+/** Stages the skills found at `source`; `null` when the user cancels the dialog. */
+export const previewAdd = (source: AddSource) =>
+  invoke<AddPreview | null>("preview_add", { source });
+
+/** Adds the previewed skills to "Added by you", replacing same-named ones. */
+export const confirmAdd = (token: string) => invoke<PackView>("confirm_add", { token });
+
+export const cancelAdd = (token: string) => invoke<void>("cancel_add", { token });
+
+/** Removes one of the user's own skills; any other id is refused. */
+export const removeSkill = (id: string) => invoke<void>("remove_skill", { id });
+
 /**
  * An active skill as it stands for the model asked about. `too_long`: left
  * out of turns on that model. `unavailable`: switched off, broken or removed;

@@ -235,7 +235,7 @@
     {
       "about": "Security analysis, testing and development skills from Trail of Bits.",
       "bundled": false,
-      "checksum": "",
+      "checksum": "a29b27c22342abc683b07a3bf898d3dce96c7bfa10ec408621f72cbfa90fc073",
       "commit": "e4dd0bb5b15535f7c5a0834187dffba6ac37e4ff",
       "exclude": [
         "plugins/code-improver/tests"
@@ -251,7 +251,7 @@
     {
       "about": "Skills from Vercel Labs for deploying to Vercel, React and React Native practices, and web design guidelines.",
       "bundled": false,
-      "checksum": "",
+      "checksum": "768f9d12814032f4e33085ea789d6b94d81b13006f1eef294eaf3ab36916d544",
       "commit": "1a2c79d4e6c4a2283dc2c614b6538cbe1ed5ca62",
       "exclude": [],
       "id": "vercel",
@@ -265,7 +265,7 @@
     {
       "about": "Offensive security skills that describe attack techniques for authorised penetration testing and red-team work.",
       "bundled": false,
-      "checksum": "",
+      "checksum": "a095d18a2f07c57b3aaf098110d69b0164121f6226e64f8b1db3a67e220e0047",
       "commit": "a8de813edc9f66f60d44cfe42d47750e89d9930b",
       "exclude": [],
       "id": "claude-red",

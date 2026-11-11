@@ -175,4 +175,21 @@ impl Store {
         )?;
         Ok(())
     }
+
+    /// Forgets the switch `id`, e.g. when its skill or pack is removed.
+    pub fn delete_switch(&self, id: &str) -> Result<()> {
+        self.conn()
+            .execute("DELETE FROM switches WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Forgets every switch whose id starts with `prefix` (compared exactly,
+    /// not as a pattern).
+    pub fn delete_switches_under(&self, prefix: &str) -> Result<()> {
+        self.conn().execute(
+            "DELETE FROM switches WHERE substr(id, 1, length(?1)) = ?1",
+            [prefix],
+        )?;
+        Ok(())
+    }
 }

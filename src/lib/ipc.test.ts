@@ -105,6 +105,35 @@ describe("ipc", () => {
       "attach_folder_file",
       { chatId: "c", path: "src/a.ts" },
     ],
+    ["extraPacks", () => ipc.extraPacks(), "extra_packs", undefined],
+    [
+      "installExtraPack",
+      () => ipc.installExtraPack("claude-red", true),
+      "install_extra_pack",
+      { id: "claude-red", acknowledged: true },
+    ],
+    ["removePack", () => ipc.removePack("vercel"), "remove_pack", { id: "vercel" }],
+    [
+      "previewAdd folder",
+      () => ipc.previewAdd({ kind: "folder" }),
+      "preview_add",
+      { source: { kind: "folder" } },
+    ],
+    [
+      "previewAdd zip",
+      () => ipc.previewAdd({ kind: "zip" }),
+      "preview_add",
+      { source: { kind: "zip" } },
+    ],
+    [
+      "previewAdd github",
+      () => ipc.previewAdd({ kind: "github", url: "https://github.com/o/r" }),
+      "preview_add",
+      { source: { kind: "github", url: "https://github.com/o/r" } },
+    ],
+    ["confirmAdd", () => ipc.confirmAdd("t1"), "confirm_add", { token: "t1" }],
+    ["cancelAdd", () => ipc.cancelAdd("t1"), "cancel_add", { token: "t1" }],
+    ["removeSkill", () => ipc.removeSkill("mine"), "remove_skill", { id: "mine" }],
     [
       "openAuthUrl",
       () => ipc.openAuthUrl("https://openrouter.ai/auth"),
@@ -220,6 +249,31 @@ describe("ipc", () => {
     const [m] = await ipc.getMessages("c");
     expect(m.kind).toBe("note");
     expect(m.seq).toBe(7);
+  });
+
+  it("previewAdd resolves with null when the dialog is cancelled, else a preview", async () => {
+    const preview: ipc.AddPreview = {
+      token: "t1",
+      skills: [
+        {
+          id: "mine", name: "mine", description: "Mine.", on: true,
+          acts_on_computer: false, broken: null, body_chars: 5, available: true,
+        },
+      ],
+      skipped: ["mine/big.md"],
+    };
+    invoke.mockResolvedValueOnce(null).mockResolvedValueOnce(preview);
+    await expect(ipc.previewAdd({ kind: "zip" })).resolves.toBeNull();
+    await expect(ipc.previewAdd({ kind: "folder" })).resolves.toEqual(preview);
+  });
+
+  it("extraPacks returns packs with installed and needs_warning", async () => {
+    const pack: ipc.ExtraPack = {
+      id: "claude-red", title: "Claude-Red", about: "a", license: "MIT",
+      repo: "SnailSploit/Claude-Red", installed: false, needs_warning: true,
+    };
+    invoke.mockResolvedValueOnce([pack]);
+    await expect(ipc.extraPacks()).resolves.toEqual([pack]);
   });
 
   it("chatState returns active skills with their flags", async () => {

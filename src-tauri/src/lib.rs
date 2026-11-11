@@ -74,6 +74,13 @@ pub fn run() {
             h::approved_folders,
             h::folder_files,
             h::attach_folder_file,
+            h::extra_packs,
+            h::install_extra_pack,
+            h::remove_pack,
+            h::preview_add,
+            h::confirm_add,
+            h::cancel_add,
+            h::remove_skill,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
