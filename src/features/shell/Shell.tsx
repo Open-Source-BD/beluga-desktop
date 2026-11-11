@@ -107,6 +107,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     attachments: AttachmentInput[],
     intent?: SendIntent,
   ) => {
+    const original = intent ? null : text;
     if (!intent) {
       const r = resolveSlash(text, skillList.rows);
       if (r.kind === "command") {
@@ -140,6 +141,8 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
         await activateSkill(id, intent.skill, modelId);
       } catch (e) {
         actions.showAlert(toUiError(e).message);
+        // A new chat swaps the message box for a fresh one: put the draft back.
+        if (original !== null) control.current?.setText(original);
         throw e;
       }
       await refreshActive(id, modelId);
