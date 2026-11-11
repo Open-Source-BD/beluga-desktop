@@ -32,7 +32,7 @@ export default function Thread({
   const scroller = useRef<HTMLDivElement>(null);
   const following = useRef(true);
   const streaming = status === "streaming";
-  const last = messages[messages.length - 1];
+  const last = messages.filter((m) => m.kind === "message").pop();
   const showInterrupted =
     !streaming && (status === "interrupted" || last?.interrupted === true);
 
@@ -57,7 +57,11 @@ export default function Thread({
     >
       <div className="col thread-col">
         {messages.map((m) =>
-          m.role === "user" ? (
+          m.kind === "note" ? (
+            <p key={m.id} className="note-line">
+              {m.text}
+            </p>
+          ) : m.role === "user" ? (
             <div key={m.id} className="me">
               {m.text}
               {m.attachments.length > 0 && (

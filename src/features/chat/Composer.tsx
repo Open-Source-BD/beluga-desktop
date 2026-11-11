@@ -1,10 +1,13 @@
 import {
+  useImperativeHandle,
   useLayoutEffect,
   useRef,
   useState,
   type ChangeEvent,
   type KeyboardEvent,
   type ReactNode,
+  type Ref,
+  type TextareaHTMLAttributes,
 } from "react";
 import type { AttachmentInput } from "../../lib/ipc";
 import { PlusIcon, SendIcon, StopIcon } from "../shell/icons";
@@ -15,13 +18,40 @@ import {
   readAttachment,
 } from "./attachments";
 
+/** Extra instructions that travel with a send, set by whoever called `submit`. */
+export interface SendIntent {
+  /** Activate this skill in the chat before sending. */
+  skill?: string;
+}
+
+/** What menus use to edit the box and send from it; the Composer still owns the text. */
+export interface ComposerControl {
+  /** Replaces the text, with the caret at `caret` (default: the end). */
+  setText(text: string, caret?: number): void;
+  /** Sends `text` (default: the box) with the current attachments, as the Send button would. */
+  submit(text?: string, intent?: SendIntent): Promise<void>;
+}
+
 interface Props {
   /**
    * The draft is cleared once this returns or its promise resolves. If the
    * promise rejects, the text and attachments stay in the box; showing the
    * error is the handler's job.
    */
-  onSend: (text: string, attachments: AttachmentInput[]) => void | Promise<void>;
+  onSend: (
+    text: string,
+    attachments: AttachmentInput[],
+    intent?: SendIntent,
+  ) => void | Promise<void>;
+  /** Told the text and caret after every edit or caret move, for menus that follow the box. */
+  onTextChange?: (text: string, caret: number) => void;
+  /** Sees a key first; returning true means it was handled and the box ignores it. */
+  onKeyIntercept?: (e: KeyboardEvent<HTMLTextAreaElement>) => boolean;
+  controlRef?: Ref<ComposerControl>;
+  /** Rendered just above the box (a popover menu), anchored to it. */
+  menu?: ReactNode;
+  /** Extra attributes for the text field (combobox wiring for a menu). */
+  fieldAria?: TextareaHTMLAttributes<HTMLTextAreaElement>;
   onStop?: () => void;
   /** A reply is streaming in this chat: sending is blocked and the button becomes Stop. */
   streaming?: boolean;
@@ -39,6 +69,11 @@ const MAX_HEIGHT = 200;
 
 export default function Composer({
   onSend,
+  onTextChange,
+  onKeyIntercept,
+  controlRef,
+  menu,
+  fieldAria,
   onStop,
   streaming = false,
   disabled = false,
@@ -56,12 +91,17 @@ export default function Composer({
   const locked = disabled || noModel;
   const hasImage = files.some((f) => f.mime.startsWith("image/"));
   const imageBlocked = hasImage && !acceptsImages;
-  const canSend =
-    !locked &&
-    !streaming &&
-    !sending &&
-    !imageBlocked &&
-    (text.trim() !== "" || files.length > 0);
+  const canSendText = (t: string) =>
+    !locked && !streaming && !sending && !imageBlocked && (t.trim() !== "" || files.length > 0);
+  const canSend = canSendText(text);
+  const caretAt = useRef<number | null>(null);
+  const lastCaret = useRef(0);
+
+  const change = (next: string, caret: number) => {
+    lastCaret.current = caret;
+    setText(next);
+    onTextChange?.(next, caret);
+  };
   const notices =
     imageBlocked && !refusals.includes(CANNOT_READ_IMAGES)
       ? [...refusals, CANNOT_READ_IMAGES]
@@ -74,18 +114,27 @@ export default function Composer({
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`;
   }, [text]);
 
-  const submit = async () => {
-    if (!canSend) return;
+  // A caret requested by `setText` is applied once the new text is in the field.
+  useLayoutEffect(() => {
+    if (caretAt.current !== null && field.current) {
+      field.current.setSelectionRange(caretAt.current, caretAt.current);
+      caretAt.current = null;
+    }
+  }, [text]);
+
+  const submit = async (override?: string, intent?: SendIntent) => {
+    const body = override ?? text;
+    if (!canSendText(body)) return;
     setSending(true);
     try {
-      await onSend(text.trim(), files);
+      await (intent ? onSend(body.trim(), files, intent) : onSend(body.trim(), files));
     } catch {
       // Not accepted: keep the draft so nothing typed or attached is lost.
       return;
     } finally {
       setSending(false);
     }
-    setText("");
+    change("", 0);
     setFiles([]);
     setRefusals([]);
   };
@@ -112,7 +161,19 @@ export default function Composer({
     setRefusals(refused);
   };
 
+  useImperativeHandle(controlRef, () => ({
+    setText(next, caret = next.length) {
+      caretAt.current = caret;
+      change(next, caret);
+    },
+    submit,
+  }));
+
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!e.nativeEvent.isComposing && onKeyIntercept?.(e)) {
+      e.preventDefault();
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       void submit();
@@ -133,6 +194,7 @@ export default function Composer({
         void submit();
       }}
     >
+      {menu && <div className="composer-menu">{menu}</div>}
       {files.length > 0 && (
         <ul className="attach-chips" aria-label="Attachments">
           {files.map((f, i) => (
@@ -167,8 +229,13 @@ export default function Composer({
         value={text}
         placeholder={placeholder}
         disabled={locked}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => change(e.target.value, e.target.selectionStart)}
+        onSelect={(e) => {
+          const caret = e.currentTarget.selectionStart;
+          if (caret !== lastCaret.current) change(e.currentTarget.value, caret);
+        }}
         onKeyDown={onKeyDown}
+        {...fieldAria}
       />
       <div className="composer-controls">
         <input

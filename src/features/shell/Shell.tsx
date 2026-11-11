@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
-import Composer from "../chat/Composer";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import Composer, { type ComposerControl, type SendIntent } from "../chat/Composer";
 import EmptyChat from "../chat/EmptyChat";
 import ErrorNotice from "../chat/ErrorNotice";
 import { toUiError } from "../chat/errors";
@@ -7,11 +8,17 @@ import ModelPicker from "../models/ModelPicker";
 import { chooseModel } from "../models/defaultModel";
 import Gauge from "../gauge/Gauge";
 import LowAllowance from "../gauge/LowAllowance";
-import { formatMoney } from "../gauge/allowance";
+import { formatChatUsage } from "../gauge/allowance";
 import { useAllowance } from "../gauge/useAllowance";
 import Thread from "../chat/Thread";
 import { useChat } from "../chat/useChat";
+import { useCommandActions } from "../commands/useCommandActions";
+import { useSlashMenu } from "../commands/useSlashMenu";
+import ActiveSkills from "../skills/ActiveSkills";
+import { useChatState } from "../skills/useChatState";
+import { useSkills } from "../skills/useSkills";
 import {
+  activateSkill,
   createChat,
   deleteChat,
   listChats,
@@ -29,6 +36,8 @@ import "../chat/chat.css";
 
 interface Props {
   onSignInAgain?: () => void;
+  /** Opens the Skills screen. */
+  onOpenSkills?: () => void;
 }
 
 function readLastModel(): string | null {
@@ -39,7 +48,7 @@ function readLastModel(): string | null {
   }
 }
 
-export default function Shell({ onSignInAgain }: Props) {
+export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [models, setModels] = useState<ModelInfo[] | null>(null);
@@ -76,15 +85,26 @@ export default function Shell({ onSignInAgain }: Props) {
 
   const allowance = useAllowance(selectedId);
   const refreshAllowance = allowance.refresh;
-  const onTurnEnd = useCallback(() => {
-    refreshChats();
-    refreshAllowance();
-  }, [refreshChats, refreshAllowance]);
+  const skillList = useSkills();
+  const activeSkills = useChatState(selectedId, modelId);
+  const refreshActive = activeSkills.refresh;
+  const onTurnEnd = useCallback(
+    (id: string) => {
+      refreshChats();
+      refreshAllowance();
+      void refreshActive(id);
+    },
+    [refreshChats, refreshAllowance, refreshActive],
+  );
   const chat = useChat(selectedId, onTurnEnd);
   const selected = chats.find((c) => c.id === selectedId);
   const hasMessages = chat.messages.length > 0 || chat.pendingUser !== null;
 
-  const handleSend = async (text: string, attachments: AttachmentInput[]) => {
+  const handleSend = async (
+    text: string,
+    attachments: AttachmentInput[],
+    intent?: SendIntent,
+  ) => {
     if (!modelId || creating) return;
     let id = selectedId;
     if (!id) {
@@ -92,7 +112,7 @@ export default function Shell({ onSignInAgain }: Props) {
       setStartError(null);
       try {
         id = (await createChat(modelId)).id;
-        setSelectedId(id);
+        flushSync(() => setSelectedId(id));
         refreshChats();
       } catch (e) {
         // Rejecting keeps the draft in the message box.
@@ -101,6 +121,15 @@ export default function Shell({ onSignInAgain }: Props) {
       } finally {
         setCreating(false);
       }
+    }
+    if (intent?.skill) {
+      try {
+        await activateSkill(id, intent.skill, modelId);
+      } catch (e) {
+        actions.showAlert(toUiError(e).message);
+        throw e;
+      }
+      await refreshActive(id, modelId);
     }
     chat.send(text, attachments, modelId, id);
   };
@@ -117,6 +146,25 @@ export default function Shell({ onSignInAgain }: Props) {
 
   const pickModel = () => setPickerOpen(true);
 
+  const control = useRef<ComposerControl>(null);
+  const actions = useCommandActions({
+    chatId: selectedId,
+    title: selected?.title,
+    modelId,
+    status: chat.status,
+    compact: chat.compact,
+    keyStatus: allowance.status,
+    usage: allowance.usage,
+    monthSpend: allowance.monthSpend,
+    handlers: {
+      newChat: () => select(null),
+      openModel: pickModel,
+      openSkills: () => onOpenSkills?.(),
+      openSettings: () => setShowSettings(true),
+    },
+  });
+  const slash = useSlashMenu({ skills: skillList.rows, ctx: actions.ctx, control });
+
   const chooseFromPicker = (id: string) => {
     setModelId(id);
     try {
@@ -132,7 +180,14 @@ export default function Shell({ onSignInAgain }: Props) {
   const composer = (
     <>
     {blocked && models && <LowAllowance models={models} onPick={chooseFromPicker} />}
+    {actions.panels}
+    <ActiveSkills skills={activeSkills.skills} onRemove={activeSkills.remove} />
     <Composer
+      controlRef={control}
+      menu={slash.menu}
+      fieldAria={slash.fieldAria}
+      onKeyIntercept={slash.onKeyIntercept}
+      onTextChange={slash.onTextChange}
       onSend={handleSend}
       onStop={chat.stop}
       streaming={chat.status === "streaming"}
@@ -197,7 +252,7 @@ export default function Shell({ onSignInAgain }: Props) {
             <div className="usage" data-slot="usage">
               {selectedId && allowance.usage && (
                 <>
-                  {`This chat: ${allowance.usage.requests} ${allowance.usage.requests === 1 ? "request" : "requests"}, ${formatMoney(allowance.usage.cost_usd)}`}
+                  {`This chat: ${formatChatUsage(allowance.usage)}`}
                 </>
               )}
             </div>

@@ -92,6 +92,7 @@
 }
 
 .composer {
+  position: relative;
   width: min(680px, 100% - 48px);
   margin: 14px auto 18px;
   background: var(--white);
@@ -244,4 +245,19 @@
 }
 .me-files .attach-chip {
   background: var(--white);
+}
+
+.note-line {
+  margin: 0;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--mid);
+}
+
+.composer-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 15;
 }

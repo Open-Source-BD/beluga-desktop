@@ -145,3 +145,17 @@ describe("Thread attachments", () => {
     expect(screen.queryByRole("img")).toBeNull();
   });
 });
+
+describe("Thread notes", () => {
+  it("shows a note as a quiet line, not a message bubble", () => {
+    const note: StoredMessage = {
+      id: "n1", role: "system", text: "Summarised above this line", attachments: [],
+      interrupted: false, created_at: 1, kind: "note", seq: 2,
+    };
+    const { container } = render(<Thread {...base} messages={[asst("hello"), note]} />);
+    const line = screen.getByText("Summarised above this line");
+    expect(line).toHaveClass("note-line");
+    expect(line.closest(".me, .reply")).toBeNull();
+    expect(container.querySelectorAll(".reply")).toHaveLength(2); // hello + the empty live region
+  });
+});

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  compactChat,
   getMessages,
   retryTurn,
   sendMessage,
@@ -34,6 +35,12 @@ const EMPTY: ChatState = {
   unsent: null,
 };
 
+/** How a /compact ended: the core's result, or the rejection when it never ran. */
+export interface CompactOutcome {
+  result?: TurnResult;
+  error?: UiError;
+}
+
 export interface UseChat extends ChatState {
   /** Sends to `targetChatId` (default: the selected chat). Ignored while that chat is streaming. */
   send(
@@ -43,6 +50,12 @@ export interface UseChat extends ChatState {
     targetChatId?: string,
   ): void;
   stop(): void;
+  /**
+   * Shortens the selected chat. It runs like a reply (status "streaming", Stop
+   * cancels it); `onOutcome` hears how it ended, so a failure is reported by
+   * the caller and does not become a thread error with a Retry.
+   */
+  compact(modelId: string, onOutcome: (outcome: CompactOutcome) => void): void;
   /**
    * Answers again. A message the core rejected is sent anew; otherwise the
    * stored last user message is answered without being stored twice.
@@ -196,5 +209,23 @@ export function useChat(
     [chatId, send, start],
   );
 
-  return { ...current, send, stop, retry };
+  const compact = useCallback<UseChat["compact"]>(
+    (modelId, onOutcome) => {
+      if (!chatId) return;
+      const id = chatId;
+      start(id, modelId, null, async () => {
+        try {
+          const result = await compactChat(id, modelId);
+          onOutcome({ result });
+          if (result.status !== "failed") return result;
+        } catch (e) {
+          onOutcome({ error: toUiError(e) });
+        }
+        return { status: "done", reason: null, error: null };
+      });
+    },
+    [chatId, start],
+  );
+
+  return { ...current, send, stop, retry, compact };
 }

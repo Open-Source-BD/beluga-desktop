@@ -32,6 +32,12 @@ vi.mock("../lib/ipc", () => ({
   keyStatus: vi.fn(async () => ({ is_free_tier: true, free_daily: null, usage_usd: 0, limit_remaining_usd: null })),
   monthSpend: vi.fn(async () => 0),
   chatUsage: vi.fn(async () => ({ requests: 0, cost_usd: 0 })),
+  listPacks: vi.fn(async () => []),
+  chatState: vi.fn(),
+  activateSkill: vi.fn(),
+  deactivateSkill: vi.fn(),
+  compactChat: vi.fn(),
+  exportChatWithDialog: vi.fn(),
 }));
 
 beforeEach(() => {

@@ -1,4 +1,4 @@
-import type { ModelInfo } from "../../lib/ipc";
+import type { ChatUsage, ModelInfo } from "../../lib/ipc";
 
 /**
  * OpenRouter's limits page describes the free-model counter as "recorded so far
@@ -20,6 +20,11 @@ export function resetTimeText(now: Date = new Date()): string {
 
 export function formatMoney(n: number): string {
   return n > 0 && n < 0.01 ? "under $0.01" : `$${n.toFixed(2)}`;
+}
+
+/** "7 requests, $0.50": what the header and /usage say about a chat. */
+export function formatChatUsage(u: ChatUsage): string {
+  return `${u.requests} ${u.requests === 1 ? "request" : "requests"}, ${formatMoney(u.cost_usd)}`;
 }
 
 /** The three cheapest paid tool-capable models, cheapest first (ties: id). */
