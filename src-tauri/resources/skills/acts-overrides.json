@@ -12,6 +12,7 @@
   "superpowers:writing-plans": true,
   "superpowers:writing-skills": true,
   "anthropic:frontend-design": false,
+  "agent-skills:code-review-and-quality": false,
   "agent-skills:code-simplification": false,
   "agent-skills:documentation-and-adrs": false,
   "emil:emil-design-eng": false,

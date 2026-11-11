@@ -143,6 +143,51 @@ fn every_bundled_pack_ships_at_least_one_license_file() {
         for f in &m.license_files {
             assert!(skills_root().join(&m.id).join(f).is_file());
         }
+        if m.id == "gstack" {
+            assert!(m.license_files.iter().any(|f| f == "NOTICE.md"));
+            assert!(m.license_files.iter().any(|f| f.starts_with("licenses/")));
+        }
+        if m.id == "impeccable" {
+            assert!(m.license_files.iter().any(|f| f == "NOTICE.md"));
+        }
+    }
+}
+
+#[test]
+fn every_anthropic_skill_folder_has_a_license_txt() {
+    let m = read_manifest(&skills_root().join("anthropic")).unwrap();
+    assert!(!m.skills.is_empty());
+    for s in &m.skills {
+        assert!(
+            s.files.iter().any(|f| f == "LICENSE.txt"),
+            "{} has no LICENSE.txt",
+            s.id
+        );
+        assert!(
+            skills_root()
+                .join("anthropic")
+                .join(&s.dir)
+                .join("LICENSE.txt")
+                .is_file()
+        );
+    }
+}
+
+#[test]
+fn only_bundled_packs_and_defaults_files_are_vendored() {
+    let bundled: HashSet<String> = bundled().into_iter().map(|p| p.id).collect();
+    for id in ["claude-red", "vercel", "trailofbits"] {
+        assert!(
+            !skills_root().join(id).exists(),
+            "{id} must not be vendored"
+        );
+    }
+    for e in fs::read_dir(skills_root()).unwrap().flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let ft = e.file_type().unwrap();
+        let ok = (ft.is_dir() && bundled.contains(&name))
+            || (ft.is_file() && (name == "default-skills.json" || name == "acts-overrides.json"));
+        assert!(ok, "unexpected entry in resources/skills: {name}");
     }
 }
 
@@ -151,7 +196,7 @@ fn skill_counts_match_the_spec() {
     let expected: HashMap<&str, usize> = HashMap::from([
         ("superpowers", 15),
         ("agent-skills", 25),
-        ("anthropic", 19),
+        ("anthropic", 18),
         ("emil", 18),
         ("engineer", 67),
         ("gstack", 63),
@@ -175,6 +220,8 @@ fn skill_counts_match_the_spec() {
     }
 }
 
+/// The 25 MB ceiling is measured in logical bytes (the sum of file
+/// lengths), not disk blocks, by controller ruling.
 #[test]
 fn vendored_tree_is_at_most_25_megabytes() {
     let mut files = Vec::new();
@@ -257,6 +304,8 @@ fn default_skills_include() {
         "superpowers:systematic-debugging",
         "superpowers:test-driven-development",
         "anthropic:frontend-design",
+        "agent-skills:code-review-and-quality",
+        "superpowers:requesting-code-review",
     ] {
         assert!(on.iter().any(|x| x == id), "{id} should be on by default");
     }
@@ -269,6 +318,8 @@ fn default_skills_exclude() {
         "superpowers:dispatching-parallel-agents",
         "superpowers:subagent-driven-development",
         "superpowers:using-git-worktrees",
+        "superpowers:using-superpowers",
+        "superpowers:diagnosing-superpowers",
     ] {
         assert!(!on.iter().any(|x| x == id), "{id} should be off by default");
     }

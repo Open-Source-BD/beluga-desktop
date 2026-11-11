@@ -31,10 +31,11 @@
     {
       "about": "Anthropic's example skills for tasks such as document creation, front-end design, art, testing and building MCP servers.",
       "bundled": true,
-      "checksum": "12f66398512b2c7534a2c5205c21607801005ac04dce1159cb83b3e58e37e786",
+      "checksum": "0f23e466ea96ac2e2d283ddeabfdf3c0e5d48cb2706c681dfd714230ac59e799",
       "commit": "2c5958ecac7cee2b583967a2c4981d0f4a75c579",
       "exclude": [
-        "template"
+        "template",
+        "skills/doc-coauthoring"
       ],
       "id": "anthropic",
       "license": "Apache-2.0",

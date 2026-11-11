@@ -209,18 +209,6 @@
       "broken": null
     },
     {
-      "id": "anthropic:doc-coauthoring",
-      "pack": "anthropic",
-      "name": "doc-coauthoring",
-      "description": "Guide users through a structured workflow for co-authoring documentation. Use when user wants to write documentation, proposals, technical specs, decision docs, or similar structured content. This",
-      "dir": "skills/doc-coauthoring",
-      "acts_on_computer": true,
-      "body_chars": 15342,
-      "files": [],
-      "license": null,
-      "broken": null
-    },
-    {
       "id": "anthropic:docx",
       "pack": "anthropic",
       "name": "docx",
@@ -419,5 +407,5 @@
   "skipped": [
     "skills/claude-api/shared/model-migration.md"
   ],
-  "checksum": "12f66398512b2c7534a2c5205c21607801005ac04dce1159cb83b3e58e37e786"
+  "checksum": "0f23e466ea96ac2e2d283ddeabfdf3c0e5d48cb2706c681dfd714230ac59e799"
 }
