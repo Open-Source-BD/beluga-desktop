@@ -14,11 +14,21 @@ const ipc = vi.hoisted(() => ({
   deleteChat: vi.fn(),
   sendMessage: vi.fn(),
   stop: vi.fn(),
+  keyStatus: vi.fn(),
+  monthSpend: vi.fn(),
+  chatUsage: vi.fn(),
 }));
 vi.mock("../../lib/ipc", () => ipc);
 
 const FREE = model({ id: "test/free", name: "Free One", is_free: true, prompt_usd_per_mtok: 0, completion_usd_per_mtok: 0, context_length: 5000 });
 const PAID = model({ id: "test/model", name: "Paid One" });
+
+const FREE_STATUS = (used: number, limit: number) => ({
+  is_free_tier: true,
+  free_daily: { used, limit, remaining: limit - used },
+  usage_usd: 0,
+  limit_remaining_usd: null,
+});
 
 let emit: (e: EngineEvent) => void;
 
@@ -28,6 +38,9 @@ beforeEach(() => {
   ipc.listChats.mockResolvedValue([]);
   ipc.listModels.mockResolvedValue([FREE, PAID]);
   ipc.getMessages.mockResolvedValue([]);
+  ipc.keyStatus.mockResolvedValue(FREE_STATUS(12, 50));
+  ipc.monthSpend.mockResolvedValue(0);
+  ipc.chatUsage.mockResolvedValue({ requests: 7, cost_usd: 0 });
   ipc.sendMessage.mockImplementation((_c, _t, _a, _m, onEvent) => {
     emit = onEvent;
     return new Promise(() => {});
@@ -121,5 +134,67 @@ describe("Shell", () => {
     await userEvent.type(await screen.findByLabelText("Message"), "hi{Enter}");
     await userEvent.click(await screen.findByRole("button", { name: "Pick another model" }));
     expect(await screen.findByRole("listbox")).toBeInTheDocument();
+  });
+
+  it("shows the gauge for a free model and spend and balance for a paid one", async () => {
+    render(<Shell />);
+    expect(await screen.findByRole("group", { name: "38 of 50 free requests left" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Free One/ }));
+    await userEvent.click(screen.getByRole("option", { name: /Paid One/ }));
+    expect(screen.getByText("Balance: no limit set")).toBeInTheDocument();
+  });
+
+  it("shows the chat usage in the header", async () => {
+    ipc.listChats.mockResolvedValue([{ id: "c9", title: "Old chat", model_id: "test/free", updated_at: 1 }]);
+    render(<Shell />);
+    await userEvent.click(await screen.findByText("Old chat"));
+    expect(await screen.findByText("This chat: 7 requests, $0.00")).toBeInTheDocument();
+  });
+
+  it("at zero on a free model blocks the box and shows LowAllowance; picking a model unblocks", async () => {
+    ipc.keyStatus.mockResolvedValue(FREE_STATUS(50, 50));
+    render(<Shell />);
+    expect(await screen.findByText(/You have used today's free requests/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Message")).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: /Paid One/, description: undefined }));
+    expect(screen.queryByText(/You have used today's free requests/)).toBeNull();
+    expect(screen.getByLabelText("Message")).toBeEnabled();
+  });
+
+  it("at zero with a paid model selected does not block", async () => {
+    localStorage.setItem("lastModel", "test/model");
+    ipc.keyStatus.mockResolvedValue(FREE_STATUS(50, 50));
+    render(<Shell />);
+    expect(await screen.findByText("Balance: no limit set")).toBeInTheDocument();
+    expect(screen.getByLabelText("Message")).toBeEnabled();
+    expect(screen.queryByText(/You have used today's free requests/)).toBeNull();
+  });
+
+  it("refreshes after a turn and on window focus", async () => {
+    localStorage.setItem("lastModel", "test/free");
+    ipc.createChat.mockResolvedValue({ id: "c1", title: "New chat", model_id: "test/free", updated_at: 1 });
+    render(<Shell />);
+    await screen.findByRole("group", { name: "38 of 50 free requests left" });
+    ipc.keyStatus.mockResolvedValue(FREE_STATUS(13, 50));
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(await screen.findByRole("group", { name: "37 of 50 free requests left" })).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Message"), "hi{Enter}");
+    await waitFor(() => expect(ipc.sendMessage).toHaveBeenCalled());
+    ipc.keyStatus.mockResolvedValue(FREE_STATUS(14, 50));
+    act(() => emit({ type: "done" }));
+    expect(await screen.findByRole("group", { name: "36 of 50 free requests left" })).toBeInTheDocument();
+  });
+
+  it("keeps the last numbers and says Could not refresh. when keyStatus fails", async () => {
+    render(<Shell />);
+    await screen.findByRole("group", { name: "38 of 50 free requests left" });
+    ipc.keyStatus.mockRejectedValue({ kind: "network", message: "x" });
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(await screen.findByText("Could not refresh.")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "38 of 50 free requests left" })).toBeInTheDocument();
   });
 });

@@ -5,6 +5,10 @@ import ErrorNotice from "../chat/ErrorNotice";
 import { toUiError } from "../chat/errors";
 import ModelPicker from "../models/ModelPicker";
 import { chooseModel } from "../models/defaultModel";
+import Gauge from "../gauge/Gauge";
+import LowAllowance from "../gauge/LowAllowance";
+import { formatMoney } from "../gauge/allowance";
+import { useAllowance } from "../gauge/useAllowance";
 import Thread from "../chat/Thread";
 import { useChat } from "../chat/useChat";
 import {
@@ -68,7 +72,13 @@ export default function Shell({ onOpenSettings, onSignInAgain }: Props) {
   }, []);
   useEffect(() => loadModels(false), [loadModels]);
 
-  const chat = useChat(selectedId, refreshChats);
+  const allowance = useAllowance(selectedId);
+  const refreshAllowance = allowance.refresh;
+  const onTurnEnd = useCallback(() => {
+    refreshChats();
+    refreshAllowance();
+  }, [refreshChats, refreshAllowance]);
+  const chat = useChat(selectedId, onTurnEnd);
   const selected = chats.find((c) => c.id === selectedId);
   const hasMessages = chat.messages.length > 0 || chat.pendingUser !== null;
 
@@ -112,12 +122,17 @@ export default function Shell({ onOpenSettings, onSignInAgain }: Props) {
     }
   };
 
+  const usingFreeModel = models?.find((m) => m.id === modelId)?.is_free ?? false;
+  const blocked = usingFreeModel && allowance.status?.free_daily?.remaining === 0;
+
   const composer = (
+    <>
+    {blocked && models && <LowAllowance models={models} onPick={chooseFromPicker} />}
     <Composer
       onSend={handleSend}
       onStop={chat.stop}
       streaming={chat.status === "streaming"}
-      disabled={creating || models === null}
+      disabled={creating || models === null || blocked}
       noModel={models !== null && modelId === null}
       hasMessages={hasMessages}
       slots={{
@@ -134,6 +149,7 @@ export default function Shell({ onOpenSettings, onSignInAgain }: Props) {
         ),
       }}
     />
+    </>
   );
 
   return (
@@ -151,12 +167,29 @@ export default function Shell({ onOpenSettings, onSignInAgain }: Props) {
           }, () => {})
         }
         onOpenSettings={() => onOpenSettings?.()}
-        footer={null}
+        footer={
+          allowance.status ? (
+            <Gauge
+              status={allowance.status}
+              monthSpend={allowance.monthSpend}
+              usingFreeModel={usingFreeModel}
+              refreshFailed={allowance.failed}
+            />
+          ) : allowance.failed ? (
+            <div className="gauge"><small>Could not refresh.</small></div>
+          ) : null
+        }
       />
       <section className="main">
         <header className="head">
           <span className="ttl">{selected?.title ?? "New chat"}</span>
-          <div className="usage" data-slot="usage" />
+          <div className="usage" data-slot="usage">
+            {selectedId && allowance.usage && (
+              <>
+                {`This chat: ${allowance.usage.requests} ${allowance.usage.requests === 1 ? "request" : "requests"}, ${formatMoney(allowance.usage.cost_usd)}`}
+              </>
+            )}
+          </div>
         </header>
         {selectedId === null ? (
           <EmptyChat>
