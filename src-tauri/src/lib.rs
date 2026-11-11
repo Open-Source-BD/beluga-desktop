@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod brand;
 pub mod openrouter;
+pub mod secrets;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
