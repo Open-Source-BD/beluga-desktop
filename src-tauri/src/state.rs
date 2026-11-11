@@ -3,6 +3,7 @@
 
 use crate::engine::{DirectEngine, Engine};
 use crate::secrets::{FileStore, KeyStore, KeychainStore, SecretError, StorageKind};
+use crate::skills::library::Library;
 use crate::store::Store;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -15,6 +16,8 @@ pub const OPENROUTER_ORIGIN: &str = "https://openrouter.ai";
 const KEY_FILE: &str = "key";
 const DB_FILE: &str = "chats.db";
 const MODEL_CACHE_FILE: &str = "models.json";
+/// Under the app data directory: `packs/<id>/` and `yours/`.
+const SKILLS_DIR: &str = "skills";
 
 /// Delivers named events to the web view.
 pub trait EventSink: Send + Sync {
@@ -177,6 +180,8 @@ pub struct AppState {
     pub store: Store,
     pub engine: Arc<dyn Engine>,
     pub data_dir: PathBuf,
+    /// Every installed skill: bundled, installed and the user's own.
+    pub library: Library,
     pub events: Arc<dyn EventSink>,
     pub turns: Mutex<HashMap<String, RunningTurn>>,
     pub pending_sign_in: Mutex<Option<PendingSignIn>>,
@@ -194,6 +199,7 @@ impl AppState {
         key_store: Arc<dyn KeyStore>,
         store: Store,
         data_dir: PathBuf,
+        builtin_skills: PathBuf,
         events: Arc<dyn EventSink>,
     ) -> Self {
         let keys = Arc::new(SharedKeyStore::new(key_store));
@@ -209,6 +215,7 @@ impl AppState {
             keys,
             store,
             engine,
+            library: Library::load(&builtin_skills, &data_dir.join(SKILLS_DIR)),
             data_dir,
             events,
             turns: Mutex::new(HashMap::new()),
@@ -221,7 +228,11 @@ impl AppState {
 
     /// Production state: the database in the app data directory, and the key
     /// in the keychain unless an earlier "file" choice left a key file there.
-    pub fn open(data_dir: PathBuf, events: Arc<dyn EventSink>) -> Result<Self, String> {
+    pub fn open(
+        data_dir: PathBuf,
+        builtin_skills: PathBuf,
+        events: Arc<dyn EventSink>,
+    ) -> Result<Self, String> {
         std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
         let store = Store::open(&data_dir.join(DB_FILE)).map_err(|e| e.to_string())?;
         let key_store = startup_key_store(&data_dir);
@@ -232,6 +243,7 @@ impl AppState {
             key_store,
             store,
             data_dir,
+            builtin_skills,
             events,
         ))
     }

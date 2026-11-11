@@ -18,7 +18,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
-            let state = state::AppState::open(data_dir, Arc::new(app.handle().clone()))?;
+            let state = state::AppState::open(
+                data_dir,
+                builtin_skills_dir(app.handle()),
+                Arc::new(app.handle().clone()),
+            )?;
             app.manage(Arc::new(state));
             // The window takes its title from the one place the name lives.
             if let Some(window) = app.get_webview_window("main") {
@@ -47,7 +51,26 @@ pub fn run() {
             h::send_message,
             h::retry_turn,
             h::stop,
+            h::list_packs,
+            h::get_skill,
+            h::set_skill_on,
+            h::set_pack_on,
+            h::skill_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// The bundled skill tree: `<resource dir>/skills` in a built app. A dev run
+/// may not have copied it yet, so fall back to the source tree.
+fn builtin_skills_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
+    let bundled = app.path().resource_dir().map(|d| d.join("skills"));
+    match bundled {
+        Ok(dir) if dir.is_dir() => dir,
+        _ if cfg!(debug_assertions) => {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/skills")
+        }
+        Ok(dir) => dir,
+        Err(_) => std::path::PathBuf::from("skills"),
+    }
 }

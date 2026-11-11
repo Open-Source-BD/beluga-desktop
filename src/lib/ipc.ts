@@ -203,6 +203,58 @@ export function retryTurn(
 
 export const stop = (chatId: string) => invoke<void>("stop", { chatId });
 
+export type PackOrigin = "built_in" | "installed" | "yours";
+
+export interface SkillView {
+  id: string;
+  name: string;
+  description: string;
+  /** The skill's own switch, independent of its pack's. */
+  on: boolean;
+  acts_on_computer: boolean;
+  broken: string | null;
+  body_chars: number;
+  /** On, its pack is on and it is not broken: what the `/` menu offers. */
+  available: boolean;
+}
+
+export interface PackView {
+  id: string;
+  title: string;
+  origin: PackOrigin;
+  license: string;
+  repo: string;
+  commit: string;
+  about: string;
+  on: boolean;
+  error: string | null;
+  skills: SkillView[];
+}
+
+export interface SkillDetail {
+  skill: SkillView;
+  pack_id: string;
+  pack_title: string;
+  license: string;
+  source_url: string;
+  body: string;
+  files: string[];
+}
+
+export const listPacks = () => invoke<PackView[]>("list_packs");
+
+export const getSkill = (id: string) => invoke<SkillDetail>("get_skill", { id });
+
+export const setSkillOn = (id: string, on: boolean) =>
+  invoke<void>("set_skill_on", { id, on });
+
+export const setPackOn = (id: string, on: boolean) =>
+  invoke<void>("set_pack_on", { id, on });
+
+/** A file the skill lists, as a text attachment for `sendMessage`. */
+export const skillFile = (id: string, file: string) =>
+  invoke<AttachmentInput>("skill_file", { id, file });
+
 /** Opens an OpenRouter page in the browser (allowed only for https://openrouter.ai/*). */
 export const openAuthUrl = (url: string) =>
   invoke<void>("plugin:opener|open_url", { url });

@@ -72,6 +72,16 @@ fn harness_with(origin: &str, keys: Arc<dyn KeyStore>) -> Harness {
 }
 
 fn harness_timed(origin: &str, keys: Arc<dyn KeyStore>, timeouts: HttpTimeouts) -> Harness {
+    harness_full(origin, keys, timeouts, None)
+}
+
+/// `builtin_skills` defaults to a folder that does not exist.
+fn harness_full(
+    origin: &str,
+    keys: Arc<dyn KeyStore>,
+    timeouts: HttpTimeouts,
+    builtin_skills: Option<std::path::PathBuf>,
+) -> Harness {
     let dir = tempfile::tempdir().unwrap();
     let events = Arc::new(Recorder::default());
     let http =
@@ -82,6 +92,7 @@ fn harness_timed(origin: &str, keys: Arc<dyn KeyStore>, timeouts: HttpTimeouts) 
         keys,
         Store::in_memory().unwrap(),
         dir.path().to_path_buf(),
+        builtin_skills.unwrap_or_else(|| dir.path().join("no-bundled-skills")),
         events.clone(),
     ));
     Harness {
@@ -1179,4 +1190,129 @@ async fn a_retried_turn_carries_stored_attachments_and_drops_images_for_a_blind_
             .unwrap()
             .starts_with("File: n.txt")
     );
+}
+
+// ---- skills ----
+
+fn real_skills_harness() -> Harness {
+    harness_full(
+        "http://unused.invalid",
+        Arc::new(SessionStore::default()),
+        HttpTimeouts::PRODUCTION,
+        Some(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/skills")),
+    )
+}
+
+#[test]
+fn list_packs_shape_matches_ipc() {
+    let h = real_skills_harness();
+    let packs = super::skills::list_packs(&h.state).unwrap();
+    assert_eq!(packs.len(), 15);
+    let v = serde_json::to_value(&packs[0]).unwrap();
+    let mut keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
+    keys.sort();
+    assert_eq!(
+        keys,
+        [
+            "about", "commit", "error", "id", "license", "on", "origin", "repo", "skills", "title"
+        ]
+    );
+    assert_eq!(v["origin"], "built_in");
+    let mut skey: Vec<_> = v["skills"][0]
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
+    skey.sort();
+    assert_eq!(
+        skey,
+        [
+            "acts_on_computer",
+            "available",
+            "body_chars",
+            "broken",
+            "description",
+            "id",
+            "name",
+            "on"
+        ]
+    );
+    let d = super::skills::get_skill(&h.state, "superpowers:brainstorming").unwrap();
+    let dv = serde_json::to_value(&d).unwrap();
+    let mut dkeys: Vec<_> = dv.as_object().unwrap().keys().cloned().collect();
+    dkeys.sort();
+    assert_eq!(
+        dkeys,
+        [
+            "body",
+            "files",
+            "license",
+            "pack_id",
+            "pack_title",
+            "skill",
+            "source_url"
+        ]
+    );
+    assert!(
+        d.source_url
+            .starts_with("https://github.com/obra/superpowers/tree/")
+    );
+    assert!(d.source_url.ends_with("/skills/brainstorming"));
+    let g = super::skills::get_skill(&h.state, "gstack:gstack").unwrap();
+    assert!(
+        g.source_url
+            .starts_with("https://github.com/garrytan/gstack/tree/")
+    );
+    assert!(!g.source_url.ends_with("/.") && !g.source_url.ends_with('/'));
+    assert_eq!(g.source_url.matches('/').count(), 6, "no trailing dir");
+}
+
+#[test]
+fn get_skill_of_an_unknown_id_is_a_ui_error() {
+    let h = real_skills_harness();
+    let e = super::skills::get_skill(&h.state, "nope:nope").unwrap_err();
+    assert_eq!(
+        e.message,
+        "This skill is not available. Check it in Skills."
+    );
+}
+
+#[test]
+fn set_skill_on_persists_across_a_reload() {
+    let h = real_skills_harness();
+    let id = "superpowers:brainstorming";
+    let on = |h: &Harness| super::skills::get_skill(&h.state, id).unwrap().skill.on;
+    assert!(on(&h), "on by default");
+    super::skills::set_skill_on(&h.state, id, false).unwrap();
+    h.state.library.reload();
+    assert!(!on(&h));
+    super::skills::set_pack_on(&h.state, "superpowers", false).unwrap();
+    h.state.library.reload();
+    let packs = super::skills::list_packs(&h.state).unwrap();
+    assert!(!packs[0].on);
+    assert!(super::skills::set_skill_on(&h.state, "nope:nope", true).is_err());
+    assert!(super::skills::set_pack_on(&h.state, "nope", true).is_err());
+}
+
+#[test]
+fn skill_file_returns_a_text_attachment() {
+    let h = real_skills_harness();
+    let packs = super::skills::list_packs(&h.state).unwrap();
+    let h2 = h.state.library.skill(&h.state.store, "gstack:gstack");
+    assert!(h2.is_some());
+    // Find a skill that lists a file.
+    let (id, file) = packs
+        .iter()
+        .flat_map(|p| &p.skills)
+        .find_map(|s| {
+            let (_, e) = h.state.library.skill(&h.state.store, &s.id)?;
+            e.files.first().map(|f| (s.id.clone(), f.clone()))
+        })
+        .expect("some bundled skill has a file");
+    let a = super::skills::skill_file(&h.state, &id, &file).unwrap();
+    assert_eq!(a.name, file.rsplit('/').next().unwrap());
+    assert_eq!(a.mime, "text/plain");
+    assert!(!a.data_base64.is_empty());
+    assert!(super::skills::skill_file(&h.state, &id, "../pack.json").is_err());
 }

@@ -1,6 +1,7 @@
 //! Skills: SKILL.md parsing and the acts-on-your-computer text scan.
 
 pub mod archive;
+pub mod library;
 pub mod pack;
 pub mod parse;
 pub mod scan;
@@ -34,4 +35,13 @@ pub struct SkillEntry {
     pub files: Vec<String>,
     pub license: Option<String>,
     pub broken: Option<String>,
+}
+
+/// Where a pack came from. Serialises as `"built_in"`, `"installed"`, `"yours"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PackOrigin {
+    BuiltIn,
+    Installed,
+    Yours,
 }

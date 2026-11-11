@@ -5,11 +5,12 @@
 use super::auth::{AuthStatus, AuthUrl, StorageChoice};
 use super::chats::ChatUsage;
 use super::turn::{AttachmentInput, TurnResult};
-use super::{auth, chats, models, turn};
+use super::{auth, chats, models, skills, turn};
 use crate::auth::callback::PRODUCTION_TIMEOUT;
 use crate::engine::{EngineEvent, UiError};
 use crate::openrouter::key_info::KeyStatus;
 use crate::openrouter::models::ModelInfo;
+use crate::skills::library::{PackView, SkillDetail};
 use crate::state::AppState;
 use crate::store::{ChatSummary, StoredMessage};
 use std::sync::Arc;
@@ -144,4 +145,33 @@ pub async fn retry_turn(
 pub async fn stop(state: S<'_>, chat_id: String) -> Result<(), UiError> {
     turn::stop(&state, &chat_id);
     Ok(())
+}
+
+#[tauri::command]
+pub async fn list_packs(state: S<'_>) -> Result<Vec<PackView>, UiError> {
+    skills::list_packs(&state)
+}
+
+#[tauri::command]
+pub async fn get_skill(state: S<'_>, id: String) -> Result<SkillDetail, UiError> {
+    skills::get_skill(&state, &id)
+}
+
+#[tauri::command]
+pub async fn set_skill_on(state: S<'_>, id: String, on: bool) -> Result<(), UiError> {
+    skills::set_skill_on(&state, &id, on)
+}
+
+#[tauri::command]
+pub async fn set_pack_on(state: S<'_>, id: String, on: bool) -> Result<(), UiError> {
+    skills::set_pack_on(&state, &id, on)
+}
+
+#[tauri::command]
+pub async fn skill_file(
+    state: S<'_>,
+    id: String,
+    file: String,
+) -> Result<AttachmentInput, UiError> {
+    skills::skill_file(&state, &id, &file)
 }

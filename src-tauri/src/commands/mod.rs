@@ -6,6 +6,7 @@ pub mod auth;
 pub mod chats;
 pub mod handlers;
 pub mod models;
+pub mod skills;
 pub mod turn;
 
 #[cfg(test)]
