@@ -3,6 +3,7 @@
 use super::auth::revoke;
 use super::chats::local;
 use crate::engine::{EngineEvent, TurnRequest, UiError};
+use crate::openrouter::models::ModelCache;
 use crate::openrouter::stream::{Part, Role, WireMessage};
 use crate::state::{AppState, RunningTurn};
 use crate::store::{StoredAttachment, StoredMessage};
@@ -27,17 +28,88 @@ impl From<AttachmentInput> for StoredAttachment {
     }
 }
 
-/// Text only for now; attachments become message parts in a later task.
-fn wire(m: &StoredMessage) -> WireMessage {
+const MAX_ATTACHMENTS: usize = 5;
+const MAX_TEXT_BYTES: usize = 200_000;
+const MAX_IMAGE_BYTES: usize = 5_000_000;
+const BLIND_MODEL: &str =
+    "This model cannot read images. Pick a model that can, or remove the image.";
+
+fn is_image(a: &StoredAttachment) -> bool {
+    a.mime.starts_with("image/")
+}
+
+fn decode(a: &StoredAttachment) -> Option<Vec<u8>> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(&a.data_base64)
+        .ok()
+}
+
+/// The web view is not a trust boundary: check count, size and kind here.
+fn validate(attachments: &[StoredAttachment]) -> Result<(), UiError> {
+    if attachments.len() > MAX_ATTACHMENTS {
+        return Err(UiError::other("You can attach up to 5 files."));
+    }
+    for a in attachments {
+        let unsupported = || UiError::other(&format!("{} is not a text file or image.", a.name));
+        let too_large = || UiError::other(&format!("{} is too large to attach.", a.name));
+        let bytes = decode(a).ok_or_else(unsupported)?;
+        if is_image(a) {
+            if bytes.len() > MAX_IMAGE_BYTES {
+                return Err(too_large());
+            }
+        } else {
+            if bytes.len() > MAX_TEXT_BYTES {
+                return Err(too_large());
+            }
+            if std::str::from_utf8(&bytes).is_err() {
+                return Err(unsupported());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The cached model list says this model cannot read images. A model that is
+/// not in the cache is given the benefit of the doubt.
+fn model_is_blind(s: &AppState, model_id: &str) -> bool {
+    ModelCache::load(&s.model_cache_file())
+        .and_then(|list| list.into_iter().find(|m| m.id == model_id))
+        .is_some_and(|m| !m.accepts_images)
+}
+
+/// A fenced block that the contents cannot close early.
+fn fenced(text: &str) -> String {
+    let mut longest = 0;
+    let mut run = 0;
+    for c in text.chars() {
+        run = if c == '`' { run + 1 } else { 0 };
+        longest = longest.max(run);
+    }
+    let fence = "`".repeat(longest.max(2) + 1);
+    format!("{fence}\n{text}\n{fence}")
+}
+
+fn wire(m: &StoredMessage, with_images: bool) -> WireMessage {
     let role = match m.role.as_str() {
         "assistant" => Role::Assistant,
         "system" => Role::System,
         _ => Role::User,
     };
-    WireMessage {
-        role,
-        parts: vec![Part::Text(m.text.clone())],
+    let mut parts = vec![Part::Text(m.text.clone())];
+    for a in &m.attachments {
+        if is_image(a) {
+            if with_images {
+                parts.push(Part::ImageDataUrl(format!(
+                    "data:{};base64,{}",
+                    a.mime, a.data_base64
+                )));
+            }
+        } else if let Some(text) = decode(a).and_then(|b| String::from_utf8(b).ok()) {
+            parts.push(Part::Text(format!("File: {}\n{}", a.name, fenced(&text))));
+        }
     }
+    WireMessage { role, parts }
 }
 
 fn is_unauthorized(e: &EngineEvent) -> bool {
@@ -63,6 +135,10 @@ pub async fn send_message(
         return Err(UiError::other("This chat no longer exists."));
     }
     let attachments: Vec<StoredAttachment> = attachments.into_iter().map(Into::into).collect();
+    validate(&attachments)?;
+    if attachments.iter().any(is_image) && model_is_blind(s, model_id) {
+        return Err(UiError::other(BLIND_MODEL));
+    }
     s.store
         .append_message(chat_id, "user", text, &attachments, false)
         .map_err(local)?;
@@ -78,12 +154,13 @@ async fn run_stored_turn(
     on_event: &(dyn Fn(EngineEvent) + Send + Sync),
 ) -> Result<(), UiError> {
     s.store.set_chat_model(chat_id, model_id).map_err(local)?;
+    let with_images = !model_is_blind(s, model_id);
     let messages = s
         .store
         .get_messages(chat_id)
         .map_err(local)?
         .iter()
-        .map(wire)
+        .map(|m| wire(m, with_images))
         .collect();
 
     let id = s.next_id();

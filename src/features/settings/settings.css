@@ -1,0 +1,55 @@
+.settings-view .head {
+  gap: 14px;
+}
+.settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 26px 0;
+}
+.settings-col {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.setting h2 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 10px;
+}
+.setting-line,
+.setting-confirm p {
+  margin: 0 0 12px;
+  color: var(--text2);
+}
+.setting-error {
+  margin: 0 0 12px;
+  color: var(--deep);
+}
+.seg {
+  display: inline-flex;
+  background: var(--floe);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+.seg button {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--mid);
+  cursor: pointer;
+}
+.seg button[aria-pressed="true"] {
+  background: var(--white);
+  color: var(--deep);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.seg button:focus-visible {
+  outline: 2px solid var(--sonar);
+  outline-offset: 1px;
+}

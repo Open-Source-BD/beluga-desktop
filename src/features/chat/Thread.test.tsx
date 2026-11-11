@@ -113,3 +113,21 @@ describe("Thread content", () => {
     expect(onSignInAgain).toHaveBeenCalled();
   });
 });
+
+describe("Thread attachments", () => {
+  it("lists the names of a stored message's attachments under its text", () => {
+    const m: StoredMessage = {
+      id: "u1", role: "user", text: "Look", interrupted: false, created_at: 1,
+      attachments: [
+        { name: "notes.md", mime: "text/markdown", data_base64: "aGk=" },
+        { name: "p.png", mime: "image/png", data_base64: "AAAA" },
+      ],
+    };
+    render(<Thread {...base} messages={[m]} />);
+    const list = screen.getByRole("list", { name: "Attachments" });
+    expect(list).toHaveTextContent("notes.md");
+    expect(list).toHaveTextContent("p.png");
+    expect(screen.getByText("Look")).toBeInTheDocument();
+    expect(screen.queryByRole("img")).toBeNull();
+  });
+});

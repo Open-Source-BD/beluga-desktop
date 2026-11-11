@@ -156,3 +156,77 @@
   color: var(--mid);
   font-size: 12.5px;
 }
+
+.attach-chips {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.attach-chip,
+.chip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  color: var(--deep);
+  background: var(--ice);
+  border: 1px solid var(--line);
+}
+.attach-chip .attach-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attach-remove {
+  display: grid;
+  place-items: center;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--mid);
+  cursor: pointer;
+}
+.attach-remove:hover {
+  color: var(--deep);
+}
+.chip-btn {
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.chip-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.attach-remove:focus-visible,
+.chip-btn:focus-visible {
+  outline: 2px solid var(--sonar);
+  outline-offset: 1px;
+}
+.attach-notices {
+  padding: 0 4px 8px;
+  font-size: 12.5px;
+  color: var(--text2);
+}
+.attach-notices p {
+  margin: 0;
+}
+.me-files {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.me-files .attach-chip {
+  background: var(--white);
+}

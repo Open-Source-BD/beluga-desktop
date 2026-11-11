@@ -60,6 +60,15 @@ export default function Thread({
           m.role === "user" ? (
             <div key={m.id} className="me">
               {m.text}
+              {m.attachments.length > 0 && (
+                <ul className="me-files" aria-label="Attachments">
+                  {m.attachments.map((a, i) => (
+                    <li key={`${a.name}-${i}`} className="attach-chip">
+                      {a.name}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           ) : (
             <div key={m.id} className="reply">

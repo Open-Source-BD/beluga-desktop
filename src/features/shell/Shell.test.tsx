@@ -17,6 +17,8 @@ const ipc = vi.hoisted(() => ({
   keyStatus: vi.fn(),
   monthSpend: vi.fn(),
   chatUsage: vi.fn(),
+  authStatus: vi.fn(),
+  signOut: vi.fn(),
 }));
 vi.mock("../../lib/ipc", () => ipc);
 
@@ -41,6 +43,7 @@ beforeEach(() => {
   ipc.keyStatus.mockResolvedValue(FREE_STATUS(12, 50));
   ipc.monthSpend.mockResolvedValue(0);
   ipc.chatUsage.mockResolvedValue({ requests: 7, cost_usd: 0 });
+  ipc.authStatus.mockResolvedValue({ signed_in: true, storage: "keychain" });
   ipc.sendMessage.mockImplementation((_c, _t, _a, _m, onEvent) => {
     emit = onEvent;
     return new Promise(() => {});
@@ -196,5 +199,56 @@ describe("Shell", () => {
     });
     expect(await screen.findByText("Could not refresh.")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "38 of 50 free requests left" })).toBeInTheDocument();
+  });
+
+  it("opens Settings in place of the conversation and goes back to chat", async () => {
+    render(<Shell />);
+    await screen.findByLabelText("Message");
+    await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("button", { name: "Back to chat" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Message")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+    expect(screen.getByLabelText("Message")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Back to chat" })).toBeNull();
+  });
+
+  it("returns to sign-in after a confirmed sign out", async () => {
+    ipc.signOut.mockResolvedValue(undefined);
+    const onSignInAgain = vi.fn();
+    render(<Shell onSignInAgain={onSignInAgain} />);
+    await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Sign out" }));
+    await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(onSignInAgain).toHaveBeenCalled());
+  });
+
+  it("refuses an image for a model that cannot read images and sends nothing", async () => {
+    localStorage.setItem("lastModel", "test/model");
+    render(<Shell />);
+    const input = (await screen.findByLabelText("Attach files")) as HTMLInputElement;
+    await userEvent.upload(input, new File([new Uint8Array([1])], "p.png", { type: "image/png" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This model cannot read images. Pick a model that can, or remove the image.",
+    );
+    expect(ipc.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("sends attachments through the chat", async () => {
+    localStorage.setItem("lastModel", "test/model");
+    ipc.createChat.mockResolvedValue({ id: "c1", title: "New chat", model_id: "test/model", updated_at: 1 });
+    render(<Shell />);
+    const input = (await screen.findByLabelText("Attach files")) as HTMLInputElement;
+    await userEvent.upload(input, new File(["hi"], "n.txt", { type: "text/plain" }));
+    await screen.findByText("n.txt");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(ipc.sendMessage).toHaveBeenCalledWith(
+        "c1",
+        "",
+        [{ name: "n.txt", mime: "text/plain", data_base64: "aGk=" }],
+        "test/model",
+        expect.any(Function),
+      ),
+    );
   });
 });

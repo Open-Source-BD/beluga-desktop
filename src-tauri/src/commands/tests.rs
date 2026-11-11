@@ -783,3 +783,191 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
 fn to<T: serde::Serialize>(v: &T) -> Value {
     serde_json::to_value(v).unwrap()
 }
+
+// ---- attachments ----
+
+fn b64(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+fn att(name: &str, mime: &str, bytes: &[u8]) -> turn::AttachmentInput {
+    turn::AttachmentInput {
+        name: name.into(),
+        mime: mime.into(),
+        data_base64: b64(bytes),
+    }
+}
+
+fn cache_model(h: &Harness, id: &str, accepts_images: bool) {
+    let m = ModelInfo {
+        id: id.into(),
+        name: id.into(),
+        prompt_usd_per_mtok: 0.0,
+        completion_usd_per_mtok: 0.0,
+        is_free: true,
+        supports_tools: true,
+        accepts_images,
+        context_length: 1000,
+    };
+    ModelCache::save(&h.state.model_cache_file(), &[m]).unwrap();
+}
+
+async fn last_body(server: &MockServer) -> Value {
+    let reqs = server.received_requests().await.unwrap();
+    reqs.last().unwrap().body_json().unwrap()
+}
+
+async fn chat_server() -> MockServer {
+    let server = MockServer::start().await;
+    mock(&server, "POST", "/api/v1/chat/completions", sse(PAID_REPLY)).await;
+    server
+}
+
+#[tokio::test]
+async fn a_text_attachment_becomes_a_file_part_after_the_users_text() {
+    let server = chat_server().await;
+    let h = signed_in(&server.uri());
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    let a = att("notes.md", "text/markdown", b"# Title\nbody");
+    send(&h, &chat.id, "Read this", "m/a", vec![a])
+        .await
+        .0
+        .unwrap();
+    let body = last_body(&server).await;
+    let content = &body["messages"][0]["content"];
+    assert_eq!(content[0]["text"], "Read this");
+    assert_eq!(
+        content[1]["text"],
+        "File: notes.md\n```\n# Title\nbody\n```"
+    );
+}
+
+#[tokio::test]
+async fn a_fence_inside_the_file_gets_a_longer_outer_fence() {
+    let server = chat_server().await;
+    let h = signed_in(&server.uri());
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    let a = att("a.md", "text/markdown", b"x\n```rust\nfn main() {}\n```\ny");
+    send(&h, &chat.id, "", "m/a", vec![a]).await.0.unwrap();
+    let body = last_body(&server).await;
+    let text = body["messages"][0]["content"][1]["text"].as_str().unwrap();
+    assert!(text.starts_with("File: a.md\n````\n"), "{text}");
+    assert!(text.ends_with("\n````"), "{text}");
+}
+
+#[tokio::test]
+async fn an_image_attachment_becomes_an_image_data_url_part() {
+    let server = chat_server().await;
+    let h = signed_in(&server.uri());
+    cache_model(&h, "m/a", true);
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    let a = att("p.png", "image/png", &[137, 80, 78, 71]);
+    let data = a.data_base64.clone();
+    send(&h, &chat.id, "look", "m/a", vec![a]).await.0.unwrap();
+    let body = last_body(&server).await;
+    assert_eq!(
+        body["messages"][0]["content"][1]["image_url"]["url"],
+        format!("data:image/png;base64,{data}")
+    );
+}
+
+#[tokio::test]
+async fn an_image_for_a_model_that_cannot_read_images_is_rejected_and_nothing_is_stored() {
+    let server = chat_server().await;
+    let h = signed_in(&server.uri());
+    cache_model(&h, "m/a", false);
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    let a = att("p.png", "image/png", &[1, 2, 3]);
+    let (r, events) = send(&h, &chat.id, "look", "m/a", vec![a]).await;
+    let e = r.unwrap_err();
+    assert_eq!(e.kind, "other");
+    assert_eq!(
+        e.message,
+        "This model cannot read images. Pick a model that can, or remove the image."
+    );
+    assert!(!e.retryable);
+    assert!(events.is_empty());
+    assert!(chats::get_messages(&h.state, &chat.id).unwrap().is_empty());
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn an_image_for_a_model_missing_from_the_cache_is_allowed() {
+    let server = chat_server().await;
+    let h = signed_in(&server.uri());
+    cache_model(&h, "m/other", false);
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    let a = att("p.png", "image/png", &[1, 2, 3]);
+    send(&h, &chat.id, "look", "m/a", vec![a]).await.0.unwrap();
+    assert_eq!(chats::get_messages(&h.state, &chat.id).unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn limits_are_enforced_in_the_core_with_the_exact_copy() {
+    let server = chat_server().await;
+    let h = signed_in(&server.uri());
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    let too_many: Vec<_> = (0..6)
+        .map(|i| att(&format!("{i}.txt"), "text/plain", b"x"))
+        .collect();
+    let big_text = att("big.txt", "text/plain", &vec![b'a'; 200_001]);
+    let big_image = att("big.png", "image/png", &vec![0u8; 5_000_001]);
+    let binary = att("blob.bin", "application/octet-stream", &[0xff, 0xfe, 0x00]);
+    let ok_text = att("edge.txt", "text/plain", &vec![b'a'; 200_000]);
+    let cases: Vec<(Vec<turn::AttachmentInput>, &str)> = vec![
+        (too_many, "You can attach up to 5 files."),
+        (vec![big_text], "big.txt is too large to attach."),
+        (vec![big_image], "big.png is too large to attach."),
+        (vec![binary], "blob.bin is not a text file or image."),
+    ];
+    for (atts, message) in cases {
+        let e = send(&h, &chat.id, "x", "m/a", atts).await.0.unwrap_err();
+        assert_eq!(
+            (e.kind.as_str(), e.message.as_str(), e.retryable),
+            ("other", message, false)
+        );
+    }
+    assert!(chats::get_messages(&h.state, &chat.id).unwrap().is_empty());
+    send(&h, &chat.id, "x", "m/a", vec![ok_text])
+        .await
+        .0
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_retried_turn_carries_stored_attachments_and_drops_images_for_a_blind_model() {
+    let server = chat_server().await;
+    let h = signed_in(&server.uri());
+    cache_model(&h, "m/a", true);
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    let atts = vec![
+        att("n.txt", "text/plain", b"hello"),
+        att("p.png", "image/png", &[1, 2, 3]),
+    ];
+    let stored: Vec<StoredAttachment> = atts.into_iter().map(Into::into).collect();
+    h.state
+        .store
+        .append_message(&chat.id, "user", "see", &stored, false)
+        .unwrap();
+
+    retry(&h, &chat.id, "m/a").await.0.unwrap();
+    let content = last_body(&server).await["messages"][0]["content"].clone();
+    assert_eq!(content.as_array().unwrap().len(), 3);
+    assert_eq!(content[2]["type"], "image_url");
+
+    cache_model(&h, "m/a", false);
+    let reply = h.state.store.get_messages(&chat.id).unwrap().pop().unwrap();
+    h.state.store.delete_message(&chat.id, &reply.id).unwrap();
+    retry(&h, &chat.id, "m/a").await.0.unwrap();
+    let content = last_body(&server).await["messages"][0]["content"].clone();
+    let parts = content.as_array().unwrap();
+    assert_eq!(parts.len(), 2);
+    assert_eq!(parts[0]["text"], "see");
+    assert!(
+        parts[1]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("File: n.txt")
+    );
+}

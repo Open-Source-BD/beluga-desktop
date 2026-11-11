@@ -17,16 +17,17 @@ import {
   listChats,
   listModels,
   renameChat,
+  type AttachmentInput,
   type ChatSummary,
   type ModelInfo,
   type UiError,
 } from "../../lib/ipc";
+import Settings from "../settings/Settings";
 import Sidebar from "./Sidebar";
 import "./shell.css";
 import "../chat/chat.css";
 
 interface Props {
-  onOpenSettings?: () => void;
   onSignInAgain?: () => void;
 }
 
@@ -38,7 +39,7 @@ function readLastModel(): string | null {
   }
 }
 
-export default function Shell({ onOpenSettings, onSignInAgain }: Props) {
+export default function Shell({ onSignInAgain }: Props) {
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [models, setModels] = useState<ModelInfo[] | null>(null);
@@ -47,6 +48,7 @@ export default function Shell({ onOpenSettings, onSignInAgain }: Props) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [startError, setStartError] = useState<UiError | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   const refreshChats = useCallback(() => {
     listChats().then(setChats, () => {});
@@ -82,7 +84,7 @@ export default function Shell({ onOpenSettings, onSignInAgain }: Props) {
   const selected = chats.find((c) => c.id === selectedId);
   const hasMessages = chat.messages.length > 0 || chat.pendingUser !== null;
 
-  const handleSend = async (text: string) => {
+  const handleSend = async (text: string, attachments: AttachmentInput[]) => {
     if (!modelId || creating) return;
     let id = selectedId;
     if (!id) {
@@ -99,10 +101,11 @@ export default function Shell({ onOpenSettings, onSignInAgain }: Props) {
         setCreating(false);
       }
     }
-    chat.send(text, [], modelId, id);
+    chat.send(text, attachments, modelId, id);
   };
 
   const select = (id: string | null) => {
+    setShowSettings(false);
     if (models) {
       const own = chats.find((c) => c.id === id)?.model_id;
       setModelId(chooseModel(models, [own, readLastModel()]));
@@ -135,6 +138,7 @@ export default function Shell({ onOpenSettings, onSignInAgain }: Props) {
       disabled={creating || models === null || blocked}
       noModel={models !== null && modelId === null}
       hasMessages={hasMessages}
+      acceptsImages={models?.find((m) => m.id === modelId)?.accepts_images ?? true}
       slots={{
         model: (
           <ModelPicker
@@ -166,7 +170,7 @@ export default function Shell({ onOpenSettings, onSignInAgain }: Props) {
             refreshChats();
           }, () => {})
         }
-        onOpenSettings={() => onOpenSettings?.()}
+        onOpenSettings={() => setShowSettings(true)}
         footer={
           allowance.status ? (
             <Gauge
@@ -180,48 +184,55 @@ export default function Shell({ onOpenSettings, onSignInAgain }: Props) {
           ) : null
         }
       />
-      <section className="main">
-        <header className="head">
-          <span className="ttl">{selected?.title ?? "New chat"}</span>
-          <div className="usage" data-slot="usage">
-            {selectedId && allowance.usage && (
-              <>
-                {`This chat: ${allowance.usage.requests} ${allowance.usage.requests === 1 ? "request" : "requests"}, ${formatMoney(allowance.usage.cost_usd)}`}
-              </>
-            )}
-          </div>
-        </header>
-        {selectedId === null ? (
-          <EmptyChat>
-            {startError && (
-              <div className="col">
-                <ErrorNotice
-                  error={startError}
-                  onSignInAgain={() => onSignInAgain?.()}
-                  onPickModel={pickModel}
-                  onRetry={() => setStartError(null)}
-                />
-              </div>
-            )}
-            {composer}
-          </EmptyChat>
-        ) : (
-          <>
-            <Thread
-              messages={chat.messages}
-              pendingUser={chat.pendingUser}
-              streamingText={chat.streamingText}
-              status={chat.status}
-              error={chat.error}
-              notSent={chat.unsent !== null}
-              onRetry={() => chat.retry(modelId)}
-              onSignInAgain={() => onSignInAgain?.()}
-              onPickModel={pickModel}
-            />
-            {composer}
-          </>
-        )}
-      </section>
+      {showSettings ? (
+        <Settings
+          onBack={() => setShowSettings(false)}
+          onSignedOut={() => onSignInAgain?.()}
+        />
+      ) : (
+        <section className="main">
+          <header className="head">
+            <span className="ttl">{selected?.title ?? "New chat"}</span>
+            <div className="usage" data-slot="usage">
+              {selectedId && allowance.usage && (
+                <>
+                  {`This chat: ${allowance.usage.requests} ${allowance.usage.requests === 1 ? "request" : "requests"}, ${formatMoney(allowance.usage.cost_usd)}`}
+                </>
+              )}
+            </div>
+          </header>
+          {selectedId === null ? (
+            <EmptyChat>
+              {startError && (
+                <div className="col">
+                  <ErrorNotice
+                    error={startError}
+                    onSignInAgain={() => onSignInAgain?.()}
+                    onPickModel={pickModel}
+                    onRetry={() => setStartError(null)}
+                  />
+                </div>
+              )}
+              {composer}
+            </EmptyChat>
+          ) : (
+            <>
+              <Thread
+                messages={chat.messages}
+                pendingUser={chat.pendingUser}
+                streamingText={chat.streamingText}
+                status={chat.status}
+                error={chat.error}
+                notSent={chat.unsent !== null}
+                onRetry={() => chat.retry(modelId)}
+                onSignInAgain={() => onSignInAgain?.()}
+                onPickModel={pickModel}
+              />
+              {composer}
+            </>
+          )}
+        </section>
+      )}
     </div>
   );
 }
