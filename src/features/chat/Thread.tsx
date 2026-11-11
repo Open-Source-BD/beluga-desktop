@@ -83,7 +83,12 @@ export default function Thread({
           </div>
         )}
         <div className="reply live" aria-live="polite">
-          {streaming && streamingText && <Markdown text={streamingText} />}
+          {streaming &&
+            (streamingText ? (
+              <Markdown text={streamingText} />
+            ) : (
+              <p className="waiting">Waiting for the model…</p>
+            ))}
         </div>
         {showInterrupted && (
           <div className="notice">

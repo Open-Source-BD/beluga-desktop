@@ -98,6 +98,20 @@ describe("Thread content", () => {
     expect(container.querySelector('[aria-live="polite"]')).toHaveTextContent("Hi");
   });
 
+  it("says Waiting for the model… in the live region until the first text", () => {
+    const { container, rerender } = render(<Thread {...base} pendingUser="hi" status="streaming" />);
+    const live = container.querySelector('[aria-live="polite"]');
+    expect(live).toHaveTextContent("Waiting for the model…");
+    rerender(<Thread {...base} pendingUser="hi" status="streaming" streamingText="He" />);
+    expect(screen.queryByText("Waiting for the model…")).toBeNull();
+    expect(live).toHaveTextContent("He");
+  });
+
+  it("shows no waiting line when nothing is streaming", () => {
+    render(<Thread {...base} status="idle" />);
+    expect(screen.queryByText("Waiting for the model…")).toBeNull();
+  });
+
   it("shows the error message as an alert with its button", async () => {
     const onSignInAgain = vi.fn();
     render(

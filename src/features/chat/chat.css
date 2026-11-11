@@ -28,6 +28,21 @@
 .reply:empty {
   display: none;
 }
+.waiting {
+  margin: 0;
+  color: var(--text2);
+  animation: waiting-pulse 1.6s ease-in-out infinite;
+}
+@keyframes waiting-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .waiting {
+    animation: none;
+  }
+}
 .notice {
   display: flex;
   align-items: center;
