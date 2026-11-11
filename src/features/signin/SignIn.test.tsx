@@ -53,6 +53,7 @@ beforeEach(() => {
     ipc[k].mockReset().mockResolvedValue(undefined);
   }
   ipc.signInCodeUrl.mockResolvedValue({ auth_url: "https://openrouter.ai/auth?x" });
+  ipc.signInStart.mockResolvedValue({ auth_url: "https://openrouter.ai/auth?start" });
 });
 
 describe("SignIn", () => {
@@ -172,6 +173,48 @@ describe("SignIn", () => {
     await user.click(screen.getByRole("button", { name: "Use this code" }));
     expect(ipc.signInWithCode).toHaveBeenCalledWith("code123");
     await waitFor(() => expect(onSignedIn).toHaveBeenCalled());
+  });
+
+  it("in code mode, Get a new code fetches and opens a fresh code URL", async () => {
+    const user = userEvent.setup();
+    await renderSignIn();
+    await user.click(screen.getByRole("button", { name: "Paste a key I already have" }));
+    await user.click(screen.getByRole("button", { name: "Get a one-time code instead" }));
+    await screen.findByLabelText("One-time code");
+    ipc.signInCodeUrl.mockResolvedValue({ auth_url: "https://openrouter.ai/auth?y" });
+    await user.click(screen.getByRole("button", { name: "Get a new code" }));
+    expect(ipc.signInCodeUrl).toHaveBeenCalledTimes(2);
+    expect(ipc.openAuthUrl).toHaveBeenLastCalledWith("https://openrouter.ai/auth?y");
+    expect(screen.getByLabelText("One-time code")).toBeInTheDocument();
+  });
+
+  it("in code mode, Paste a key instead returns to the key field", async () => {
+    const user = userEvent.setup();
+    await renderSignIn();
+    ipc.signInWithCode.mockRejectedValue({ kind: "other", message: "Expired.", retryable: false });
+    await user.click(screen.getByRole("button", { name: "Paste a key I already have" }));
+    await user.click(screen.getByRole("button", { name: "Get a one-time code instead" }));
+    await user.type(await screen.findByLabelText("One-time code"), "old");
+    await user.click(screen.getByRole("button", { name: "Use this code" }));
+    await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: "Paste a key instead" }));
+    const field = screen.getByLabelText("OpenRouter key");
+    expect(field).toHaveAttribute("type", "password");
+    expect(screen.queryByLabelText("One-time code")).not.toBeInTheDocument();
+    await user.type(field, "sk-or-abc");
+    await user.click(screen.getByRole("button", { name: "Use this key" }));
+    expect(ipc.signInWithKey).toHaveBeenCalledWith("sk-or-abc");
+  });
+
+  it("while waiting, Open the sign-in page again opens the stored URL", async () => {
+    const user = userEvent.setup();
+    await renderSignIn();
+    await user.click(screen.getByRole("button", { name: "Sign in with OpenRouter" }));
+    const again = await screen.findByRole("button", { name: "Open the sign-in page again" });
+    expect(ipc.openAuthUrl).not.toHaveBeenCalled();
+    await user.click(again);
+    expect(ipc.openAuthUrl).toHaveBeenCalledWith("https://openrouter.ai/auth?start");
+    expect(screen.getByText("Finish signing in in your browser.")).toBeInTheDocument();
   });
 
   it("opens the keychain dialog on reason keychain_unavailable and keeps the key for the session", async () => {

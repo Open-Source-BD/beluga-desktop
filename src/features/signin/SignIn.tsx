@@ -48,6 +48,8 @@ function isKeychainUnavailable(err: unknown): boolean {
 
 export default function SignIn({ notice, onSignedIn }: Props) {
   const [phase, setPhase] = useState<Phase>("idle");
+  /** The browser sign-in page, kept so it can be opened again. */
+  const [authUrl, setAuthUrl] = useState<string | null>(null);
   const [pasteMode, setPasteMode] = useState<PasteMode>("closed");
   const [secret, setSecret] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -84,9 +86,11 @@ export default function SignIn({ notice, onSignedIn }: Props) {
 
   async function startBrowserSignIn() {
     setError(null);
+    setAuthUrl(null);
     setPhase("waiting");
     try {
-      await signInStart();
+      const { auth_url } = await signInStart();
+      setAuthUrl(auth_url);
     } catch (err) {
       setPhase("idle");
       setError(messageOf(err));
@@ -100,6 +104,21 @@ export default function SignIn({ notice, onSignedIn }: Props) {
       // Cancelling a sign-in that already ended is harmless.
     }
     setPhase("idle");
+  }
+
+  async function openAgain() {
+    if (!authUrl) return;
+    try {
+      await openAuthUrl(authUrl);
+    } catch (err) {
+      setError(messageOf(err));
+    }
+  }
+
+  function switchToKey() {
+    setError(null);
+    setSecret("");
+    setPasteMode("key");
   }
 
   async function switchToCode() {
@@ -177,6 +196,11 @@ export default function SignIn({ notice, onSignedIn }: Props) {
         {phase === "waiting" ? (
           <div className="signin-waiting">
             <p role="status">Finish signing in in your browser.</p>
+            {authUrl && (
+              <button type="button" className="signin-link" onClick={openAgain}>
+                Open the sign-in page again
+              </button>
+            )}
             <button type="button" className="signin-alt" onClick={cancel}>
               Cancel
             </button>
@@ -219,7 +243,24 @@ export default function SignIn({ notice, onSignedIn }: Props) {
                 >
                   {isCode ? "Use this code" : "Use this key"}
                 </button>
-                {!isCode && (
+                {isCode ? (
+                  <>
+                    <button
+                      type="button"
+                      className="signin-link"
+                      onClick={switchToCode}
+                    >
+                      Get a new code
+                    </button>
+                    <button
+                      type="button"
+                      className="signin-link"
+                      onClick={switchToKey}
+                    >
+                      Paste a key instead
+                    </button>
+                  </>
+                ) : (
                   <button
                     type="button"
                     className="signin-link"
