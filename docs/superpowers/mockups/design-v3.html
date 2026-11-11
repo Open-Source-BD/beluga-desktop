@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beluga design direction v3</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ice:#F4F7F9;--floe:#E9EEF2;--line:#D5DEE5;--deep:#0F2B3C;--mid:#56707F;
+    --sonar:#0E7C8B;--amber-soft:#FBF1E2;--white:#FFFFFF;
+    --page:#C9D5DD;--text2:#2C4656;--frame:#AFC0CB;--dot:#C3CFD8;--sel:#DAE3E9;--tick-used:#C6D2DA;
+    --ask-line:#E3C79E;--ask-ink:#6D3F10;--ask-pre-line:#EAD7B8;--field-line:#BFCCD5;--ph:#8296A2;
+    --btn:#0F2B3C;--on-btn:#FFFFFF;--on-accent:#FFFFFF;--pitch:#0F2B3C;--shadow:rgba(15,43,60,.45);
+    color-scheme:light;
+  }
+  @media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ice:#0F1C24;--floe:#0A151B;--line:#213540;--deep:#E3ECF1;--mid:#8AA1AE;
+    --sonar:#45B9C7;--amber-soft:#2A2115;--white:#16272F;
+    --page:#04090C;--text2:#A9BDC8;--frame:#2A3F4B;--dot:#2A3F4B;--sel:#1C2F3A;--tick-used:#243741;
+    --ask-line:#5C4525;--ask-ink:#F0C48A;--ask-pre-line:#4A3A22;--field-line:#2F4552;--ph:#6F8794;
+    --btn:#E3ECF1;--on-btn:#0F1C24;--on-accent:#04222A;--pitch:#13303F;--shadow:rgba(0,0,0,.7);
+    color-scheme:dark;
+  }}
+  :root[data-theme="dark"]{
+    --ice:#0F1C24;--floe:#0A151B;--line:#213540;--deep:#E3ECF1;--mid:#8AA1AE;
+    --sonar:#45B9C7;--amber-soft:#2A2115;--white:#16272F;
+    --page:#04090C;--text2:#A9BDC8;--frame:#2A3F4B;--dot:#2A3F4B;--sel:#1C2F3A;--tick-used:#243741;
+    --ask-line:#5C4525;--ask-ink:#F0C48A;--ask-pre-line:#4A3A22;--field-line:#2F4552;--ph:#6F8794;
+    --btn:#E3ECF1;--on-btn:#0F1C24;--on-accent:#04222A;--pitch:#13303F;--shadow:rgba(0,0,0,.7);
+    color-scheme:dark;
+  }
+  .mode{position:sticky;top:12px;z-index:5;display:flex;align-items:center;gap:12px;width:max-content;margin:0 0 22px auto;padding:6px 6px 6px 14px;border-radius:12px;background:var(--ice);border:1px solid var(--frame);box-shadow:0 10px 24px -16px var(--shadow)}
+  .mode span{color:var(--mid);font-size:13px}
+  .seg{display:flex;background:var(--floe);border-radius:8px;padding:3px;gap:2px}
+  .seg button{font:inherit;font-size:13px;font-weight:500;padding:5px 12px;border-radius:6px;border:0;background:transparent;color:var(--mid);cursor:pointer}
+  .seg button[aria-pressed="true"]{background:var(--white);color:var(--deep);box-shadow:0 0 0 1px var(--line)}
+  .seg button:focus-visible{outline:2px solid var(--sonar);outline-offset:1px}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:var(--deep);font-family:"Hanken Grotesk",system-ui,sans-serif;font-size:14px;line-height:1.5;padding:40px 24px 80px}
+  .page{max-width:1120px;margin:0 auto}
+  .intro h1{font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:34px;letter-spacing:-.02em;margin:0 0 8px;line-height:1.1}
+  .intro p{margin:0 0 6px;max-width:68ch;color:var(--text2)}
+  .cap{font-family:"Bricolage Grotesque",sans-serif;font-weight:500;font-size:20px;letter-spacing:-.01em;margin:48px 0 4px}
+  .capsub{margin:0 0 14px;color:var(--text2);max-width:70ch}
+
+  /* window frame */
+  .win{background:var(--ice);border-radius:12px;overflow:hidden;box-shadow:0 24px 60px -20px var(--shadow);border:1px solid var(--frame)}
+  .bar{height:38px;display:flex;align-items:center;padding:0 14px;gap:7px;background:var(--floe);border-bottom:1px solid var(--line)}
+  .dot{width:11px;height:11px;border-radius:50%;background:var(--dot)}
+  .bar .t{margin-left:10px;font-size:12.5px;color:var(--mid)}
+  .app{display:grid;grid-template-columns:232px 1fr;height:600px}
+
+  /* sidebar */
+  .side{background:var(--floe);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:14px 10px 12px;min-height:0}
+  .brand{display:flex;align-items:center;gap:8px;padding:2px 8px 14px;font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:17px;letter-spacing:-.01em}
+  .brand svg{flex:none}
+  .newc{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:var(--white);border:1px solid var(--line);font-weight:500}
+  .newc kbd{margin-left:auto;font:inherit;font-size:11.5px;color:var(--mid)}
+  .grp{font-size:12px;color:var(--mid);padding:16px 10px 4px}
+  .row{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .row.on{background:var(--sel);font-weight:500}
+  .row svg{flex:none;color:var(--mid)}
+  .row .n{margin-left:auto;font-size:12px;color:var(--mid)}
+  .gauge{margin-top:auto;padding:12px 10px 2px;border-top:1px solid var(--line)}
+  .gauge b{font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:22px;letter-spacing:-.02em}
+  .gauge .of{color:var(--mid)}
+  .ticks{display:grid;grid-template-columns:repeat(25,1fr);gap:3px 2px;margin:8px 0 8px}
+  .ticks i{height:9px;border-radius:2px;background:var(--sonar)}
+  .ticks i.u{background:var(--tick-used)}
+  .gauge small{display:block;color:var(--mid);font-size:12px;line-height:1.45}
+
+  /* main */
+  .main{display:flex;flex-direction:column;min-width:0;min-height:0}
+  .head{height:46px;display:flex;align-items:center;gap:10px;padding:0 20px;border-bottom:1px solid var(--line)}
+  .head .ttl{font-weight:600}
+  .head .proj{color:var(--mid)}
+  .head .cost{margin-left:auto;color:var(--mid);font-size:13px}
+  .head .cost b{color:var(--deep);font-weight:600}
+
+  .thread{flex:1;overflow:hidden;padding:26px 0 0;display:flex;flex-direction:column;gap:16px}
+  .col{width:min(680px,100% - 48px);margin:0 auto}
+  .me{align-self:flex-end;background:var(--sel);padding:9px 14px;border-radius:16px 16px 4px 16px;max-width:520px;margin-right:calc((100% - min(680px,100% - 48px))/2)}
+  .skill{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sonar);font-weight:500;margin-bottom:4px}
+  .steps{border-left:2px solid var(--line);margin:2px 0 0 4px;padding-left:14px;display:grid;gap:3px;color:var(--mid);font-size:13px}
+  .steps span code{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--deep)}
+  .ask{border:1px solid var(--ask-line);background:var(--amber-soft);border-radius:10px;padding:12px 14px}
+  .ask .q{font-weight:600;color:var(--ask-ink)}
+  .ask pre{margin:8px 0 10px;background:var(--white);border:1px solid var(--ask-pre-line);border-radius:7px;padding:8px 10px;font-family:"JetBrains Mono",monospace;font-size:12.5px;overflow:hidden}
+  .btns{display:flex;gap:8px;flex-wrap:wrap}
+  .b{font:inherit;font-weight:500;font-size:13px;padding:6px 12px;border-radius:7px;border:1px solid var(--line);background:var(--white);color:var(--deep)}
+  .b.p{background:var(--btn);color:var(--on-btn);border-color:var(--btn)}
+
+  .composer{width:min(680px,100% - 48px);margin:14px auto 18px;background:var(--white);border:1px solid var(--field-line);border-radius:14px;padding:12px 12px 8px;box-shadow:0 6px 18px -12px rgba(15,43,60,.5)}
+  .composer .ph{color:var(--ph);padding:0 4px 14px}
+  .ctl{display:flex;align-items:center;gap:6px}
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:7px;font-size:12.5px;color:var(--deep);background:var(--ice);border:1px solid var(--line)}
+  .chip .free{color:var(--sonar);font-weight:600}
+  .send{margin-left:auto;width:30px;height:30px;border-radius:8px;background:var(--btn);display:grid;place-items:center}
+
+  /* empty state */
+  .empty{flex:1;display:flex;flex-direction:column;justify-content:center;padding-bottom:40px}
+  .hello{font-family:"Bricolage Grotesque",sans-serif;font-weight:500;font-size:40px;letter-spacing:-.025em;line-height:1.05;margin:0 0 6px}
+  .hello-sub{color:var(--mid);margin:0 0 22px}
+  .empty .composer{margin:0 auto 14px}
+  .starts{display:grid;gap:2px}
+  .starts a{display:flex;gap:12px;align-items:baseline;padding:8px 10px;border-radius:8px;color:inherit;text-decoration:none}
+  .starts a:first-child{background:var(--floe)}
+  .starts .w{font-weight:500}
+  .starts .s{color:var(--mid);font-size:13px}
+
+  /* sign in */
+  .signin{display:grid;grid-template-columns:1fr 1fr;height:460px}
+  .pitch{background:var(--pitch);color:#E6EFF3;padding:40px 40px 32px;display:flex;flex-direction:column}
+  .pitch h2{font-family:"Bricolage Grotesque",sans-serif;font-weight:500;font-size:38px;letter-spacing:-.025em;line-height:1.05;margin:auto 0 12px;color:#fff}
+  .pitch p{margin:0;color:#A9C0CC;max-width:36ch}
+  .pitch .brand{color:#fff;padding:0}
+  .form{padding:40px;display:flex;flex-direction:column;justify-content:center;gap:12px;background:var(--ice)}
+  .form h3{font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:21px;letter-spacing:-.01em;margin:0}
+  .form p{margin:0 0 6px;color:var(--mid);max-width:38ch}
+  .big{font:inherit;font-weight:600;font-size:14.5px;padding:12px 16px;border-radius:10px;border:0;background:var(--sonar);color:var(--on-accent);text-align:center}
+  .alt{font:inherit;font-weight:500;padding:11px 16px;border-radius:10px;border:1px solid var(--field-line);background:var(--white);color:var(--deep);text-align:center}
+  .fine{font-size:12.5px;color:var(--mid);margin-top:6px}
+
+  .notes{margin-top:44px;background:var(--ice);border:1px solid var(--frame);border-radius:12px;padding:22px 26px}
+  .notes h3{font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:18px;margin:0 0 8px}
+  .notes ul{margin:0;padding-left:18px;max-width:78ch}
+  .notes li{margin:4px 0}
+  @media (max-width:760px){.app{grid-template-columns:1fr}.side{display:none}.signin{grid-template-columns:1fr;height:auto}}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="mode" role="group" aria-label="Appearance">
+    <span>Appearance</span>
+    <div class="seg">
+      <button data-m="system" aria-pressed="true">System</button>
+      <button data-m="light" aria-pressed="false">Light</button>
+      <button data-m="dark" aria-pressed="false">Dark</button>
+    </div>
+  </div>
+
+  <div class="intro">
+    <h1>Beluga in light, dark and system</h1>
+    <p>Use the Appearance switch at the top right to see all three screens in each mode. System follows your computer and is the default. In the app this switch lives in Settings.</p>
+    <p>"Beluga" is still a placeholder name.</p>
+  </div>
+
+  <div class="cap">First open</div>
+  <p class="capsub">One decision on the screen: sign in. Pasting a key is the quieter second option.</p>
+  <div class="win">
+    <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+    <div class="signin">
+      <div class="pitch">
+        <div class="brand">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M3 14c0-5 4-9 9.5-9 4.5 0 8.500 3 8.500 7 0 3-2.500 5-6 5H9l-4 3 .8-3.600C4 15.800 3 15 3 14Z" fill="#fff"/><circle cx="15.500" cy="10.500" r="1.100" fill="#0F2B3C"/></svg>
+          Beluga
+        </div>
+        <h2>A senior developer's habits, on a free model.</h2>
+        <p>Plans before it codes, tests what it writes, and asks before it touches your machine.</p>
+      </div>
+      <div class="form">
+        <h3>Connect your OpenRouter account</h3>
+        <p>Beluga has no subscription. It runs on your own OpenRouter account, which is free to open.</p>
+        <button class="big">Sign in with OpenRouter</button>
+        <button class="alt">Paste a key I already have</button>
+        <div class="fine">Your key stays in this computer's keychain and is never sent to us.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cap">New chat</div>
+  <p class="capsub">The message box is the screen. Model and project sit inside it, so nothing has to be set up elsewhere first.</p>
+  <div class="win">
+    <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="t">Beluga</span></div>
+    <div class="app">
+      <aside class="side">
+        <div class="brand">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 14c0-5 4-9 9.500-9 4.500 0 8.500 3 8.500 7 0 3-2.500 5-6 5H9l-4 3 .8-3.600C4 15.800 3 15 3 14Z" fill="currentColor"/><circle cx="15.500" cy="10.500" r="1.100" style="fill:var(--floe)"/></svg>
+          Beluga
+        </div>
+        <div class="newc"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.200" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New chat<kbd>⌘N</kbd></div>
+        <div class="grp">Projects</div>
+        <div class="row on"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>my-shop-app</div>
+        <div class="row"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>portfolio-site</div>
+        <div class="grp">Earlier</div>
+        <div class="row">Fix cart total rounding</div>
+        <div class="row">Explain React hooks</div>
+        <div class="row">Set up login with email</div>
+        <div class="grp">Library</div>
+        <div class="row"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><path d="M17 14v6M14 17h6" stroke-linecap="round"/></svg>Skills<span class="n">6 on</span></div>
+        <div class="gauge">
+          <div><b>38</b> <span class="of">of 50 free requests left</span></div>
+          <div class="ticks">
+            <i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          </div>
+          <small>Resets tomorrow at 06:00.<br>Spent this month: $0.00</small>
+        </div>
+      </aside>
+      <section class="main">
+        <div class="empty">
+          <div class="col">
+            <h2 class="hello">What are we building?</h2>
+            <p class="hello-sub">Working in my-shop-app. Beluga can read and edit files there, and asks before running anything.</p>
+          </div>
+          <div class="composer">
+            <div class="ph">Describe a feature, paste an error, or ask a question</div>
+            <div class="ctl">
+              <span class="chip"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.200" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Attach</span>
+              <span class="chip">Gemma 4 31B <span class="free">Free</span><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.500" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></span>
+              <span class="chip">/ Skills</span>
+              <span class="send"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" style="stroke:var(--on-btn)" stroke-width="2.400" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg></span>
+            </div>
+          </div>
+          <div class="col starts">
+            <a><span class="w">Plan a feature before writing it</span><span class="s">asks you questions, then writes a step-by-step plan</span></a>
+            <a><span class="w">Find and fix a bug</span><span class="s">reproduces it first, then fixes the cause</span></a>
+            <a><span class="w">Review my recent changes</span><span class="s">checks for mistakes and security problems</span></a>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div class="cap">Mid-task</div>
+  <p class="capsub">Its work reads as a quiet trail down the left. Colour appears only twice: teal for the skill in use, amber when it needs your decision.</p>
+  <div class="win">
+    <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="t">Beluga</span></div>
+    <div class="app">
+      <aside class="side">
+        <div class="brand">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 14c0-5 4-9 9.500-9 4.500 0 8.500 3 8.500 7 0 3-2.500 5-6 5H9l-4 3 .8-3.600C4 15.800 3 15 3 14Z" fill="currentColor"/><circle cx="15.500" cy="10.500" r="1.100" style="fill:var(--floe)"/></svg>
+          Beluga
+        </div>
+        <div class="newc"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.200" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New chat<kbd>⌘N</kbd></div>
+        <div class="grp">Projects</div>
+        <div class="row on"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>my-shop-app</div>
+        <div class="row"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>portfolio-site</div>
+        <div class="grp">Earlier</div>
+        <div class="row">Fix cart total rounding</div>
+        <div class="row">Explain React hooks</div>
+        <div class="grp">Library</div>
+        <div class="row"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><path d="M17 14v6M14 17h6" stroke-linecap="round"/></svg>Skills<span class="n">6 on</span></div>
+        <div class="gauge">
+          <div><b>31</b> <span class="of">of 50 free requests left</span></div>
+          <div class="ticks">
+            <i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i class="u"></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          </div>
+          <small>Resets tomorrow at 06:00.<br>Spent this month: $0.00</small>
+        </div>
+      </aside>
+      <section class="main">
+        <div class="head"><span class="ttl">Add a login page</span><span class="proj">my-shop-app</span><span class="cost">This chat <b>7 requests</b>, $0.00</span></div>
+        <div class="thread">
+          <div class="me">Add a login page with email and password</div>
+          <div class="col">
+            <div class="skill"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.400 7.200H22l-6 4.600 2.300 7.200L12 16.600 5.700 21l2.300-7.200-6-4.600h7.600Z"/></svg>Using the planning skill</div>
+            <div>Your app already uses React Router and has no form library yet. I'll add one, write the tests for the form first, then build the page at <b>/login</b>.</div>
+            <div class="steps" style="margin-top:10px">
+              <span>Read <code>src/App.tsx</code> and <code>src/routes.ts</code></span>
+              <span>Wrote the plan, 4 steps</span>
+              <span>Created <code>src/pages/Login.test.tsx</code></span>
+            </div>
+          </div>
+          <div class="col">
+            <div class="ask">
+              <div class="q">Run this command in my-shop-app?</div>
+              <pre>npm install react-hook-form</pre>
+              <div class="btns"><button class="b p">Run once</button><button class="b">Always allow npm install here</button><button class="b">Don't run</button></div>
+            </div>
+          </div>
+        </div>
+        <div class="composer">
+          <div class="ph">Reply, or tell Beluga to change course</div>
+          <div class="ctl">
+            <span class="chip"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.200" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Attach</span>
+            <span class="chip">Gemma 4 31B <span class="free">Free</span><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.500" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></span>
+            <span class="chip">/ Skills</span>
+            <span class="send"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" style="stroke:var(--on-btn)" stroke-width="2.400" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg></span>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div class="notes">
+    <h3>What I took from the references</h3>
+    <ul>
+      <li><b>From assistant-ui:</b> almost no colour, thin lines in place of boxed panels, the model picker living inside the message box, and a centred greeting on an empty chat.</li>
+      <li><b>From Dribbble:</b> a large, confident greeting, and a sidebar that stays quiet so the conversation carries the screen.</li>
+      <li><b>Ours alone:</b> the free-request gauge at the bottom left. Fifty marks, one spent per request, so someone on a free account always sees what they have left.</li>
+    </ul>
+  </div>
+</div>
+<script>
+  document.querySelectorAll('.seg button').forEach(function(b){
+    b.addEventListener('click',function(){
+      var m=b.dataset.m, r=document.documentElement;
+      if(m==='system'){r.removeAttribute('data-theme')}else{r.setAttribute('data-theme',m)}
+      document.querySelectorAll('.seg button').forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false')});
+    });
+  });
+</script>
+</body>
+</html>
