@@ -4,7 +4,7 @@
 
 use super::auth::{AuthStatus, AuthUrl, StorageChoice};
 use super::chats::ChatUsage;
-use super::turn::AttachmentInput;
+use super::turn::{AttachmentInput, TurnResult};
 use super::{auth, chats, models, turn};
 use crate::auth::callback::PRODUCTION_TIMEOUT;
 use crate::engine::{EngineEvent, UiError};
@@ -120,7 +120,7 @@ pub async fn send_message(
     attachments: Vec<AttachmentInput>,
     model_id: String,
     on_event: Channel<EngineEvent>,
-) -> Result<(), UiError> {
+) -> Result<TurnResult, UiError> {
     let emit = move |e: EngineEvent| {
         let _ = on_event.send(e);
     };
@@ -133,7 +133,7 @@ pub async fn retry_turn(
     chat_id: String,
     model_id: String,
     on_event: Channel<EngineEvent>,
-) -> Result<(), UiError> {
+) -> Result<TurnResult, UiError> {
     let emit = move |e: EngineEvent| {
         let _ = on_event.send(e);
     };

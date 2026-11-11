@@ -7,6 +7,7 @@ import {
   type AttachmentInput,
   type EngineEvent,
   type StoredMessage,
+  type TurnResult,
   type UiError,
 } from "../../lib/ipc";
 import { toUiError } from "./errors";
@@ -109,7 +110,7 @@ export function useChat(
       id: string,
       modelId: string,
       pending: { text: string; attachments: AttachmentInput[] } | null,
-      run: (onEvent: (e: EngineEvent) => void) => Promise<void>,
+      run: (onEvent: (e: EngineEvent) => void) => Promise<TurnResult>,
     ) => {
       if (streaming.current.has(id)) return;
       streaming.current.add(id);
@@ -122,13 +123,14 @@ export function useChat(
         unsent: null,
       }));
 
+      // The command's promise is the only end-of-turn signal: it settles after
+      // the core has stored the reply. Channel events only carry reply text.
       let settled = false;
       const settle = async (
         status: ChatStatus,
         error: UiError | null,
         notSent = false,
       ) => {
-        if (settled) return;
         settled = true;
         const messages = await reload(id);
         streaming.current.delete(id);
@@ -144,24 +146,16 @@ export function useChat(
         onTurnEndRef.current?.(id);
       };
       const onEvent = (event: EngineEvent) => {
-        if (settled) return;
-        switch (event.type) {
-          case "text_delta":
-            patch(id, (s) => ({ streamingText: s.streamingText + event.text }));
-            break;
-          case "done":
-            void settle("idle", null);
-            break;
-          case "interrupted":
-            void settle("interrupted", null);
-            break;
-          case "failed":
-            void settle("failed", event.error);
-            break;
-        }
+        if (settled || event.type !== "text_delta") return;
+        patch(id, (s) => ({ streamingText: s.streamingText + event.text }));
       };
       run(onEvent).then(
-        () => settle("idle", null),
+        (r) => {
+          if (r.status === "failed") {
+            return settle("failed", r.error ?? toUiError(null));
+          }
+          return settle(r.status === "interrupted" ? "interrupted" : "idle", null);
+        },
         (e: unknown) => settle("failed", toUiError(e), true),
       );
     },

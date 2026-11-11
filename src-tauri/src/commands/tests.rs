@@ -1,4 +1,5 @@
 use super::auth::{self, StorageChoice};
+use super::turn::{TurnResult, TurnStatus};
 use super::{chats, models, turn};
 use crate::engine::{EngineEvent, UiError};
 use crate::openrouter::models::{ModelCache, ModelInfo};
@@ -121,7 +122,7 @@ async fn send(
     text: &str,
     model: &str,
     attachments: Vec<turn::AttachmentInput>,
-) -> (Result<(), UiError>, Vec<EngineEvent>) {
+) -> (Result<TurnResult, UiError>, Vec<EngineEvent>) {
     let events: Events = Arc::default();
     let sink = events.clone();
     let r = turn::send_message(&h.state, chat_id, text, attachments, model, &move |e| {
@@ -381,7 +382,7 @@ async fn send_message_persists_user_and_assistant_messages_and_records_usage() {
         data_base64: "aGk=".into(),
     };
     let (r, events) = send(&h, &chat.id, "Hi there", "m/b", vec![att.clone()]).await;
-    r.unwrap();
+    assert_eq!(r.unwrap(), done());
     assert_eq!(events.last(), Some(&EngineEvent::Done));
 
     let msgs = chats::get_messages(&h.state, &chat.id).unwrap();
@@ -451,7 +452,14 @@ async fn send_message_interrupted_persists_partial_text_with_interrupted_true() 
     let h = signed_in(&server.uri());
     let chat = chats::create_chat(&h.state, "m/a").unwrap();
     let (r, events) = send(&h, &chat.id, "Hi", "m/a", vec![]).await;
-    r.unwrap();
+    assert_eq!(
+        r.unwrap(),
+        TurnResult {
+            status: TurnStatus::Interrupted,
+            reason: Some("rate_limited".into()),
+            error: None,
+        }
+    );
     assert_eq!(
         events.last(),
         Some(&EngineEvent::Interrupted {
@@ -465,7 +473,11 @@ async fn send_message_interrupted_persists_partial_text_with_interrupted_true() 
     assert_eq!(chats::chat_usage(&h.state, &chat.id).unwrap().requests, 1);
 }
 
-async fn retry(h: &Harness, chat_id: &str, model: &str) -> (Result<(), UiError>, Vec<EngineEvent>) {
+async fn retry(
+    h: &Harness,
+    chat_id: &str,
+    model: &str,
+) -> (Result<TurnResult, UiError>, Vec<EngineEvent>) {
     let events: Events = Arc::default();
     let sink = events.clone();
     let r = turn::retry_turn(&h.state, chat_id, model, &move |e| {
@@ -499,7 +511,7 @@ async fn retry_turn_after_an_interrupted_reply_replaces_the_partial() {
         .append_message(&chat.id, "assistant", "Partial", &[], true)
         .unwrap();
     let (r, events) = retry(&h, &chat.id, "m/b").await;
-    r.unwrap();
+    assert_eq!(r.unwrap(), done());
     assert_eq!(events.last(), Some(&EngineEvent::Done));
     assert_eq!(
         roles_and_texts(&h, &chat.id),
@@ -581,7 +593,11 @@ async fn send_message_401_emits_auth_revoked_and_auth_status_becomes_signed_out(
     let h = signed_in(&server.uri());
     let chat = chats::create_chat(&h.state, "m/a").unwrap();
     assert!(auth::auth_status(&h.state).signed_in);
-    let (_, events) = send(&h, &chat.id, "Hi", "m/a", vec![]).await;
+    let (r, events) = send(&h, &chat.id, "Hi", "m/a", vec![]).await;
+    let r = r.unwrap();
+    assert_eq!(r.status, TurnStatus::Failed);
+    assert_eq!(r.reason, None);
+    assert_eq!(r.error.map(|e| e.kind), Some("unauthorized".to_string()));
     assert!(matches!(
         events.last(),
         Some(EngineEvent::Failed { error }) if error.kind == "unauthorized"
@@ -687,8 +703,15 @@ async fn stop_cancels_the_running_turn_for_that_chat_only() {
     turn::stop(&h.state, &a.id);
     let (ra, ea) = ta.await.unwrap();
     let (rb, eb) = tb.await.unwrap();
-    ra.unwrap();
-    rb.unwrap();
+    assert_eq!(
+        ra.unwrap(),
+        TurnResult {
+            status: TurnStatus::Interrupted,
+            reason: Some("stopped".into()),
+            error: None,
+        }
+    );
+    assert_eq!(rb.unwrap(), done());
     assert_eq!(
         ea,
         vec![EngineEvent::Interrupted {
@@ -778,6 +801,35 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
     for out in &outputs {
         assert!(!out.contains(KEY), "key leaked in {out}");
     }
+}
+
+fn done() -> TurnResult {
+    TurnResult {
+        status: TurnStatus::Done,
+        reason: None,
+        error: None,
+    }
+}
+
+#[test]
+fn turn_result_json_shape() {
+    assert_eq!(
+        to(&done()),
+        json!({"status": "done", "reason": null, "error": null})
+    );
+    let failed = TurnResult {
+        status: TurnStatus::Failed,
+        reason: None,
+        error: Some(UiError::other("x")),
+    };
+    assert_eq!(
+        to(&failed),
+        json!({
+            "status": "failed",
+            "reason": null,
+            "error": {"kind": "other", "message": "x", "retryable": false}
+        })
+    );
 }
 
 fn to<T: serde::Serialize>(v: &T) -> Value {

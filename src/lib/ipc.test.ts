@@ -70,7 +70,11 @@ describe("ipc", () => {
   it("sendMessage passes a channel that delivers engine events", async () => {
     const seen: ipc.EngineEvent[] = [];
     const att = { name: "a.txt", mime: "text/plain", data_base64: "aGk=" };
-    await ipc.sendMessage("c", "hi", [att], "m/a", (e) => seen.push(e));
+    const result: ipc.TurnResult = { status: "interrupted", reason: "stopped", error: null };
+    invoke.mockResolvedValueOnce(result);
+    await expect(ipc.sendMessage("c", "hi", [att], "m/a", (e) => seen.push(e))).resolves.toEqual(
+      result,
+    );
     expect(invoke).toHaveBeenCalledTimes(1);
     const [cmd, args] = invoke.mock.calls[0];
     expect(cmd).toBe("send_message");
@@ -84,7 +88,13 @@ describe("ipc", () => {
 
   it("retryTurn passes chat id, model id and a channel", async () => {
     const seen: ipc.EngineEvent[] = [];
-    await ipc.retryTurn("c", "m/a", (e) => seen.push(e));
+    const result: ipc.TurnResult = {
+      status: "failed",
+      reason: null,
+      error: { kind: "network", message: "x", retryable: true },
+    };
+    invoke.mockResolvedValueOnce(result);
+    await expect(ipc.retryTurn("c", "m/a", (e) => seen.push(e))).resolves.toEqual(result);
     const [cmd, args] = invoke.mock.calls[0];
     expect(cmd).toBe("retry_turn");
     expect(Object.keys(args).sort()).toEqual(["chatId", "modelId", "onEvent"]);

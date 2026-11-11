@@ -107,6 +107,17 @@ export type EngineEvent =
   | { type: "interrupted"; reason: "stopped" | UiErrorKind }
   | { type: "failed"; error: UiError };
 
+/**
+ * How a turn that ran ended. The command resolves with it only after the
+ * reply and usage are stored. `reason` is set for "interrupted" ("stopped" or
+ * a UiError kind), `error` for "failed". A rejection means the turn never ran.
+ */
+export interface TurnResult {
+  status: "done" | "interrupted" | "failed";
+  reason: string | null;
+  error: UiError | null;
+}
+
 export const AUTH_FINISHED = "auth://finished";
 export const AUTH_REVOKED = "auth://revoked";
 
@@ -154,16 +165,19 @@ export const chatUsage = (chatId: string) =>
 
 export const monthSpend = () => invoke<number>("month_spend");
 
-/** Resolves when the turn has ended; progress arrives through `onEvent`. */
+/**
+ * Resolves with how the turn ended, once it is stored; rejects if the turn
+ * never ran. Reply text arrives through `onEvent`; settle on the promise only.
+ */
 export function sendMessage(
   chatId: string,
   text: string,
   attachments: AttachmentInput[],
   modelId: string,
   onEvent: (event: EngineEvent) => void,
-): Promise<void> {
+): Promise<TurnResult> {
   const channel = new Channel<EngineEvent>(onEvent);
-  return invoke<void>("send_message", {
+  return invoke<TurnResult>("send_message", {
     chatId,
     text,
     attachments,
@@ -180,9 +194,9 @@ export function retryTurn(
   chatId: string,
   modelId: string,
   onEvent: (event: EngineEvent) => void,
-): Promise<void> {
+): Promise<TurnResult> {
   const channel = new Channel<EngineEvent>(onEvent);
-  return invoke<void>("retry_turn", { chatId, modelId, onEvent: channel });
+  return invoke<TurnResult>("retry_turn", { chatId, modelId, onEvent: channel });
 }
 
 export const stop = (chatId: string) => invoke<void>("stop", { chatId });

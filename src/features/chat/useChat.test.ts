@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { EngineEvent, StoredMessage } from "../../lib/ipc";
+import type { EngineEvent, StoredMessage, TurnResult, UiError } from "../../lib/ipc";
 import { useChat } from "./useChat";
 
 const ipc = vi.hoisted(() => ({
@@ -15,8 +15,13 @@ const msg = (id: string, role: "user" | "assistant", text: string, interrupted =
   id, role, text, attachments: [], interrupted, created_at: 1,
 });
 
+const DONE: TurnResult = { status: "done", reason: null, error: null };
+const failed = (error: UiError): TurnResult => ({ status: "failed", reason: null, error });
+const interrupted = (reason: string): TurnResult => ({ status: "interrupted", reason, error: null });
+const OFFLINE: UiError = { kind: "network", message: "Offline", retryable: true };
+
 let emit: (e: EngineEvent) => void;
-let finish: () => void;
+let finish: (r: TurnResult) => void;
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -25,7 +30,7 @@ beforeEach(() => {
   ipc.sendMessage.mockImplementation(
     (_c: string, _t: string, _a: unknown, _m: string, onEvent: (e: EngineEvent) => void) => {
       emit = onEvent;
-      return new Promise<void>((resolve) => {
+      return new Promise<TurnResult>((resolve) => {
         finish = resolve;
       });
     },
@@ -33,7 +38,7 @@ beforeEach(() => {
   ipc.retryTurn.mockImplementation(
     (_c: string, _m: string, onEvent: (e: EngineEvent) => void) => {
       emit = onEvent;
-      return new Promise<void>((resolve) => {
+      return new Promise<TurnResult>((resolve) => {
         finish = resolve;
       });
     },
@@ -53,7 +58,7 @@ describe("useChat", () => {
     ipc.getMessages.mockResolvedValue([msg("1", "user", "hi"), msg("2", "assistant", "Hello")]);
     await act(async () => {
       emit({ type: "done" });
-      finish();
+      finish(DONE);
     });
     expect(result.current.status).toBe("idle");
     expect(result.current.streamingText).toBe("");
@@ -64,10 +69,9 @@ describe("useChat", () => {
     const { result } = renderHook(() => useChat("a"));
     act(() => result.current.send("hi", [], "m1"));
     ipc.getMessages.mockResolvedValue([msg("1", "user", "hi")]);
-    const error = { kind: "network" as const, message: "Offline", retryable: true };
-    await act(async () => emit({ type: "failed", error }));
+    await act(async () => finish(failed(OFFLINE)));
     expect(result.current.status).toBe("failed");
-    expect(result.current.error).toEqual(error);
+    expect(result.current.error).toEqual(OFFLINE);
     expect(result.current.messages).toHaveLength(1);
   });
 
@@ -83,7 +87,7 @@ describe("useChat", () => {
     const { result } = renderHook(() => useChat("a"));
     act(() => result.current.send("hi", [], "m1"));
     ipc.getMessages.mockResolvedValue([msg("1", "user", "hi"), msg("2", "assistant", "Hel", true)]);
-    await act(async () => emit({ type: "interrupted", reason: "stopped" }));
+    await act(async () => finish(interrupted("stopped")));
     expect(result.current.status).toBe("interrupted");
     expect(result.current.messages[1]).toMatchObject({ text: "Hel", interrupted: true });
     act(() => result.current.retry());
@@ -96,9 +100,7 @@ describe("useChat", () => {
     const { result } = renderHook(() => useChat("a"));
     act(() => result.current.send("hi", [], "m1"));
     ipc.getMessages.mockResolvedValue([msg("1", "user", "hi")]);
-    await act(async () =>
-      emit({ type: "failed", error: { kind: "network", message: "Offline", retryable: true } }),
-    );
+    await act(async () => finish(failed(OFFLINE)));
     act(() => result.current.retry());
     expect(ipc.retryTurn).toHaveBeenCalledWith("a", "m1", expect.any(Function));
     expect(ipc.sendMessage).toHaveBeenCalledTimes(1);
@@ -129,6 +131,36 @@ describe("useChat", () => {
     expect(result.current.pendingUser).toBe("new text");
     act(() => result.current.retry());
     expect(ipc.sendMessage).toHaveBeenLastCalledWith("a", "new text", [], "m1", expect.any(Function));
+  });
+
+  it("a promise resolving with status failed and no terminal event shows the error", async () => {
+    const { result } = renderHook(() => useChat("a"));
+    act(() => result.current.send("hi", [], "m1"));
+    act(() => emit({ type: "text_delta", text: "He" }));
+    ipc.getMessages.mockResolvedValue([msg("1", "user", "hi")]);
+    await act(async () => finish(failed(OFFLINE)));
+    expect(result.current.status).toBe("failed");
+    expect(result.current.error).toEqual(OFFLINE);
+    expect(result.current.streamingText).toBe("");
+    expect(result.current.unsent).toBeNull();
+    expect(result.current.messages).toHaveLength(1);
+  });
+
+  it("a terminal event before the promise changes nothing until the promise settles", async () => {
+    const { result } = renderHook(() => useChat("a"));
+    await waitFor(() => expect(ipc.getMessages).toHaveBeenCalledTimes(1));
+    act(() => result.current.send("hi", [], "m1"));
+    act(() => emit({ type: "text_delta", text: "Hel" }));
+    await act(async () => emit({ type: "failed", error: OFFLINE }));
+    await act(async () => emit({ type: "done" }));
+    expect(result.current.status).toBe("streaming");
+    expect(result.current.streamingText).toBe("Hel");
+    expect(result.current.error).toBeNull();
+    expect(ipc.getMessages).toHaveBeenCalledTimes(1);
+    ipc.getMessages.mockResolvedValue([msg("1", "user", "hi"), msg("2", "assistant", "Hel", true)]);
+    await act(async () => finish(interrupted("network")));
+    expect(result.current.status).toBe("interrupted");
+    expect(result.current.messages[1]).toMatchObject({ text: "Hel", interrupted: true });
   });
 
   it("does not start a second send while the chat is streaming", () => {

@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { EngineEvent } from "../../lib/ipc";
+import type { EngineEvent, TurnResult } from "../../lib/ipc";
 import { model } from "../models/fixtures";
 import Shell from "./Shell";
 
@@ -33,6 +33,7 @@ const FREE_STATUS = (used: number, limit: number) => ({
 });
 
 let emit: (e: EngineEvent) => void;
+let finish: (r: TurnResult) => void;
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -46,7 +47,9 @@ beforeEach(() => {
   ipc.authStatus.mockResolvedValue({ signed_in: true, storage: "keychain" });
   ipc.sendMessage.mockImplementation((_c, _t, _a, _m, onEvent) => {
     emit = onEvent;
-    return new Promise(() => {});
+    return new Promise<TurnResult>((resolve) => {
+      finish = resolve;
+    });
   });
 });
 
@@ -186,7 +189,7 @@ describe("Shell", () => {
     await userEvent.type(screen.getByLabelText("Message"), "hi{Enter}");
     await waitFor(() => expect(ipc.sendMessage).toHaveBeenCalled());
     ipc.keyStatus.mockResolvedValue(FREE_STATUS(14, 50));
-    act(() => emit({ type: "done" }));
+    act(() => finish({ status: "done", reason: null, error: null }));
     expect(await screen.findByRole("group", { name: "36 of 50 free requests left" })).toBeInTheDocument();
   });
 

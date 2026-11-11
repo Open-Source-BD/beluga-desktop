@@ -2,12 +2,13 @@
 
 use super::auth::revoke;
 use super::chats::local;
-use crate::engine::{EngineEvent, TurnRequest, UiError};
+use crate::engine::{EngineEvent, TurnOutcome, TurnRequest, UiError};
 use crate::openrouter::models::ModelCache;
 use crate::openrouter::stream::{Part, Role, WireMessage};
 use crate::state::{AppState, RunningTurn};
 use crate::store::{StoredAttachment, StoredMessage};
 use serde::{Deserialize, Serialize};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio_util::sync::CancellationToken;
 
@@ -24,6 +25,60 @@ impl From<AttachmentInput> for StoredAttachment {
             name: a.name,
             mime: a.mime,
             data_base64: a.data_base64,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnStatus {
+    Done,
+    Interrupted,
+    Failed,
+}
+
+/// How a turn that ran ended, returned only after its reply and usage are
+/// stored. `reason` is set for `Interrupted` ("stopped" or a `UiError` kind);
+/// `error` is set for `Failed`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TurnResult {
+    pub status: TurnStatus,
+    pub reason: Option<String>,
+    pub error: Option<UiError>,
+}
+
+impl TurnResult {
+    fn done() -> Self {
+        Self {
+            status: TurnStatus::Done,
+            reason: None,
+            error: None,
+        }
+    }
+
+    fn interrupted(reason: String) -> Self {
+        Self {
+            status: TurnStatus::Interrupted,
+            reason: Some(reason),
+            error: None,
+        }
+    }
+
+    fn failed(error: UiError) -> Self {
+        Self {
+            status: TurnStatus::Failed,
+            reason: None,
+            error: Some(error),
+        }
+    }
+
+    /// The result a terminal event announces; `None` for other events.
+    fn from_event(e: &EngineEvent) -> Option<Self> {
+        match e {
+            EngineEvent::Done => Some(Self::done()),
+            EngineEvent::Interrupted { reason } => Some(Self::interrupted(reason.clone())),
+            EngineEvent::Failed { error } => Some(Self::failed(error.clone())),
+            _ => None,
         }
     }
 }
@@ -122,7 +177,8 @@ fn is_unauthorized(e: &EngineEvent) -> bool {
 
 /// Store the user's message, run one turn over the whole chat history, and
 /// store the reply (partial replies are marked interrupted) and its usage.
-/// Returns when the turn ends; progress arrives through `on_event`.
+/// Returns how the turn ended once everything is stored; progress arrives
+/// through `on_event`. `Err` means the turn never ran.
 pub async fn send_message(
     s: &AppState,
     chat_id: &str,
@@ -130,7 +186,7 @@ pub async fn send_message(
     attachments: Vec<AttachmentInput>,
     model_id: &str,
     on_event: &(dyn Fn(EngineEvent) + Send + Sync),
-) -> Result<(), UiError> {
+) -> Result<TurnResult, UiError> {
     if s.store.get_chat(chat_id).map_err(local)?.is_none() {
         return Err(UiError::other("This chat no longer exists."));
     }
@@ -152,7 +208,7 @@ async fn run_stored_turn(
     chat_id: &str,
     model_id: &str,
     on_event: &(dyn Fn(EngineEvent) + Send + Sync),
-) -> Result<(), UiError> {
+) -> Result<TurnResult, UiError> {
     s.store.set_chat_model(chat_id, model_id).map_err(local)?;
     let with_images = !model_is_blind(s, model_id);
     let messages = s
@@ -177,9 +233,13 @@ async fn run_stored_turn(
     }
 
     let unauthorized = AtomicBool::new(false);
+    let ended: Mutex<Option<TurnResult>> = Mutex::new(None);
     let emit = |e: EngineEvent| {
         if is_unauthorized(&e) {
             unauthorized.store(true, Ordering::SeqCst);
+        }
+        if let Some(result) = TurnResult::from_event(&e) {
+            *ended.lock().unwrap_or_else(|p| p.into_inner()) = Some(result);
         }
         on_event(e);
     };
@@ -198,6 +258,26 @@ async fn run_stored_turn(
     if unauthorized.load(Ordering::SeqCst) {
         revoke(s);
     }
+    let result = ended
+        .into_inner()
+        .unwrap_or_else(|p| p.into_inner())
+        .unwrap_or_else(|| {
+            // Defensive: every engine turn ends with a terminal event.
+            if out.interrupted {
+                TurnResult::interrupted("network".to_string())
+            } else {
+                TurnResult::done()
+            }
+        });
+    // The turn ran and the user message is stored, so a failure to store the
+    // reply is reported as a failed turn, not as a send that never happened.
+    if let Err(e) = persist(s, chat_id, &out) {
+        return Ok(TurnResult::failed(e));
+    }
+    Ok(result)
+}
+
+fn persist(s: &AppState, chat_id: &str, out: &TurnOutcome) -> Result<(), UiError> {
     if !out.text.is_empty() {
         s.store
             .append_message(chat_id, "assistant", &out.text, &[], out.interrupted)
@@ -218,7 +298,7 @@ pub async fn retry_turn(
     chat_id: &str,
     model_id: &str,
     on_event: &(dyn Fn(EngineEvent) + Send + Sync),
-) -> Result<(), UiError> {
+) -> Result<TurnResult, UiError> {
     if s.store.get_chat(chat_id).map_err(local)?.is_none() {
         return Err(UiError::other("This chat no longer exists."));
     }
