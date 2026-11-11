@@ -1,0 +1,423 @@
+{
+  "id": "anthropic",
+  "title": "Anthropic Skills",
+  "repo": "anthropics/skills",
+  "commit": "2c5958ecac7cee2b583967a2c4981d0f4a75c579",
+  "license": "Apache-2.0",
+  "license_files": [
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "skills": [
+    {
+      "id": "anthropic:academy-guide",
+      "pack": "anthropic",
+      "name": "academy-guide",
+      "description": "Stop and check this skill before finishing any reply to a question about how to use Claude or a Claude product — it recommends matching courses, tutorials, and use cases from Claude Academy",
+      "dir": "skills/academy-guide",
+      "acts_on_computer": false,
+      "body_chars": 6611,
+      "files": [
+        "LICENSE.txt"
+      ],
+      "license": "Complete terms in LICENSE.txt",
+      "broken": null
+    },
+    {
+      "id": "anthropic:algorithmic-art",
+      "pack": "anthropic",
+      "name": "algorithmic-art",
+      "description": "Creating algorithmic art using p5.js with seeded randomness and interactive parameter exploration. Use this when users request creating art using code, generative art, algorithmic art, flow fields, or",
+      "dir": "skills/algorithmic-art",
+      "acts_on_computer": true,
+      "body_chars": 19327,
+      "files": [
+        "LICENSE.txt"
+      ],
+      "license": "Complete terms in LICENSE.txt",
+      "broken": null
+    },
+    {
+      "id": "anthropic:brand-guidelines",
+      "pack": "anthropic",
+      "name": "brand-guidelines",
+      "description": "Applies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel. Use it when brand colors or style guidelines, visual",
+      "dir": "skills/brand-guidelines",
+      "acts_on_computer": false,
+      "body_chars": 1914,
+      "files": [
+        "LICENSE.txt"
+      ],
+      "license": "Complete terms in LICENSE.txt",
+      "broken": null
+    },
+    {
+      "id": "anthropic:canvas-design",
+      "pack": "anthropic",
+      "name": "canvas-design",
+      "description": "Create beautiful visual art in .png and .pdf documents using design philosophy. You should use this skill when the user asks to create a poster, piece of art, design, or other static piece. Create",
+      "dir": "skills/canvas-design",
+      "acts_on_computer": true,
+      "body_chars": 11566,
+      "files": [
+        "LICENSE.txt",
+        "canvas-fonts/ArsenalSC-OFL.txt",
+        "canvas-fonts/BigShoulders-OFL.txt",
+        "canvas-fonts/Boldonse-OFL.txt",
+        "canvas-fonts/BricolageGrotesque-OFL.txt",
+        "canvas-fonts/CrimsonPro-OFL.txt",
+        "canvas-fonts/DMMono-OFL.txt",
+        "canvas-fonts/EricaOne-OFL.txt",
+        "canvas-fonts/GeistMono-OFL.txt",
+        "canvas-fonts/Gloock-OFL.txt",
+        "canvas-fonts/IBMPlexMono-OFL.txt",
+        "canvas-fonts/InstrumentSans-OFL.txt",
+        "canvas-fonts/Italiana-OFL.txt",
+        "canvas-fonts/JetBrainsMono-OFL.txt",
+        "canvas-fonts/Jura-OFL.txt",
+        "canvas-fonts/LibreBaskerville-OFL.txt",
+        "canvas-fonts/Lora-OFL.txt",
+        "canvas-fonts/NationalPark-OFL.txt",
+        "canvas-fonts/NothingYouCouldDo-OFL.txt",
+        "canvas-fonts/Outfit-OFL.txt",
+        "canvas-fonts/PixelifySans-OFL.txt",
+        "canvas-fonts/PoiretOne-OFL.txt",
+        "canvas-fonts/RedHatMono-OFL.txt",
+        "canvas-fonts/Silkscreen-OFL.txt",
+        "canvas-fonts/SmoochSans-OFL.txt",
+        "canvas-fonts/Tektur-OFL.txt",
+        "canvas-fonts/WorkSans-OFL.txt",
+        "canvas-fonts/YoungSerif-OFL.txt"
+      ],
+      "license": "Complete terms in LICENSE.txt",
+      "broken": null
+    },
+    {
+      "id": "anthropic:claude-api",
+      "pack": "anthropic",
+      "name": "claude-api",
+      "description": "Reference for the Claude API / Anthropic SDK — model ids, pricing, params, streaming, tool use, MCP, agents, caching, token counting, model migration. TRIGGER — read BEFORE opening the target file;",
+      "dir": "skills/claude-api",
+      "acts_on_computer": true,
+      "body_chars": 103963,
+      "files": [
+        "LICENSE.txt",
+        "csharp/claude-api/README.md",
+        "csharp/claude-api/batches.md",
+        "csharp/claude-api/files-api.md",
+        "csharp/claude-api/streaming.md",
+        "csharp/claude-api/tool-use.md",
+        "curl/examples.md",
+        "curl/managed-agents.md",
+        "go/claude-api/README.md",
+        "go/claude-api/files-api.md",
+        "go/claude-api/streaming.md",
+        "go/claude-api/tool-use.md",
+        "go/managed-agents/README.md",
+        "java/claude-api/README.md",
+        "java/claude-api/files-api.md",
+        "java/claude-api/streaming.md",
+        "java/claude-api/tool-use.md",
+        "java/managed-agents/README.md",
+        "php/claude-api/README.md",
+        "php/claude-api/batches.md",
+        "php/claude-api/files-api.md",
+        "php/claude-api/streaming.md",
+        "php/claude-api/tool-use.md",
+        "php/managed-agents/README.md",
+        "python/claude-api/README.md",
+        "python/claude-api/batches.md",
+        "python/claude-api/files-api.md",
+        "python/claude-api/sdk-upgrade.md",
+        "python/claude-api/streaming.md",
+        "python/claude-api/tool-use.md",
+        "python/managed-agents/README.md",
+        "ruby/claude-api/README.md",
+        "ruby/claude-api/streaming.md",
+        "ruby/claude-api/tool-use.md",
+        "ruby/managed-agents/README.md",
+        "shared/admin-api.md",
+        "shared/agent-design.md",
+        "shared/anthropic-cli.md",
+        "shared/claude-platform-on-aws.md",
+        "shared/cost-optimization.md",
+        "shared/error-codes.md",
+        "shared/evals/build-eval.md",
+        "shared/evals/cost-hillclimb.md",
+        "shared/evals/eval-audit.md",
+        "shared/evals/eval-hillclimb.md",
+        "shared/evals/report/SCHEMA.md",
+        "shared/live-sources.md",
+        "shared/managed-agents-api-reference.md",
+        "shared/managed-agents-client-patterns.md",
+        "shared/managed-agents-core.md",
+        "shared/managed-agents-environments.md",
+        "shared/managed-agents-events.md",
+        "shared/managed-agents-memory.md",
+        "shared/managed-agents-multiagent.md",
+        "shared/managed-agents-onboarding-from-quickstart.md",
+        "shared/managed-agents-onboarding-from-url.md",
+        "shared/managed-agents-onboarding.md",
+        "shared/managed-agents-outcomes.md",
+        "shared/managed-agents-overview.md",
+        "shared/managed-agents-quickstarts/bug-hunter.md",
+        "shared/managed-agents-quickstarts/contract-tracker.md",
+        "shared/managed-agents-quickstarts/data-analyst.md",
+        "shared/managed-agents-quickstarts/deep-researcher.md",
+        "shared/managed-agents-quickstarts/explainer-video-maker.md",
+        "shared/managed-agents-quickstarts/field-monitor.md",
+        "shared/managed-agents-quickstarts/incident-commander.md",
+        "shared/managed-agents-quickstarts/performance-tuner.md",
+        "shared/managed-agents-quickstarts/sprint-retro-facilitator.md",
+        "shared/managed-agents-quickstarts/structured-extractor.md",
+        "shared/managed-agents-quickstarts/support-agent.md",
+        "shared/managed-agents-quickstarts/support-to-eng-escalator.md",
+        "shared/managed-agents-quickstarts/watchlist-scanner.md",
+        "shared/managed-agents-scheduled-deployments.md",
+        "shared/managed-agents-self-hosted-sandboxes.md",
+        "shared/managed-agents-tools.md",
+        "shared/managed-agents-webhooks.md",
+        "shared/models.md",
+        "shared/platform-availability.md",
+        "shared/preserved-thinking-migration/causes.md",
+        "shared/preserved-thinking-migration.md",
+        "shared/prompt-audit.md",
+        "shared/prompt-caching.md",
+        "shared/token-counting.md",
+        "shared/tool-use-concepts.md",
+        "typescript/claude-api/README.md",
+        "typescript/claude-api/batches.md",
+        "typescript/claude-api/files-api.md",
+        "typescript/claude-api/streaming.md",
+        "typescript/claude-api/tool-use.md",
+        "typescript/managed-agents/README.md"
+      ],
+      "license": "Complete terms in LICENSE.txt",
+      "broken": null
+    },
+    {
+      "id": "anthropic:discernment-nudge",
+      "pack": "anthropic",
+      "name": "discernment-nudge",
+      "description": "After you give a substantive answer or draft that the user may act on — advice or recommendations, drafted artifacts such as goals, plans, pitches, proposals, or emails, estimates or projections,",
+      "dir": "skills/discernment-nudge",
+      "acts_on_computer": false,
+      "body_chars": 9391,
+      "files": [
+        "LICENSE.txt"
+      ],
+      "license": "Complete terms in LICENSE.txt",
+      "broken": null
+    },
+    {
+      "id": "anthropic:doc-coauthoring",
+      "pack": "anthropic",
+      "name": "doc-coauthoring",
+      "description": "Guide users through a structured workflow for co-authoring documentation. Use when user wants to write documentation, proposals, technical specs, decision docs, or similar structured content. This",
+      "dir": "skills/doc-coauthoring",
+      "acts_on_computer": true,
+      "body_chars": 15342,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "anthropic:docx",
+      "pack": "anthropic",
+      "name": "docx",
+      "description": "Use this skill whenever the user wants to create, read, edit, or manipulate Word documents (.docx files) or Word templates (.dotx files). Triggers include: any mention of 'Word doc', 'word document',",
+      "dir": "skills/docx",
+      "acts_on_computer": true,
+      "body_chars": 5944,
+      "files": [
+        "LICENSE.txt"
+      ],
+      "license": "Complete terms in LICENSE.txt",
+      "broken": null
+    },
+    {
+      "id": "anthropic:frontend-design",
+      "pack": "anthropic",
+      "name": "frontend-design",
+      "description": "Guidance for distinctive, intentional visual design when building new UI or reshaping an existing one. Helps with aesthetic direction, typography, and making choices that don't read as templated",
+      "dir": "skills/frontend-design",
+      "acts_on_computer": false,
+      "body_chars": 9075,
+      "files": [
+        "LICENSE.txt"
+      ],
+      "license": "Complete terms in LICENSE.txt",
+      "broken": null
+    },
+    {
+      "id": "anthropic:internal-comms",
+      "pack": "anthropic",
+      "name": "internal-comms",
+      "description": "A set of resources to help me write all kinds of internal communications, using the formats that my company likes to use. Claude should use this skill whenever asked to write some sort of internal",
+      "dir": "skills/internal-comms",
+      "acts_on_computer": false,
+      "body_chars": 1099,
+      "files": [
+        "LICENSE.txt",
+        "examples/3p-updates.md",
+        "examples/company-newsletter.md",
+        "examples/faq-answers.md",
+        "examples/general-comms.md"
+      ],
+      "license": "Complete terms in LICENSE.txt",
+      "broken": null
+    },
+    {
+      "id": "anthropic:mcp-builder",
+      "pack": "anthropic",
+      "name": "mcp-builder",
+      "description": "Guide for creating high-quality MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools. Use when building MCP servers to integrate",
+      "dir": "skills/mcp-builder",
+      "acts_on_computer": true,
+      "body_chars": 10735,
+      "files": [
+        "LICENSE.txt",
+        "reference/evaluation.md",
+        "reference/mcp_best_practices.md",
+        "reference/node_mcp_server.md",
+        "reference/node_mcp_server_v2.md",
+        "reference/python_mcp_server.md",
+        "scripts/requirements.txt"
+      ],
+      "license": "Complete terms in LICENSE.txt",
+      "broken": null
+    },
+    {
+      "id": "anthropic:pdf",
+      "pack": "anthropic",
+      "name": "pdf",
+      "description": "Use this skill whenever the user wants to do anything with PDF files. This includes reading or extracting text/tables from PDFs, combining or merging multiple PDFs into one, splitting PDFs apart,",
+      "dir": "skills/pdf",
+      "acts_on_computer": true,
+      "body_chars": 7512,
+      "files": [
+        "LICENSE.txt",
+        "forms.md",
+        "reference.md"
+      ],
+      "license": "Complete terms in LICENSE.txt",
+      "broken": null
+    },
+    {
+      "id": "anthropic:pptx",
+      "pack": "anthropic",
+      "name": "pptx",
+      "description": "Use this skill any time a .pptx or .potx file is involved in any way — as input, output, or both. This includes: creating slide decks, pitch decks, or presentations; reading, parsing, or extracting",
+      "dir": "skills/pptx",
+      "acts_on_computer": true,
+      "body_chars": 19820,
+      "files": [
+        "LICENSE.txt"
+      ],
+      "license": "Complete terms in LICENSE.txt",
+      "broken": null
+    },
+    {
+      "id": "anthropic:skill-creator",
+      "pack": "anthropic",
+      "name": "skill-creator",
+      "description": "Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a",
+      "dir": "skills/skill-creator",
+      "acts_on_computer": true,
+      "body_chars": 32625,
+      "files": [
+        "LICENSE.txt",
+        "agents/analyzer.md",
+        "agents/comparator.md",
+        "agents/grader.md",
+        "references/schemas.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "anthropic:slack-gif-creator",
+      "pack": "anthropic",
+      "name": "slack-gif-creator",
+      "description": "Knowledge and utilities for creating animated GIFs optimized for Slack. Provides constraints, validation tools, and animation concepts. Use when users request animated GIFs for Slack like \"make me a",
+      "dir": "skills/slack-gif-creator",
+      "acts_on_computer": true,
+      "body_chars": 7528,
+      "files": [
+        "LICENSE.txt",
+        "requirements.txt"
+      ],
+      "license": "Complete terms in LICENSE.txt",
+      "broken": null
+    },
+    {
+      "id": "anthropic:theme-factory",
+      "pack": "anthropic",
+      "name": "theme-factory",
+      "description": "Toolkit for styling artifacts with a theme. These artifacts can be slides, docs, reportings, HTML landing pages, etc. There are 10 pre-set themes with colors/fonts that you can apply to any artifact",
+      "dir": "skills/theme-factory",
+      "acts_on_computer": true,
+      "body_chars": 2779,
+      "files": [
+        "LICENSE.txt",
+        "themes/arctic-frost.md",
+        "themes/botanical-garden.md",
+        "themes/desert-rose.md",
+        "themes/forest-canopy.md",
+        "themes/golden-hour.md",
+        "themes/midnight-galaxy.md",
+        "themes/modern-minimalist.md",
+        "themes/ocean-depths.md",
+        "themes/sunset-boulevard.md",
+        "themes/tech-innovation.md"
+      ],
+      "license": "Complete terms in LICENSE.txt",
+      "broken": null
+    },
+    {
+      "id": "anthropic:web-artifacts-builder",
+      "pack": "anthropic",
+      "name": "web-artifacts-builder",
+      "description": "Suite of tools for creating elaborate, multi-component claude.ai HTML artifacts using modern frontend web technologies (React, Tailwind CSS, shadcn/ui). Use for complex artifacts requiring state",
+      "dir": "skills/web-artifacts-builder",
+      "acts_on_computer": true,
+      "body_chars": 2695,
+      "files": [
+        "LICENSE.txt"
+      ],
+      "license": "Complete terms in LICENSE.txt",
+      "broken": null
+    },
+    {
+      "id": "anthropic:webapp-testing",
+      "pack": "anthropic",
+      "name": "webapp-testing",
+      "description": "Toolkit for interacting with and testing local web applications using Playwright. Supports verifying frontend functionality, debugging UI behavior, capturing browser screenshots, and viewing browser",
+      "dir": "skills/webapp-testing",
+      "acts_on_computer": true,
+      "body_chars": 3574,
+      "files": [
+        "LICENSE.txt"
+      ],
+      "license": "Complete terms in LICENSE.txt",
+      "broken": null
+    },
+    {
+      "id": "anthropic:xlsx",
+      "pack": "anthropic",
+      "name": "xlsx",
+      "description": "Use this skill any time a spreadsheet file is the primary input or output. This means any task where the user wants to: open, read, edit, or fix an existing .xlsx, .xlsm, .xltx, .csv, or .tsv file",
+      "dir": "skills/xlsx",
+      "acts_on_computer": true,
+      "body_chars": 7503,
+      "files": [
+        "LICENSE.txt"
+      ],
+      "license": "Complete terms in LICENSE.txt",
+      "broken": null
+    }
+  ],
+  "skipped": [
+    "skills/claude-api/shared/model-migration.md"
+  ],
+  "checksum": "12f66398512b2c7534a2c5205c21607801005ac04dce1159cb83b3e58e37e786"
+}

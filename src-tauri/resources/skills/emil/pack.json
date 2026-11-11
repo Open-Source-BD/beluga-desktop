@@ -1,0 +1,247 @@
+{
+  "id": "emil",
+  "title": "Emil Kowalski",
+  "repo": "emilkowalski/skills",
+  "commit": "715c1807e08c497cfd1dc4feb450a2a3300ef2a9",
+  "license": "MIT",
+  "license_files": [
+    "LICENSE"
+  ],
+  "skills": [
+    {
+      "id": "emil:animate",
+      "pack": "emil",
+      "name": "animate",
+      "description": "Build an animation from scratch, making the decisions in the order that determines whether it feels right — should it animate at all, what purpose, which tool, which properties, which curve and",
+      "dir": "skills/animate",
+      "acts_on_computer": false,
+      "body_chars": 11320,
+      "files": [
+        "RECIPES.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "emil:animate-expo",
+      "pack": "emil",
+      "name": "animate-expo",
+      "description": "Build animations in React Native and Expo, making the decisions in the order that determines whether they feel right — should it animate, which thread it runs on, which properties, spring or timing,",
+      "dir": "skills/animate-expo",
+      "acts_on_computer": true,
+      "body_chars": 17220,
+      "files": [
+        "RECIPES.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "emil:animation-performance",
+      "pack": "emil",
+      "name": "animation-performance",
+      "description": "Keep web animations inside the frame budget — animate composite-only properties, keep motion off the main thread when the page is busy, and find the cause when an animation drops frames. Covers the",
+      "dir": "skills/animation-performance",
+      "acts_on_computer": true,
+      "body_chars": 13412,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "emil:animation-vocabulary",
+      "pack": "emil",
+      "name": "animation-vocabulary",
+      "description": "Reverse-lookup glossary that turns a vague description of a web animation or motion effect into its exact term (\"the bouncy thing when a popover opens\" → Pop in; \"the iOS rubber-band scroll\" →",
+      "dir": "skills/animation-vocabulary",
+      "acts_on_computer": true,
+      "body_chars": 12707,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "emil:apple-design",
+      "pack": "emil",
+      "name": "apple-design",
+      "description": "Apple's approach to interface design and fluid, physical motion, translated for the web. Use when building or reviewing gesture-driven UI, spring animations, drag/swipe/sheet interactions, momentum",
+      "dir": "skills/apple-design",
+      "acts_on_computer": false,
+      "body_chars": 22413,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "emil:ask-sonner",
+      "pack": "emil",
+      "name": "ask-sonner",
+      "description": "Guide to Sonner, the React toast library — install and wire up the Toaster, pick the right toast() call, promise and loading toasts, updating, dismissing and persisting toasts, styling, theming and",
+      "dir": "skills/ask-sonner",
+      "acts_on_computer": true,
+      "body_chars": 6684,
+      "files": [
+        "API.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "emil:break-ui",
+      "pack": "emil",
+      "name": "break-ui",
+      "description": "Try to break a piece of UI by feeding it worst-case data — long names, unbreakable emails, one-letter names, missing fields, huge counts, zero items, long labels, non-Latin text, emoji, extreme",
+      "dir": "skills/break-ui",
+      "acts_on_computer": true,
+      "body_chars": 13763,
+      "files": [
+        "CATALOG.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "emil:choreograph",
+      "pack": "emil",
+      "name": "choreograph",
+      "description": "Coordinate several elements that animate together — decide what moves, in what order, how much they overlap, and what stays still — so a group reads as one intentional motion instead of a pile of",
+      "dir": "skills/choreograph",
+      "acts_on_computer": true,
+      "body_chars": 14861,
+      "files": [
+        "RECIPES.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "emil:emil-design-eng",
+      "pack": "emil",
+      "name": "emil-design-eng",
+      "description": "This skill encodes Emil Kowalski's philosophy on UI polish, component design, animation decisions, and the invisible details that make software feel great.",
+      "dir": "skills/emil-design-eng",
+      "acts_on_computer": false,
+      "body_chars": 27215,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "emil:find-animation-opportunities",
+      "pack": "emil",
+      "name": "find-animation-opportunities",
+      "description": "Search a codebase or UI for places that don't animate but should, and reject everything that shouldn't. Read-only; it proposes motion with exact values, it does not implement it. Use when the user",
+      "dir": "skills/find-animation-opportunities",
+      "acts_on_computer": false,
+      "body_chars": 9294,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "emil:gestures",
+      "pack": "emil",
+      "name": "gestures",
+      "description": "Build drag, swipe, and sheet interactions that track the finger 1:1 and stay interruptible. Use when building or fixing anything the user drags, swipes, flings, holds, or dismisses with a gesture —",
+      "dir": "skills/gestures",
+      "acts_on_computer": true,
+      "body_chars": 7698,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "emil:improve-animations",
+      "pack": "emil",
+      "name": "improve-animations",
+      "description": "Survey a codebase's animation and motion code as a senior motion advisor, then produce a prioritized audit and self-contained implementation plans for other agents (or cheaper models) to execute.",
+      "dir": "skills/improve-animations",
+      "acts_on_computer": true,
+      "body_chars": 7652,
+      "files": [
+        "AUDIT.md",
+        "PLAN-TEMPLATE.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "emil:mobile-native",
+      "pack": "emil",
+      "name": "mobile-native",
+      "description": "Make a web app feel native on a phone — the small CSS and meta-tag fixes that separate \"a website in a browser\" from something that feels installed. Covers sticky hover states, tap highlight flashes,",
+      "dir": "skills/mobile-native",
+      "acts_on_computer": true,
+      "body_chars": 16006,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "emil:pick-ui-library",
+      "pack": "emil",
+      "name": "pick-ui-library",
+      "description": "Pick the right library for a given frontend task from a curated, opinionated list — numbers, OTP inputs, charts, command menus, virtualization, drag and drop, toasts, state, styling, and more. Only",
+      "dir": "skills/pick-ui-library",
+      "acts_on_computer": true,
+      "body_chars": 4425,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "emil:prototype",
+      "pack": "emil",
+      "name": "prototype",
+      "description": "Build multiple genuinely different versions of a UI piece you describe, rendered behind a visual picker so you can flip through them live and promote the one that feels right. Only runs when",
+      "dir": "skills/prototype",
+      "acts_on_computer": false,
+      "body_chars": 7462,
+      "files": [
+        "PICKER.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "emil:remove-animations",
+      "pack": "emil",
+      "name": "remove-animations",
+      "description": "Find the animations an interface doesn't need and remove them — motion on keyboard actions, high-frequency surfaces, functional data, and decoration with no purpose — then clean up what they leave",
+      "dir": "skills/remove-animations",
+      "acts_on_computer": true,
+      "body_chars": 10558,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "emil:review-animations",
+      "pack": "emil",
+      "name": "review-animations",
+      "description": "Reviews animation and motion code against a high craft bar derived from Emil Kowalski's design engineering philosophy. Default to flagging; approval is earned.",
+      "dir": "skills/review-animations",
+      "acts_on_computer": false,
+      "body_chars": 8186,
+      "files": [
+        "STANDARDS.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "emil:write-swift",
+      "pack": "emil",
+      "name": "write-swift",
+      "description": "How to write modern Swift well — modeling with value types, Swift 6 data-race safety and approachable concurrency (@concurrent, main-actor-by-default, actors, task groups), protocols and generics",
+      "dir": "skills/write-swift",
+      "acts_on_computer": true,
+      "body_chars": 41691,
+      "files": [],
+      "license": null,
+      "broken": null
+    }
+  ],
+  "skipped": [],
+  "checksum": "6b23d28b494b8dd588a9692f6ab02be658401cdb251ed4d42b97fb4ccf2d913c"
+}

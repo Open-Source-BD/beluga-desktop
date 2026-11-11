@@ -1,0 +1,1256 @@
+{
+  "id": "engineer",
+  "title": "Engineer Skills",
+  "repo": "Jeffallan/claude-skills",
+  "commit": "078a25cc5bfd8011459be7b91d004e900c1d02d3",
+  "license": "MIT",
+  "license_files": [
+    "LICENSE"
+  ],
+  "skills": [
+    {
+      "id": "engineer:angular-architect",
+      "pack": "engineer",
+      "name": "angular-architect",
+      "description": "Generates Angular 17+ standalone components, configures advanced routing with lazy loading and guards, implements NgRx state management, applies RxJS patterns, and optimizes bundle performance. Use",
+      "dir": "skills/angular-architect",
+      "acts_on_computer": true,
+      "body_chars": 5338,
+      "files": [
+        "references/components.md",
+        "references/ngrx.md",
+        "references/routing.md",
+        "references/rxjs.md",
+        "references/testing.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:api-designer",
+      "pack": "engineer",
+      "name": "api-designer",
+      "description": "Use when designing REST or GraphQL APIs, creating OpenAPI specifications, or planning API architecture. Invoke for resource modeling, versioning strategies, pagination patterns, error handling",
+      "dir": "skills/api-designer",
+      "acts_on_computer": false,
+      "body_chars": 7277,
+      "files": [
+        "references/error-handling.md",
+        "references/openapi.md",
+        "references/pagination.md",
+        "references/rest-patterns.md",
+        "references/versioning.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:architecture-designer",
+      "pack": "engineer",
+      "name": "architecture-designer",
+      "description": "Use when designing new high-level system architecture, reviewing existing designs, or making architectural decisions. Invoke to create architecture diagrams, write Architecture Decision Records",
+      "dir": "skills/architecture-designer",
+      "acts_on_computer": true,
+      "body_chars": 3902,
+      "files": [
+        "references/adr-template.md",
+        "references/architecture-patterns.md",
+        "references/database-selection.md",
+        "references/nfr-checklist.md",
+        "references/system-design.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:atlassian-mcp",
+      "pack": "engineer",
+      "name": "atlassian-mcp",
+      "description": "Integrates with Atlassian products to manage project tracking and documentation via MCP protocol. Use when querying Jira issues with JQL filters, creating and updating tickets with custom fields,",
+      "dir": "skills/atlassian-mcp",
+      "acts_on_computer": true,
+      "body_chars": 4768,
+      "files": [
+        "references/authentication-patterns.md",
+        "references/common-workflows.md",
+        "references/confluence-operations.md",
+        "references/jira-queries.md",
+        "references/mcp-server-setup.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:chaos-engineer",
+      "pack": "engineer",
+      "name": "chaos-engineer",
+      "description": "Designs chaos experiments, creates failure injection frameworks, and facilitates game day exercises for distributed systems — producing runbooks, experiment manifests, rollback procedures, and",
+      "dir": "skills/chaos-engineer",
+      "acts_on_computer": true,
+      "body_chars": 6068,
+      "files": [
+        "references/chaos-tools.md",
+        "references/experiment-design.md",
+        "references/game-days.md",
+        "references/infrastructure-chaos.md",
+        "references/kubernetes-chaos.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:cli-developer",
+      "pack": "engineer",
+      "name": "cli-developer",
+      "description": "Use when building CLI tools, implementing argument parsing, or adding interactive prompts. Invoke for parsing flags and subcommands, displaying progress bars and spinners, generating bash/zsh/fish",
+      "dir": "skills/cli-developer",
+      "acts_on_computer": false,
+      "body_chars": 4011,
+      "files": [
+        "references/design-patterns.md",
+        "references/go-cli.md",
+        "references/node-cli.md",
+        "references/python-cli.md",
+        "references/ux-patterns.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:cloud-architect",
+      "pack": "engineer",
+      "name": "cloud-architect",
+      "description": "Designs cloud architectures, creates migration plans, generates cost optimization recommendations, and produces disaster recovery strategies across AWS, Azure, and GCP. Use when designing cloud",
+      "dir": "skills/cloud-architect",
+      "acts_on_computer": true,
+      "body_chars": 6512,
+      "files": [
+        "references/aws.md",
+        "references/azure.md",
+        "references/cost.md",
+        "references/gcp.md",
+        "references/multi-cloud.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:code-documenter",
+      "pack": "engineer",
+      "name": "code-documenter",
+      "description": "Generates, formats, and validates technical documentation — including docstrings, OpenAPI/Swagger specs, JSDoc annotations, doc portals, and user guides. Use when adding docstrings to functions or",
+      "dir": "skills/code-documenter",
+      "acts_on_computer": true,
+      "body_chars": 4997,
+      "files": [
+        "references/api-docs-fastapi-django.md",
+        "references/api-docs-nestjs-express.md",
+        "references/coverage-reports.md",
+        "references/documentation-systems.md",
+        "references/interactive-api-docs.md",
+        "references/python-docstrings.md",
+        "references/typescript-jsdoc.md",
+        "references/user-guides-tutorials.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:code-reviewer",
+      "pack": "engineer",
+      "name": "code-reviewer",
+      "description": "Analyzes code diffs and files to identify bugs, security vulnerabilities (SQL injection, XSS, insecure deserialization), code smells, N+1 queries, naming issues, and architectural concerns, then",
+      "dir": "skills/code-reviewer",
+      "acts_on_computer": true,
+      "body_chars": 4217,
+      "files": [
+        "references/common-issues.md",
+        "references/feedback-examples.md",
+        "references/receiving-feedback.md",
+        "references/report-template.md",
+        "references/review-checklist.md",
+        "references/spec-compliance-review.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:cpp-pro",
+      "pack": "engineer",
+      "name": "cpp-pro",
+      "description": "Writes, optimizes, and debugs C++ applications using modern C++20/23 features, template metaprogramming, and high-performance systems techniques. Use when building or refactoring C++ code requiring",
+      "dir": "skills/cpp-pro",
+      "acts_on_computer": true,
+      "body_chars": 3837,
+      "files": [
+        "references/build-tooling.md",
+        "references/concurrency.md",
+        "references/memory-performance.md",
+        "references/modern-cpp.md",
+        "references/templates.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:csharp-developer",
+      "pack": "engineer",
+      "name": "csharp-developer",
+      "description": "Use when building C# applications with .NET 8+, ASP.NET Core APIs, or Blazor web apps. Builds REST APIs using minimal or controller-based routing, configures database access with Entity Framework",
+      "dir": "skills/csharp-developer",
+      "acts_on_computer": true,
+      "body_chars": 4375,
+      "files": [
+        "references/aspnet-core.md",
+        "references/blazor.md",
+        "references/entity-framework.md",
+        "references/modern-csharp.md",
+        "references/performance.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:database-optimizer",
+      "pack": "engineer",
+      "name": "database-optimizer",
+      "description": "Optimizes database queries and improves performance across PostgreSQL and MySQL systems. Use when investigating slow queries, analyzing execution plans, or optimizing database performance. Invoke for",
+      "dir": "skills/database-optimizer",
+      "acts_on_computer": false,
+      "body_chars": 5371,
+      "files": [
+        "references/index-strategies.md",
+        "references/monitoring-analysis.md",
+        "references/mysql-tuning.md",
+        "references/postgresql-tuning.md",
+        "references/query-optimization.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:debugging-wizard",
+      "pack": "engineer",
+      "name": "debugging-wizard",
+      "description": "Parses error messages, traces execution flow through stack traces, correlates log entries to identify failure points, and applies systematic hypothesis-driven methodology to isolate and resolve bugs.",
+      "dir": "skills/debugging-wizard",
+      "acts_on_computer": true,
+      "body_chars": 3080,
+      "files": [
+        "references/common-patterns.md",
+        "references/debugging-tools.md",
+        "references/quick-fixes.md",
+        "references/strategies.md",
+        "references/systematic-debugging.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:devops-engineer",
+      "pack": "engineer",
+      "name": "devops-engineer",
+      "description": "Creates Dockerfiles, configures CI/CD pipelines, writes Kubernetes manifests, and generates Terraform/Pulumi infrastructure templates. Handles deployment automation, GitOps configuration, incident",
+      "dir": "skills/devops-engineer",
+      "acts_on_computer": true,
+      "body_chars": 5568,
+      "files": [
+        "references/deployment-strategies.md",
+        "references/docker-patterns.md",
+        "references/github-actions.md",
+        "references/gitlab-ci.md",
+        "references/incident-response.md",
+        "references/kubernetes.md",
+        "references/platform-engineering.md",
+        "references/release-automation.md",
+        "references/terraform-iac.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:django-expert",
+      "pack": "engineer",
+      "name": "django-expert",
+      "description": "Use when building Django web applications or REST APIs with Django REST Framework. Invoke when working with settings.py, models.py, manage.py, or any Django project file. Creates Django models with",
+      "dir": "skills/django-expert",
+      "acts_on_computer": true,
+      "body_chars": 5299,
+      "files": [
+        "references/authentication.md",
+        "references/drf-serializers.md",
+        "references/models-orm.md",
+        "references/testing-django.md",
+        "references/viewsets-views.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:django-storages-s3",
+      "pack": "engineer",
+      "name": "django-storages-s3",
+      "description": "Use when configuring Django to store static and media files on AWS S3 with django-storages. Invoke when working with the STORAGES setting, S3 buckets, presigned URLs, CloudFront, or boto3-backed file",
+      "dir": "skills/django-storages-s3",
+      "acts_on_computer": false,
+      "body_chars": 6546,
+      "files": [
+        "references/configuration.md",
+        "references/custom-backends.md",
+        "references/presigned-urls.md",
+        "references/testing-storages.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:dotnet-core-expert",
+      "pack": "engineer",
+      "name": "dotnet-core-expert",
+      "description": "Use when building .NET 8 applications with minimal APIs, clean architecture, or cloud-native microservices. Invoke for Entity Framework Core, CQRS with MediatR, JWT authentication, AOT compilation.",
+      "dir": "skills/dotnet-core-expert",
+      "acts_on_computer": true,
+      "body_chars": 4574,
+      "files": [
+        "references/authentication.md",
+        "references/clean-architecture.md",
+        "references/cloud-native.md",
+        "references/entity-framework.md",
+        "references/minimal-apis.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:embedded-systems",
+      "pack": "engineer",
+      "name": "embedded-systems",
+      "description": "Use when developing firmware for microcontrollers, implementing RTOS applications, or optimizing power consumption. Invoke for STM32, ESP32, FreeRTOS, bare-metal, power optimization, real-time",
+      "dir": "skills/embedded-systems",
+      "acts_on_computer": true,
+      "body_chars": 5592,
+      "files": [
+        "references/communication-protocols.md",
+        "references/memory-optimization.md",
+        "references/microcontroller-programming.md",
+        "references/power-optimization.md",
+        "references/rtos-patterns.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:fastapi-expert",
+      "pack": "engineer",
+      "name": "fastapi-expert",
+      "description": "Use when building high-performance async Python APIs with FastAPI and Pydantic V2. Invoke to create REST endpoints, define Pydantic models, implement authentication flows, set up async SQLAlchemy",
+      "dir": "skills/fastapi-expert",
+      "acts_on_computer": true,
+      "body_chars": 6170,
+      "files": [
+        "references/async-sqlalchemy.md",
+        "references/authentication.md",
+        "references/endpoints-routing.md",
+        "references/migration-from-django.md",
+        "references/pydantic-v2.md",
+        "references/testing-async.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:feature-forge",
+      "pack": "engineer",
+      "name": "feature-forge",
+      "description": "Conducts structured requirements workshops to produce feature specifications, user stories, EARS-format functional requirements, acceptance criteria, and implementation checklists. Use when defining",
+      "dir": "skills/feature-forge",
+      "acts_on_computer": true,
+      "body_chars": 3666,
+      "files": [
+        "references/acceptance-criteria.md",
+        "references/ears-syntax.md",
+        "references/interview-questions.md",
+        "references/pre-discovery-subagents.md",
+        "references/specification-template.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:fine-tuning-expert",
+      "pack": "engineer",
+      "name": "fine-tuning-expert",
+      "description": "Use when fine-tuning LLMs, training custom models, or adapting foundation models for specific tasks. Invoke for configuring LoRA/QLoRA adapters, preparing JSONL training datasets, setting",
+      "dir": "skills/fine-tuning-expert",
+      "acts_on_computer": false,
+      "body_chars": 5767,
+      "files": [
+        "references/dataset-preparation.md",
+        "references/deployment-optimization.md",
+        "references/evaluation-metrics.md",
+        "references/hyperparameter-tuning.md",
+        "references/lora-peft.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:flutter-expert",
+      "pack": "engineer",
+      "name": "flutter-expert",
+      "description": "Use when building cross-platform applications with Flutter 3+ and Dart. Invoke for widget development, Riverpod/Bloc state management, GoRouter navigation, platform-specific implementations,",
+      "dir": "skills/flutter-expert",
+      "acts_on_computer": true,
+      "body_chars": 5192,
+      "files": [
+        "references/bloc-state.md",
+        "references/gorouter-navigation.md",
+        "references/performance.md",
+        "references/project-structure.md",
+        "references/riverpod-state.md",
+        "references/widget-patterns.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:fullstack-guardian",
+      "pack": "engineer",
+      "name": "fullstack-guardian",
+      "description": "Builds security-focused full-stack web applications by implementing integrated frontend and backend components with layered security at every level. Covers the complete stack from database to UI,",
+      "dir": "skills/fullstack-guardian",
+      "acts_on_computer": true,
+      "body_chars": 4421,
+      "files": [
+        "references/api-design-standards.md",
+        "references/architecture-decisions.md",
+        "references/backend-patterns.md",
+        "references/common-patterns.md",
+        "references/deliverables-checklist.md",
+        "references/design-template.md",
+        "references/error-handling.md",
+        "references/frontend-patterns.md",
+        "references/integration-patterns.md",
+        "references/security-checklist.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:game-developer",
+      "pack": "engineer",
+      "name": "game-developer",
+      "description": "Use when building game systems, implementing Unity/Unreal Engine features, or optimizing game performance. Invoke to implement ECS architecture, configure physics systems and colliders, set up",
+      "dir": "skills/game-developer",
+      "acts_on_computer": false,
+      "body_chars": 4921,
+      "files": [
+        "references/ecs-patterns.md",
+        "references/multiplayer-networking.md",
+        "references/performance-optimization.md",
+        "references/unity-patterns.md",
+        "references/unreal-cpp.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:golang-pro",
+      "pack": "engineer",
+      "name": "golang-pro",
+      "description": "Implements concurrent Go patterns using goroutines and channels, designs and builds microservices with gRPC or REST, optimizes Go application performance with pprof, and enforces idiomatic Go with",
+      "dir": "skills/golang-pro",
+      "acts_on_computer": true,
+      "body_chars": 4276,
+      "files": [
+        "references/concurrency.md",
+        "references/generics.md",
+        "references/interfaces.md",
+        "references/project-structure.md",
+        "references/testing.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:graphql-architect",
+      "pack": "engineer",
+      "name": "graphql-architect",
+      "description": "Use when designing GraphQL schemas, implementing Apollo Federation, or building real-time subscriptions. Invoke for schema design, resolvers with DataLoader, query optimization, federation directives.",
+      "dir": "skills/graphql-architect",
+      "acts_on_computer": true,
+      "body_chars": 4586,
+      "files": [
+        "references/federation.md",
+        "references/migration-from-rest.md",
+        "references/resolvers.md",
+        "references/schema-design.md",
+        "references/security.md",
+        "references/subscriptions.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:java-architect",
+      "pack": "engineer",
+      "name": "java-architect",
+      "description": "Use when building, configuring, or debugging enterprise Java applications with Spring Boot 3.x, microservices, or reactive programming. Invoke to implement WebFlux endpoints, optimize JPA queries and",
+      "dir": "skills/java-architect",
+      "acts_on_computer": false,
+      "body_chars": 5072,
+      "files": [
+        "references/jpa-optimization.md",
+        "references/reactive-webflux.md",
+        "references/spring-boot-setup.md",
+        "references/spring-security.md",
+        "references/testing-patterns.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:javascript-pro",
+      "pack": "engineer",
+      "name": "javascript-pro",
+      "description": "Writes, debugs, and refactors JavaScript code using modern ES2023+ features, async/await patterns, ESM module systems, and Node.js APIs. Use when building vanilla JavaScript applications, implementing",
+      "dir": "skills/javascript-pro",
+      "acts_on_computer": true,
+      "body_chars": 4173,
+      "files": [
+        "references/async-patterns.md",
+        "references/browser-apis.md",
+        "references/modern-syntax.md",
+        "references/modules.md",
+        "references/node-essentials.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:kotlin-specialist",
+      "pack": "engineer",
+      "name": "kotlin-specialist",
+      "description": "Provides idiomatic Kotlin implementation patterns including coroutine concurrency, Flow stream handling, multiplatform architecture, Compose UI construction, Ktor server setup, and type-safe DSL",
+      "dir": "skills/kotlin-specialist",
+      "acts_on_computer": true,
+      "body_chars": 5249,
+      "files": [
+        "references/android-compose.md",
+        "references/coroutines-flow.md",
+        "references/dsl-idioms.md",
+        "references/ktor-server.md",
+        "references/multiplatform-kmp.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:kubernetes-specialist",
+      "pack": "engineer",
+      "name": "kubernetes-specialist",
+      "description": "Use when deploying or managing Kubernetes workloads. Invoke to create deployment manifests, configure pod security policies, set up service accounts, define network isolation rules, debug pod crashes,",
+      "dir": "skills/kubernetes-specialist",
+      "acts_on_computer": true,
+      "body_chars": 7247,
+      "files": [
+        "references/configuration.md",
+        "references/cost-optimization.md",
+        "references/custom-operators.md",
+        "references/gitops.md",
+        "references/helm-charts.md",
+        "references/multi-cluster.md",
+        "references/networking.md",
+        "references/service-mesh.md",
+        "references/storage.md",
+        "references/troubleshooting.md",
+        "references/workloads.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:laravel-specialist",
+      "pack": "engineer",
+      "name": "laravel-specialist",
+      "description": "Build and configure Laravel 10+ applications, including creating Eloquent models and relationships, implementing Sanctum authentication, configuring Horizon queues, designing RESTful APIs with API",
+      "dir": "skills/laravel-specialist",
+      "acts_on_computer": true,
+      "body_chars": 7568,
+      "files": [
+        "references/eloquent.md",
+        "references/livewire.md",
+        "references/queues.md",
+        "references/routing.md",
+        "references/testing.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:legacy-modernizer",
+      "pack": "engineer",
+      "name": "legacy-modernizer",
+      "description": "Designs incremental migration strategies, identifies service boundaries, produces dependency maps and migration roadmaps, and generates API facade designs for aging codebases. Use when modernizing",
+      "dir": "skills/legacy-modernizer",
+      "acts_on_computer": false,
+      "body_chars": 5398,
+      "files": [
+        "references/legacy-testing.md",
+        "references/migration-strategies.md",
+        "references/refactoring-patterns.md",
+        "references/strangler-fig-pattern.md",
+        "references/system-assessment.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:mcp-developer",
+      "pack": "engineer",
+      "name": "mcp-developer",
+      "description": "Use when building, debugging, or extending MCP servers or clients that connect AI systems with external tools and data sources. Invoke to implement tool handlers, configure resource providers, set up",
+      "dir": "skills/mcp-developer",
+      "acts_on_computer": false,
+      "body_chars": 5019,
+      "files": [
+        "references/protocol.md",
+        "references/python-sdk.md",
+        "references/resources.md",
+        "references/tools.md",
+        "references/typescript-sdk.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:microservices-architect",
+      "pack": "engineer",
+      "name": "microservices-architect",
+      "description": "Designs distributed system architectures, decomposes monoliths into bounded-context services, recommends communication patterns, and produces service boundary diagrams and resilience strategies. Use",
+      "dir": "skills/microservices-architect",
+      "acts_on_computer": false,
+      "body_chars": 6065,
+      "files": [
+        "references/communication.md",
+        "references/data.md",
+        "references/decomposition.md",
+        "references/observability.md",
+        "references/patterns.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:ml-pipeline",
+      "pack": "engineer",
+      "name": "ml-pipeline",
+      "description": "Designs and implements production-grade ML pipeline infrastructure: configures experiment tracking with MLflow or Weights & Biases, creates Kubeflow or Airflow DAGs for training orchestration, builds",
+      "dir": "skills/ml-pipeline",
+      "acts_on_computer": false,
+      "body_chars": 6217,
+      "files": [
+        "references/experiment-tracking.md",
+        "references/feature-engineering.md",
+        "references/model-validation.md",
+        "references/pipeline-orchestration.md",
+        "references/training-pipelines.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:monitoring-expert",
+      "pack": "engineer",
+      "name": "monitoring-expert",
+      "description": "Configures monitoring systems, implements structured logging pipelines, creates Prometheus/Grafana dashboards, defines alerting rules, and instruments distributed tracing. Implements",
+      "dir": "skills/monitoring-expert",
+      "acts_on_computer": false,
+      "body_chars": 5289,
+      "files": [
+        "references/alerting-rules.md",
+        "references/application-profiling.md",
+        "references/capacity-planning.md",
+        "references/dashboards.md",
+        "references/opentelemetry.md",
+        "references/performance-testing.md",
+        "references/prometheus-metrics.md",
+        "references/structured-logging.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:nestjs-expert",
+      "pack": "engineer",
+      "name": "nestjs-expert",
+      "description": "Creates and configures NestJS modules, controllers, services, DTOs, guards, and interceptors for enterprise-grade TypeScript backend applications. Use when building NestJS REST APIs or GraphQL",
+      "dir": "skills/nestjs-expert",
+      "acts_on_computer": true,
+      "body_chars": 6870,
+      "files": [
+        "references/authentication.md",
+        "references/controllers-routing.md",
+        "references/dtos-validation.md",
+        "references/migration-from-express.md",
+        "references/services-di.md",
+        "references/testing-patterns.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:nextjs-developer",
+      "pack": "engineer",
+      "name": "nextjs-developer",
+      "description": "Use when building Next.js 14+ applications with App Router, server components, or server actions. Invoke to configure route handlers, implement middleware, set up API routes, add streaming SSR, write",
+      "dir": "skills/nextjs-developer",
+      "acts_on_computer": false,
+      "body_chars": 4738,
+      "files": [
+        "references/app-router.md",
+        "references/data-fetching.md",
+        "references/deployment.md",
+        "references/server-actions.md",
+        "references/server-components.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:pandas-pro",
+      "pack": "engineer",
+      "name": "pandas-pro",
+      "description": "Performs pandas DataFrame operations for data analysis, manipulation, and transformation. Use when working with pandas DataFrames, data cleaning, aggregation, merging, or time series analysis. Invoke",
+      "dir": "skills/pandas-pro",
+      "acts_on_computer": false,
+      "body_chars": 5269,
+      "files": [
+        "references/aggregation-groupby.md",
+        "references/data-cleaning.md",
+        "references/dataframe-operations.md",
+        "references/merging-joining.md",
+        "references/performance-optimization.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:php-pro",
+      "pack": "engineer",
+      "name": "php-pro",
+      "description": "Use when building PHP applications with modern PHP 8.3+ features, Laravel, or Symfony frameworks. Invokes strict typing, PHPStan level 9, async patterns with Swoole, and PSR standards. Creates",
+      "dir": "skills/php-pro",
+      "acts_on_computer": true,
+      "body_chars": 5392,
+      "files": [
+        "references/async-patterns.md",
+        "references/laravel-patterns.md",
+        "references/modern-php-features.md",
+        "references/symfony-patterns.md",
+        "references/testing-quality.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:playwright-expert",
+      "pack": "engineer",
+      "name": "playwright-expert",
+      "description": "Use when writing E2E tests with Playwright, setting up test infrastructure, or debugging flaky browser tests. Invoke to write test scripts, create page objects, configure test fixtures, set up",
+      "dir": "skills/playwright-expert",
+      "acts_on_computer": true,
+      "body_chars": 4899,
+      "files": [
+        "references/api-mocking.md",
+        "references/configuration.md",
+        "references/debugging-flaky.md",
+        "references/page-object-model.md",
+        "references/selectors-locators.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:postgres-pro",
+      "pack": "engineer",
+      "name": "postgres-pro",
+      "description": "Use when optimizing PostgreSQL queries, configuring replication, or implementing advanced database features. Invoke for EXPLAIN analysis, JSONB operations, extension usage, VACUUM tuning, performance",
+      "dir": "skills/postgres-pro",
+      "acts_on_computer": false,
+      "body_chars": 5312,
+      "files": [
+        "references/extensions.md",
+        "references/jsonb.md",
+        "references/maintenance.md",
+        "references/performance.md",
+        "references/replication.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:prompt-engineer",
+      "pack": "engineer",
+      "name": "prompt-engineer",
+      "description": "Writes, refactors, and evaluates prompts for LLMs — generating optimized prompt templates, structured output schemas, evaluation rubrics, and test suites. Use when designing prompts for new LLM",
+      "dir": "skills/prompt-engineer",
+      "acts_on_computer": false,
+      "body_chars": 4935,
+      "files": [
+        "references/context-management.md",
+        "references/evaluation-frameworks.md",
+        "references/prompt-optimization.md",
+        "references/prompt-patterns.md",
+        "references/structured-outputs.md",
+        "references/system-prompts.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:python-pro",
+      "pack": "engineer",
+      "name": "python-pro",
+      "description": "Use when building Python 3.11+ applications requiring type safety, async programming, or robust error handling. Generates type-annotated Python code, configures mypy in strict mode, writes pytest test",
+      "dir": "skills/python-pro",
+      "acts_on_computer": true,
+      "body_chars": 5435,
+      "files": [
+        "references/async-patterns.md",
+        "references/packaging.md",
+        "references/standard-library.md",
+        "references/testing.md",
+        "references/type-system.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:rag-architect",
+      "pack": "engineer",
+      "name": "rag-architect",
+      "description": "Designs and implements production-grade RAG systems by chunking documents, generating embeddings, configuring vector stores, building hybrid search pipelines, applying reranking, and evaluating",
+      "dir": "skills/rag-architect",
+      "acts_on_computer": false,
+      "body_chars": 7101,
+      "files": [
+        "references/chunking-strategies.md",
+        "references/embedding-models.md",
+        "references/rag-evaluation.md",
+        "references/retrieval-optimization.md",
+        "references/vector-databases.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:rails-expert",
+      "pack": "engineer",
+      "name": "rails-expert",
+      "description": "Rails 7+ specialist that optimizes Active Record queries with includes/eager_load, implements Turbo Frames and Turbo Streams for partial page updates, configures Action Cable for WebSocket",
+      "dir": "skills/rails-expert",
+      "acts_on_computer": true,
+      "body_chars": 4733,
+      "files": [
+        "references/active-record.md",
+        "references/api-development.md",
+        "references/background-jobs.md",
+        "references/hotwire-turbo.md",
+        "references/rspec-testing.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:react-expert",
+      "pack": "engineer",
+      "name": "react-expert",
+      "description": "Use when building React 18+ applications in .jsx or .tsx files, Next.js App Router projects, or create-react-app setups. Creates components, implements custom hooks, debugs rendering issues, migrates",
+      "dir": "skills/react-expert",
+      "acts_on_computer": true,
+      "body_chars": 4576,
+      "files": [
+        "references/hooks-patterns.md",
+        "references/migration-class-to-modern.md",
+        "references/performance.md",
+        "references/react-19-features.md",
+        "references/server-components.md",
+        "references/state-management.md",
+        "references/testing-react.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:react-native-expert",
+      "pack": "engineer",
+      "name": "react-native-expert",
+      "description": "Builds, optimizes, and debugs cross-platform mobile applications with React Native and Expo. Implements navigation hierarchies (tabs, stacks, drawers), configures native modules, optimizes FlatList",
+      "dir": "skills/react-native-expert",
+      "acts_on_computer": false,
+      "body_chars": 5751,
+      "files": [
+        "references/expo-router.md",
+        "references/list-optimization.md",
+        "references/platform-handling.md",
+        "references/project-structure.md",
+        "references/storage-hooks.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:rust-engineer",
+      "pack": "engineer",
+      "name": "rust-engineer",
+      "description": "Writes, reviews, and debugs idiomatic Rust code with memory safety and zero-cost abstractions. Implements ownership patterns, manages lifetimes, designs trait hierarchies, builds async applications",
+      "dir": "skills/rust-engineer",
+      "acts_on_computer": true,
+      "body_chars": 5150,
+      "files": [
+        "references/async.md",
+        "references/error-handling.md",
+        "references/ownership.md",
+        "references/testing.md",
+        "references/traits.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:salesforce-developer",
+      "pack": "engineer",
+      "name": "salesforce-developer",
+      "description": "Writes and debugs Apex code, builds Lightning Web Components, optimizes SOQL queries, implements triggers, batch jobs, platform events, and integrations on the Salesforce platform. Use when developing",
+      "dir": "skills/salesforce-developer",
+      "acts_on_computer": true,
+      "body_chars": 6818,
+      "files": [
+        "references/apex-development.md",
+        "references/deployment-devops.md",
+        "references/integration-patterns.md",
+        "references/lightning-web-components.md",
+        "references/soql-sosl.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:secure-code-guardian",
+      "pack": "engineer",
+      "name": "secure-code-guardian",
+      "description": "Use when implementing authentication/authorization, securing user input, or preventing OWASP Top 10 vulnerabilities — including custom security implementations such as hashing passwords with",
+      "dir": "skills/secure-code-guardian",
+      "acts_on_computer": true,
+      "body_chars": 6143,
+      "files": [
+        "references/authentication.md",
+        "references/input-validation.md",
+        "references/owasp-prevention.md",
+        "references/security-headers.md",
+        "references/xss-csrf.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:security-reviewer",
+      "pack": "engineer",
+      "name": "security-reviewer",
+      "description": "Identifies security vulnerabilities, generates structured audit reports with severity ratings, and provides actionable remediation guidance. Use when conducting security audits, reviewing code for",
+      "dir": "skills/security-reviewer",
+      "acts_on_computer": false,
+      "body_chars": 3942,
+      "files": [
+        "references/infrastructure-security.md",
+        "references/penetration-testing.md",
+        "references/report-template.md",
+        "references/sast-tools.md",
+        "references/secret-scanning.md",
+        "references/vulnerability-patterns.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:shopify-expert",
+      "pack": "engineer",
+      "name": "shopify-expert",
+      "description": "Builds and debugs Shopify themes (.liquid files, theme.json, sections), develops custom Shopify apps (shopify.app.toml, OAuth, webhooks), and implements Storefront API integrations for headless",
+      "dir": "skills/shopify-expert",
+      "acts_on_computer": true,
+      "body_chars": 6191,
+      "files": [
+        "references/app-development.md",
+        "references/checkout-customization.md",
+        "references/liquid-templating.md",
+        "references/performance-optimization.md",
+        "references/storefront-api.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:spark-engineer",
+      "pack": "engineer",
+      "name": "spark-engineer",
+      "description": "Use when writing Spark jobs, debugging performance issues, or configuring cluster settings for Apache Spark applications, distributed data processing pipelines, or big data workloads. Invoke to write",
+      "dir": "skills/spark-engineer",
+      "acts_on_computer": true,
+      "body_chars": 5773,
+      "files": [
+        "references/partitioning-caching.md",
+        "references/performance-tuning.md",
+        "references/rdd-operations.md",
+        "references/spark-sql-dataframes.md",
+        "references/streaming-patterns.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:spec-miner",
+      "pack": "engineer",
+      "name": "spec-miner",
+      "description": "Reverse-engineering specialist that extracts specifications from existing codebases. Use when working with legacy or undocumented systems, inherited projects, or old codebases with no documentation.",
+      "dir": "skills/spec-miner",
+      "acts_on_computer": true,
+      "body_chars": 3732,
+      "files": [
+        "references/analysis-checklist.md",
+        "references/analysis-process.md",
+        "references/ears-format.md",
+        "references/specification-template.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:spring-boot-engineer",
+      "pack": "engineer",
+      "name": "spring-boot-engineer",
+      "description": "Generates Spring Boot 3.x configurations, creates REST controllers, implements Spring Security 6 authentication flows, sets up Spring Data JPA repositories, and configures reactive WebFlux endpoints.",
+      "dir": "skills/spring-boot-engineer",
+      "acts_on_computer": true,
+      "body_chars": 6567,
+      "files": [
+        "references/cloud.md",
+        "references/data.md",
+        "references/security.md",
+        "references/testing.md",
+        "references/web.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:sql-pro",
+      "pack": "engineer",
+      "name": "sql-pro",
+      "description": "Optimizes SQL queries, designs database schemas, and troubleshoots performance issues. Use when a user asks why their query is slow, needs help writing complex joins or aggregations, mentions database",
+      "dir": "skills/sql-pro",
+      "acts_on_computer": false,
+      "body_chars": 4396,
+      "files": [
+        "references/database-design.md",
+        "references/dialect-differences.md",
+        "references/optimization.md",
+        "references/query-patterns.md",
+        "references/window-functions.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:sre-engineer",
+      "pack": "engineer",
+      "name": "sre-engineer",
+      "description": "Defines service level objectives, creates error budget policies, designs incident response procedures, develops capacity models, and produces monitoring configurations and automation scripts for",
+      "dir": "skills/sre-engineer",
+      "acts_on_computer": true,
+      "body_chars": 6088,
+      "files": [
+        "references/automation-toil.md",
+        "references/error-budget-policy.md",
+        "references/incident-chaos.md",
+        "references/monitoring-alerting.md",
+        "references/slo-sli-management.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:swift-expert",
+      "pack": "engineer",
+      "name": "swift-expert",
+      "description": "Builds iOS/macOS/watchOS/tvOS applications, implements SwiftUI views and state management, designs protocol-oriented architectures, handles async/await concurrency, implements actors for thread",
+      "dir": "skills/swift-expert",
+      "acts_on_computer": true,
+      "body_chars": 5162,
+      "files": [
+        "references/async-concurrency.md",
+        "references/memory-performance.md",
+        "references/protocol-oriented.md",
+        "references/swiftui-patterns.md",
+        "references/testing-patterns.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:terraform-engineer",
+      "pack": "engineer",
+      "name": "terraform-engineer",
+      "description": "Use when implementing infrastructure as code with Terraform across AWS, Azure, or GCP. Invoke for module development (create reusable modules, manage module versioning), state management (migrate",
+      "dir": "skills/terraform-engineer",
+      "acts_on_computer": false,
+      "body_chars": 4920,
+      "files": [
+        "references/best-practices.md",
+        "references/module-patterns.md",
+        "references/providers.md",
+        "references/state-management.md",
+        "references/testing.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:test-master",
+      "pack": "engineer",
+      "name": "test-master",
+      "description": "Generates test files, creates mocking strategies, analyzes code coverage, designs test architectures, and produces test plans and defect reports across functional, performance, and security testing",
+      "dir": "skills/test-master",
+      "acts_on_computer": true,
+      "body_chars": 3953,
+      "files": [
+        "references/automation-frameworks.md",
+        "references/e2e-testing.md",
+        "references/integration-testing.md",
+        "references/performance-testing.md",
+        "references/qa-methodology.md",
+        "references/security-testing.md",
+        "references/tdd-iron-laws.md",
+        "references/test-reports.md",
+        "references/testing-anti-patterns.md",
+        "references/unit-testing.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:the-fool",
+      "pack": "engineer",
+      "name": "the-fool",
+      "description": "Use when challenging ideas, plans, decisions, or proposals using structured critical reasoning. Invoke to play devil's advocate, run a pre-mortem, red team, or audit evidence and assumptions.",
+      "dir": "skills/the-fool",
+      "acts_on_computer": false,
+      "body_chars": 5702,
+      "files": [
+        "references/dialectic-synthesis.md",
+        "references/evidence-audit.md",
+        "references/mode-selection-guide.md",
+        "references/pre-mortem-analysis.md",
+        "references/red-team-adversarial.md",
+        "references/socratic-questioning.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:typescript-pro",
+      "pack": "engineer",
+      "name": "typescript-pro",
+      "description": "Implements advanced TypeScript type systems, creates custom type guards, utility types, and branded types, and configures tRPC for end-to-end type safety. Use when building TypeScript applications",
+      "dir": "skills/typescript-pro",
+      "acts_on_computer": true,
+      "body_chars": 4860,
+      "files": [
+        "references/advanced-types.md",
+        "references/configuration.md",
+        "references/patterns.md",
+        "references/type-guards.md",
+        "references/utility-types.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:vue-expert",
+      "pack": "engineer",
+      "name": "vue-expert",
+      "description": "Builds Vue 3 components with Composition API patterns, configures Nuxt 3 SSR/SSG projects, sets up Pinia stores, scaffolds Quasar/Capacitor mobile apps, implements PWA features, and optimises Vite",
+      "dir": "skills/vue-expert",
+      "acts_on_computer": true,
+      "body_chars": 3502,
+      "files": [
+        "references/build-tooling.md",
+        "references/components.md",
+        "references/composition-api.md",
+        "references/mobile-hybrid.md",
+        "references/nuxt.md",
+        "references/state-management.md",
+        "references/typescript.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:vue-expert-js",
+      "pack": "engineer",
+      "name": "vue-expert-js",
+      "description": "Creates Vue 3 components, builds vanilla JS composables, configures Vite projects, and sets up routing and state management using JavaScript only — no TypeScript. Generates JSDoc-typed code with",
+      "dir": "skills/vue-expert-js",
+      "acts_on_computer": false,
+      "body_chars": 5259,
+      "files": [
+        "references/component-architecture.md",
+        "references/composables-patterns.md",
+        "references/jsdoc-typing.md",
+        "references/state-management.md",
+        "references/testing-patterns.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:websocket-engineer",
+      "pack": "engineer",
+      "name": "websocket-engineer",
+      "description": "Use when building real-time communication systems with WebSockets or Socket.IO. Invoke for bidirectional messaging, horizontal scaling with Redis, presence tracking, room management.",
+      "dir": "skills/websocket-engineer",
+      "acts_on_computer": false,
+      "body_chars": 5870,
+      "files": [
+        "references/alternatives.md",
+        "references/patterns.md",
+        "references/protocol.md",
+        "references/scaling.md",
+        "references/security.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "engineer:wordpress-pro",
+      "pack": "engineer",
+      "name": "wordpress-pro",
+      "description": "Develops custom WordPress themes and plugins, creates and registers Gutenberg blocks and block patterns, configures WooCommerce stores, implements WordPress REST API endpoints, applies security",
+      "dir": "skills/wordpress-pro",
+      "acts_on_computer": true,
+      "body_chars": 5384,
+      "files": [
+        "references/gutenberg-blocks.md",
+        "references/hooks-filters.md",
+        "references/performance-security.md",
+        "references/plugin-architecture.md",
+        "references/theme-development.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    }
+  ],
+  "skipped": [],
+  "checksum": "bde4a517d309fce89f739f53661fb5c2bf03bb88b08d842d1b2a37e13a72490d"
+}

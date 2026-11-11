@@ -1,0 +1,1030 @@
+{
+  "id": "gstack",
+  "title": "gstack",
+  "repo": "garrytan/gstack",
+  "commit": "f0cd9f8c4b453c1eadd714e4149174ee01179eae",
+  "license": "MIT",
+  "license_files": [
+    "LICENSE",
+    "NOTICE.md",
+    "licenses/Apache-2.0.txt",
+    "licenses/MIT-elaya.txt",
+    "licenses/MIT-hallmark.txt",
+    "licenses/MIT-pstack.txt",
+    "licenses/MIT-skill-diet.txt",
+    "licenses/MIT-tstack.txt"
+  ],
+  "skills": [
+    {
+      "id": "gstack:gstack",
+      "pack": "gstack",
+      "name": "gstack",
+      "description": "Router for the gstack skill suite. (gstack)",
+      "dir": ".",
+      "acts_on_computer": true,
+      "body_chars": 20590,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:autoplan",
+      "pack": "gstack",
+      "name": "autoplan",
+      "description": "Auto-review pipeline — runs the CEO, design, eng (architecture, edge cases, failure modes, tests) and DX reviews (lean run: one reviewer), auto-deciding. (gstack)",
+      "dir": "autoplan",
+      "acts_on_computer": true,
+      "body_chars": 41489,
+      "files": [
+        "DRIVER.md",
+        "sections/ceo-only.md",
+        "sections/ceo-phase.md",
+        "sections/design-phase.md",
+        "sections/dx-phase.md",
+        "sections/eng-phase.md",
+        "sections/manifest.json",
+        "sections/phase-close.md",
+        "sections/preamble.md",
+        "sections/tasks-aggregator.md",
+        "sections/unattended.md",
+        "shadow-decider.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:benchmark",
+      "pack": "gstack",
+      "name": "benchmark",
+      "description": "Web performance regression detection. (gstack)",
+      "dir": "benchmark",
+      "acts_on_computer": true,
+      "body_chars": 30639,
+      "files": [
+        "sections/manifest.json",
+        "sections/vet-the-number.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:benchmark-models",
+      "pack": "gstack",
+      "name": "benchmark-models",
+      "description": "Cross-model benchmark for gstack skills. (gstack)",
+      "dir": "benchmark-models",
+      "acts_on_computer": true,
+      "body_chars": 15704,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:browse",
+      "pack": "gstack",
+      "name": "browse",
+      "description": "Drive a real browser through Aside: open a page, read it, click through a flow, take screenshots, check console errors. (gstack)",
+      "dir": "browse",
+      "acts_on_computer": true,
+      "body_chars": 34234,
+      "files": [
+        "PLAN-snapshot-dropdown-interactive.md",
+        "sections/command-list.md",
+        "sections/manifest.json",
+        "src/cookie-import-native-qualification.json",
+        "test/fixtures/route-dispatch-allowlist.json"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:canary",
+      "pack": "gstack",
+      "name": "canary",
+      "description": "Post-deploy canary monitoring. (gstack)",
+      "dir": "canary",
+      "acts_on_computer": true,
+      "body_chars": 29051,
+      "files": [
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:captain",
+      "pack": "gstack",
+      "name": "captain",
+      "description": "Run a crew of coding agents from one controller (also /crew): lanes send READY blocks and never merge; the controller merges through trains, keeps the digest, relays approvals, fixes flakes daily.",
+      "dir": "captain",
+      "acts_on_computer": true,
+      "body_chars": 27202,
+      "files": [
+        "sections/preamble.md",
+        "templates/AGENTS.md",
+        "templates/CREW.md",
+        "templates/DIGEST.md",
+        "templates/NOTES.md",
+        "templates/READY.md",
+        "templates/automation-flaky-pass.md",
+        "templates/brief.md",
+        "templates/flaky-ledger.md",
+        "templates/merge-ask.md",
+        "templates/merge-train-peer.md",
+        "templates/plan-ask.md",
+        "templates/postmortem.md",
+        "templates/report.md",
+        "templates/slot-call.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:careful",
+      "pack": "gstack",
+      "name": "careful",
+      "description": "Safety guardrails for destructive commands. (gstack)",
+      "dir": "careful",
+      "acts_on_computer": true,
+      "body_chars": 4045,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:codex",
+      "pack": "gstack",
+      "name": "codex",
+      "description": "OpenAI Codex CLI wrapper — three modes. (gstack)",
+      "dir": "codex",
+      "acts_on_computer": true,
+      "body_chars": 35601,
+      "files": [
+        "sections/challenge-mode.md",
+        "sections/consult-mode.md",
+        "sections/manifest.json",
+        "sections/preamble.md",
+        "sections/review-mode.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:context-restore",
+      "pack": "gstack",
+      "name": "context-restore",
+      "description": "Restore working context saved earlier by /context-save. (gstack)",
+      "dir": "context-restore",
+      "acts_on_computer": true,
+      "body_chars": 23522,
+      "files": [
+        "sections/manifest.json",
+        "sections/preamble.md",
+        "sections/transcripts.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:context-save",
+      "pack": "gstack",
+      "name": "context-save",
+      "description": "Save working context. (gstack)",
+      "dir": "context-save",
+      "acts_on_computer": true,
+      "body_chars": 18510,
+      "files": [
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:cso",
+      "pack": "gstack",
+      "name": "cso",
+      "description": "Security audit: supported static findings; qualified profiles add reproduction and repair candidates. (gstack)",
+      "dir": "cso",
+      "acts_on_computer": true,
+      "body_chars": 18361,
+      "files": [
+        "ACKNOWLEDGEMENTS.md",
+        "sections/audit-phases.md",
+        "sections/manifest.json"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:design-consultation",
+      "pack": "gstack",
+      "name": "design-consultation",
+      "description": "Design consultation: understands your product, researches the landscape, proposes a complete design system (aesthetic, typography, color, layout, spacing, motion), and generates font+color preview...",
+      "dir": "design-consultation",
+      "acts_on_computer": true,
+      "body_chars": 38978,
+      "files": [
+        "sections/manifest.json",
+        "sections/preamble.md",
+        "sections/proposal-and-preview.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:design-html",
+      "pack": "gstack",
+      "name": "design-html",
+      "description": "Design finalization: generates production-quality Pretext-native HTML/CSS. (gstack)",
+      "dir": "design-html",
+      "acts_on_computer": true,
+      "body_chars": 33938,
+      "files": [
+        "sections/craft.md",
+        "sections/detector-install-offer.md",
+        "sections/doctrine.md",
+        "sections/manifest.json",
+        "sections/preamble.md",
+        "sections/pretext-patterns.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:design-motion",
+      "pack": "gstack",
+      "name": "design-motion",
+      "description": "Design motion: animate an approved design into a seamless MP4 and GIF loop. (gstack)",
+      "dir": "design-motion",
+      "acts_on_computer": true,
+      "body_chars": 17679,
+      "files": [
+        "sections/fidelity.md",
+        "sections/figma.md",
+        "sections/manifest.json",
+        "sections/motion.md",
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:design-review",
+      "pack": "gstack",
+      "name": "design-review",
+      "description": "Designer's eye QA: finds visual inconsistency, spacing issues, hierarchy problems, AI slop patterns, and slow interactions — then fixes them; --build checks UI while you build it. (gstack)",
+      "dir": "design-review",
+      "acts_on_computer": true,
+      "body_chars": 84294,
+      "files": [
+        "sections/build-loop.md",
+        "sections/craft-audit.md",
+        "sections/manifest.json",
+        "sections/outside-voices.md",
+        "sections/preamble.md",
+        "sections/test-bootstrap.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:design-shotgun",
+      "pack": "gstack",
+      "name": "design-shotgun",
+      "description": "Design shotgun: generate multiple AI design variants, open a comparison board, collect structured feedback, and iterate. (gstack)",
+      "dir": "design-shotgun",
+      "acts_on_computer": true,
+      "body_chars": 34566,
+      "files": [
+        "sections/doctrine.md",
+        "sections/manifest.json",
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:deslop-shared-libs",
+      "pack": "gstack",
+      "name": "deslop-shared-libs",
+      "description": "Find worthwhile shared-code extractions in recent work. (gstack)",
+      "dir": "deslop-shared-libs",
+      "acts_on_computer": true,
+      "body_chars": 12793,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:devex-review",
+      "pack": "gstack",
+      "name": "devex-review",
+      "description": "Live developer experience audit. (gstack)",
+      "dir": "devex-review",
+      "acts_on_computer": true,
+      "body_chars": 58482,
+      "files": [
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:diagram",
+      "pack": "gstack",
+      "name": "diagram",
+      "description": "Turn an English description (or mermaid source) into a diagram triplet: the source, an editable .excalidraw file you can open on excalidraw.com, and rendered SVG + PNG. (gstack)",
+      "dir": "diagram",
+      "acts_on_computer": true,
+      "body_chars": 15863,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:document-generate",
+      "pack": "gstack",
+      "name": "document-generate",
+      "description": "Generate missing documentation from scratch for a feature, module, or entire project. (gstack)",
+      "dir": "document-generate",
+      "acts_on_computer": true,
+      "body_chars": 22416,
+      "files": [
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:document-release",
+      "pack": "gstack",
+      "name": "document-release",
+      "description": "Release documentation audit. (gstack)",
+      "dir": "document-release",
+      "acts_on_computer": true,
+      "body_chars": 16656,
+      "files": [
+        "sections/audit-scope.md",
+        "sections/manifest.json",
+        "sections/preamble.md",
+        "sections/release-body.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:eval-plan",
+      "pack": "gstack",
+      "name": "eval-plan",
+      "description": "Preregister a paid eval (bars, arms, decoys, stop rules), dry-run it at zero cost, then run a three-item priced pilot whose spend table gates approval. (gstack)",
+      "dir": "eval-plan",
+      "acts_on_computer": true,
+      "body_chars": 21347,
+      "files": [
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:freeze",
+      "pack": "gstack",
+      "name": "freeze",
+      "description": "Restrict file edits to a specific directory for the session. (gstack)",
+      "dir": "freeze",
+      "acts_on_computer": true,
+      "body_chars": 3441,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:gstack-upgrade",
+      "pack": "gstack",
+      "name": "gstack-upgrade",
+      "description": "Upgrade gstack to the latest version.",
+      "dir": "gstack-upgrade",
+      "acts_on_computer": true,
+      "body_chars": 23825,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:guard",
+      "pack": "gstack",
+      "name": "guard",
+      "description": "Full safety mode: destructive command warnings + directory-scoped edits. (gstack)",
+      "dir": "guard",
+      "acts_on_computer": true,
+      "body_chars": 2424,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:health",
+      "pack": "gstack",
+      "name": "health",
+      "description": "Code quality dashboard. (gstack)",
+      "dir": "health",
+      "acts_on_computer": true,
+      "body_chars": 20899,
+      "files": [
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:ios-clean",
+      "pack": "gstack",
+      "name": "ios-clean",
+      "description": "Remove the DebugBridge SPM package and all #if DEBUG wiring from an iOS app. (gstack)",
+      "dir": "ios-clean",
+      "acts_on_computer": true,
+      "body_chars": 8949,
+      "files": [
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:ios-design-review",
+      "pack": "gstack",
+      "name": "ios-design-review",
+      "description": "Visual design audit for iOS apps on real hardware. (gstack)",
+      "dir": "ios-design-review",
+      "acts_on_computer": true,
+      "body_chars": 9633,
+      "files": [
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:ios-fix",
+      "pack": "gstack",
+      "name": "ios-fix",
+      "description": "Autonomous iOS bug fixer. (gstack)",
+      "dir": "ios-fix",
+      "acts_on_computer": true,
+      "body_chars": 8488,
+      "files": [
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:ios-qa",
+      "pack": "gstack",
+      "name": "ios-qa",
+      "description": "Live-device iOS QA for SwiftUI apps. (gstack)",
+      "dir": "ios-qa",
+      "acts_on_computer": true,
+      "body_chars": 21812,
+      "files": [
+        "docs/tailscale-acl-example.md",
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:ios-sync",
+      "pack": "gstack",
+      "name": "ios-sync",
+      "description": "Regenerate the iOS debug bridge against the latest upstream gstack templates. (gstack)",
+      "dir": "ios-sync",
+      "acts_on_computer": true,
+      "body_chars": 9047,
+      "files": [
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:land-and-deploy",
+      "pack": "gstack",
+      "name": "land-and-deploy",
+      "description": "Land and deploy workflow. (gstack)",
+      "dir": "land-and-deploy",
+      "acts_on_computer": true,
+      "body_chars": 31818,
+      "files": [
+        "sections/canary.md",
+        "sections/first-run-validation.md",
+        "sections/manifest.json",
+        "sections/merge-and-deploy.md",
+        "sections/preamble.md",
+        "sections/readiness-gate.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:landing-report",
+      "pack": "gstack",
+      "name": "landing-report",
+      "description": "Read-only queue dashboard for workspace-aware ship. (gstack)",
+      "dir": "landing-report",
+      "acts_on_computer": true,
+      "body_chars": 11156,
+      "files": [
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:learn",
+      "pack": "gstack",
+      "name": "learn",
+      "description": "Manage project learnings.",
+      "dir": "learn",
+      "acts_on_computer": true,
+      "body_chars": 8073,
+      "files": [
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:make-pdf",
+      "pack": "gstack",
+      "name": "make-pdf",
+      "description": "Turn any markdown file into a publication-quality PDF. (gstack)",
+      "dir": "make-pdf",
+      "acts_on_computer": true,
+      "body_chars": 19681,
+      "files": [
+        "test/fixtures/combined-gate.expected.txt",
+        "test/fixtures/combined-gate.md",
+        "test/fixtures/diagram-gate.md",
+        "test/fixtures/docx-images/doc.md",
+        "test/fixtures/emoji-gate.md",
+        "test/fixtures/landscape-gate.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:modernize",
+      "pack": "gstack",
+      "name": "modernize",
+      "description": "Bring an aging PR onto its current base and decide: MODERNIZE, REWORK or CLOSE. (gstack)",
+      "dir": "modernize",
+      "acts_on_computer": true,
+      "body_chars": 14442,
+      "files": [
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:office-hours",
+      "pack": "gstack",
+      "name": "office-hours",
+      "description": "YC Office Hours — two modes. (gstack)",
+      "dir": "office-hours",
+      "acts_on_computer": true,
+      "body_chars": 42605,
+      "files": [
+        "sections/design-and-handoff.md",
+        "sections/manifest.json",
+        "sections/phase-2a-startup-diagnostic.md",
+        "sections/phase-2b-builder-brainstorm.md",
+        "sections/preamble.md",
+        "sections/second-opinion.md",
+        "sections/visual-design.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:open-gstack-browser",
+      "pack": "gstack",
+      "name": "open-gstack-browser",
+      "description": "Launch GStack Browser — AI-controlled Chromium with the sidebar extension baked in.",
+      "dir": "open-gstack-browser",
+      "acts_on_computer": true,
+      "body_chars": 18265,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:pair-agent",
+      "pack": "gstack",
+      "name": "pair-agent",
+      "description": "Pair a remote AI agent with your browser. (gstack)",
+      "dir": "pair-agent",
+      "acts_on_computer": true,
+      "body_chars": 20192,
+      "files": [
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:plan-ceo-review",
+      "pack": "gstack",
+      "name": "plan-ceo-review",
+      "description": "CEO/founder-mode plan review. (gstack)",
+      "dir": "plan-ceo-review",
+      "acts_on_computer": true,
+      "body_chars": 59173,
+      "files": [
+        "sections/checklist.md",
+        "sections/manifest.json",
+        "sections/preamble.md",
+        "sections/review-sections.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:plan-design-review",
+      "pack": "gstack",
+      "name": "plan-design-review",
+      "description": "Designer's eye plan review — interactive, like CEO and Eng review. (gstack)",
+      "dir": "plan-design-review",
+      "acts_on_computer": true,
+      "body_chars": 55117,
+      "files": [
+        "sections/checklist.md",
+        "sections/manifest.json",
+        "sections/preamble.md",
+        "sections/review-sections.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:plan-devex-review",
+      "pack": "gstack",
+      "name": "plan-devex-review",
+      "description": "Interactive developer experience plan review. (gstack)",
+      "dir": "plan-devex-review",
+      "acts_on_computer": true,
+      "body_chars": 46252,
+      "files": [
+        "dx-hall-of-fame.md",
+        "sections/checklist.md",
+        "sections/manifest.json",
+        "sections/preamble.md",
+        "sections/review-sections.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:plan-eng-review",
+      "pack": "gstack",
+      "name": "plan-eng-review",
+      "description": "Eng manager-mode plan review. (gstack)",
+      "dir": "plan-eng-review",
+      "acts_on_computer": true,
+      "body_chars": 40891,
+      "files": [
+        "sections/checklist.md",
+        "sections/manifest.json",
+        "sections/preamble.md",
+        "sections/review-sections.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:plan-tune",
+      "pack": "gstack",
+      "name": "plan-tune",
+      "description": "Self-tuning question sensitivity + developer psychographic for gstack (v1: observational). (gstack)",
+      "dir": "plan-tune",
+      "acts_on_computer": true,
+      "body_chars": 34968,
+      "files": [
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:qa",
+      "pack": "gstack",
+      "name": "qa",
+      "description": "Use when you test the site, API or CLI and fix bugs. (gstack)",
+      "dir": "qa",
+      "acts_on_computer": true,
+      "body_chars": 28894,
+      "files": [
+        "references/issue-taxonomy.md",
+        "sections/browser-setup.md",
+        "sections/browser-verify.md",
+        "sections/exploratory.md",
+        "sections/manifest.json",
+        "sections/preamble.md",
+        "sections/qa-patterns.md",
+        "sections/scope.md",
+        "sections/system-functional.md",
+        "sections/test-bootstrap.md",
+        "templates/functional-report-template.md",
+        "templates/qa-report-template.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:qa-only",
+      "pack": "gstack",
+      "name": "qa-only",
+      "description": "Report browser/API/CLI/job/worker/webhook bugs. (gstack)",
+      "dir": "qa-only",
+      "acts_on_computer": true,
+      "body_chars": 21590,
+      "files": [
+        "sections/exploratory.md",
+        "sections/manifest.json",
+        "sections/preamble.md",
+        "sections/reporting.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:retro",
+      "pack": "gstack",
+      "name": "retro",
+      "description": "Weekly engineering retrospective. (gstack)",
+      "dir": "retro",
+      "acts_on_computer": true,
+      "body_chars": 49764,
+      "files": [
+        "sections/manifest.json",
+        "sections/preamble.md",
+        "sections/report-format.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:review",
+      "pack": "gstack",
+      "name": "review",
+      "description": "Use when you review this PR's diff. (gstack)",
+      "dir": "review",
+      "acts_on_computer": true,
+      "body_chars": 59200,
+      "files": [
+        "TODOS-format.md",
+        "checklist.md",
+        "design-checklist.md",
+        "gate-integrity.md",
+        "greptile-triage.md",
+        "sections/adversarial.md",
+        "sections/manifest.json",
+        "sections/plan-completion.md",
+        "sections/preamble.md",
+        "sections/review-army.md",
+        "sections/shared-code-reuse.md",
+        "specialists/api-contract.md",
+        "specialists/data-migration.md",
+        "specialists/maintainability.md",
+        "specialists/performance.md",
+        "specialists/red-team.md",
+        "specialists/security.md",
+        "specialists/simplification.md",
+        "specialists/state-machines.md",
+        "specialists/targeted.md",
+        "specialists/testing.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:runaway-stopper",
+      "pack": "gstack",
+      "name": "runaway-stopper",
+      "description": "Find runaway Capy threads and subagents, stop or rotate them safely, and prevent repeats. (gstack)",
+      "dir": "runaway-stopper",
+      "acts_on_computer": true,
+      "body_chars": 15816,
+      "files": [
+        "templates/rotation-handoff.md",
+        "templates/successor-brief.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:scrape",
+      "pack": "gstack",
+      "name": "scrape",
+      "description": "Pull data from a web page through the Aside browser — your real, already signed-in sessions. (gstack)",
+      "dir": "scrape",
+      "acts_on_computer": true,
+      "body_chars": 27551,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:setup-browser-cookies",
+      "pack": "gstack",
+      "name": "setup-browser-cookies",
+      "description": "Import cookies from your real Chromium browser into the headless browse session. (gstack)",
+      "dir": "setup-browser-cookies",
+      "acts_on_computer": true,
+      "body_chars": 13045,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:setup-deploy",
+      "pack": "gstack",
+      "name": "setup-deploy",
+      "description": "Configure deployment settings for /land-and-deploy.",
+      "dir": "setup-deploy",
+      "acts_on_computer": true,
+      "body_chars": 21532,
+      "files": [
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:setup-gbrain",
+      "pack": "gstack",
+      "name": "setup-gbrain",
+      "description": "Set up gbrain for this coding agent: install the CLI, initialize a local PGLite or Supabase brain, register MCP, capture per-remote trust policy. (gstack)",
+      "dir": "setup-gbrain",
+      "acts_on_computer": true,
+      "body_chars": 37974,
+      "files": [
+        "memory.md",
+        "sections/brain-init.md",
+        "sections/claude-md-persist.md",
+        "sections/engine-remediation.md",
+        "sections/manifest.json",
+        "sections/preamble.md",
+        "sections/transcript-gate.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:ship",
+      "pack": "gstack",
+      "name": "ship",
+      "description": "Ship it: merge the base, run tests, review the diff, bump VERSION and CHANGELOG, push and create a PR. (gstack)",
+      "dir": "ship",
+      "acts_on_computer": true,
+      "body_chars": 60776,
+      "files": [
+        "DRIVER.md",
+        "sections/adversarial.md",
+        "sections/apple-release.md",
+        "sections/budget-handoff.md",
+        "sections/capy-pr.md",
+        "sections/changelog.md",
+        "sections/documentation.md",
+        "sections/greptile-early.md",
+        "sections/greptile.md",
+        "sections/handoff.md",
+        "sections/manifest.json",
+        "sections/measure.md",
+        "sections/plan-completion.md",
+        "sections/pr-body.md",
+        "sections/preamble.md",
+        "sections/review-army.md",
+        "sections/shared-code-reuse.md",
+        "sections/test-coverage.md",
+        "sections/tests.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:skillify",
+      "pack": "gstack",
+      "name": "skillify",
+      "description": "Codify the most recent successful /scrape flow into a permanent browser-skill on disk. (gstack)",
+      "dir": "skillify",
+      "acts_on_computer": true,
+      "body_chars": 21951,
+      "files": [
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:spec",
+      "pack": "gstack",
+      "name": "spec",
+      "description": "Turn vague intent into a precise, executable spec in five phases. (gstack)",
+      "dir": "spec",
+      "acts_on_computer": true,
+      "body_chars": 34317,
+      "files": [
+        "sections/gate-and-file.md",
+        "sections/manifest.json",
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:sync-gbrain",
+      "pack": "gstack",
+      "name": "sync-gbrain",
+      "description": "Keep gbrain current with this repo's code and refresh agent search guidance in CLAUDE.md. (gstack)",
+      "dir": "sync-gbrain",
+      "acts_on_computer": true,
+      "body_chars": 36926,
+      "files": [
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:test-audit",
+      "pack": "gstack",
+      "name": "test-audit",
+      "description": "Find low-value or duplicate tests and the test-only code they keep alive. (gstack)",
+      "dir": "test-audit",
+      "acts_on_computer": true,
+      "body_chars": 17322,
+      "files": [
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:ubicloud",
+      "pack": "gstack",
+      "name": "ubicloud",
+      "description": "Run a heavy suite, build or eval on an ephemeral 16-vCPU Ubicloud VM: TTL-named VMs, a reaper, quota preflight and a hang watchdog. (gstack)",
+      "dir": "ubicloud",
+      "acts_on_computer": true,
+      "body_chars": 15116,
+      "files": [
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:unfreeze",
+      "pack": "gstack",
+      "name": "unfreeze",
+      "description": "Clear the freeze boundary set by /freeze, allowing edits to all directories again. (gstack)",
+      "dir": "unfreeze",
+      "acts_on_computer": true,
+      "body_chars": 1298,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:verify",
+      "pack": "gstack",
+      "name": "verify",
+      "description": "Use when coding: run the checks and tests /ship picks until green. (gstack)",
+      "dir": "verify",
+      "acts_on_computer": true,
+      "body_chars": 10928,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "gstack:write-skill",
+      "pack": "gstack",
+      "name": "write-skill",
+      "description": "Write a new agent skill or improve one without bloat: the edit ladder, levels, drift and size checks, full diets. (gstack)",
+      "dir": "write-skill",
+      "acts_on_computer": true,
+      "body_chars": 8658,
+      "files": [
+        "references/diet.md",
+        "sections/preamble.md"
+      ],
+      "license": null,
+      "broken": null
+    }
+  ],
+  "skipped": [],
+  "checksum": "cc2e87a22accd0d3b160b82ddf0c716b8f230bc05bdf6325a90bda476e9d54d2"
+}

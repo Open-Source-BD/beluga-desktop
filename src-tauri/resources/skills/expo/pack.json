@@ -1,0 +1,419 @@
+{
+  "id": "expo",
+  "title": "Expo",
+  "repo": "expo/skills",
+  "commit": "a9e5bd3fa00b4e61f632e43f85da73aee1942582",
+  "license": "MIT",
+  "license_files": [
+    "LICENSE"
+  ],
+  "skills": [
+    {
+      "id": "expo:expo-migrate-module",
+      "pack": "expo",
+      "name": "expo-migrate-module",
+      "description": "Migrate an existing Apple/Swift Expo native module from the Expo Modules API 1.0 definition DSL to the 2.0 macro API (sometimes called v2) while preserving its JavaScript and TypeScript contract. Use",
+      "dir": "plugins/expo-experiments/skills/expo-migrate-module",
+      "acts_on_computer": true,
+      "body_chars": 12447,
+      "files": [
+        "agents/openai.yaml",
+        "references/compatibility.md",
+        "references/example.md",
+        "references/migration-map.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "expo:eas-app-stores",
+      "pack": "expo",
+      "name": "eas-app-stores",
+      "description": "Build and submit iOS and Android apps with EAS to TestFlight, the App Store, or Google Play. Supports Expo and other React Native projects, plus existing native apps. Use for eas.json setup, release",
+      "dir": "plugins/expo/skills/eas-app-stores",
+      "acts_on_computer": true,
+      "body_chars": 6982,
+      "files": [
+        "agents/openai.yaml",
+        "references/app-store-metadata.md",
+        "references/ios-app-store.md",
+        "references/native-ios.md",
+        "references/play-store.md",
+        "references/testflight.md",
+        "references/workflows.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "expo:eas-hosting",
+      "pack": "expo",
+      "name": "eas-hosting",
+      "description": "Deploy Expo websites and Expo Router API routes to EAS Hosting - export the web bundle, run eas deploy for production and PR preview URLs, manage environment secrets and custom domains, and work",
+      "dir": "plugins/expo/skills/eas-hosting",
+      "acts_on_computer": true,
+      "body_chars": 10890,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "expo:eas-observe",
+      "pack": "expo",
+      "name": "eas-observe",
+      "description": "Use for anything related to EAS Observe - adding `expo-observe` to an Expo project (AppMetricsRoot/ObserveRoot HOC, markInteractive and ObserveInteractiveMarker, the useObserve hook, the Expo Router /",
+      "dir": "plugins/expo/skills/eas-observe",
+      "acts_on_computer": true,
+      "body_chars": 4762,
+      "files": [
+        "agents/openai.yaml",
+        "references/library-integrations.md",
+        "references/metrics.md",
+        "references/queries.md",
+        "references/setup.md",
+        "references/third-party.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "expo:eas-simulator",
+      "pack": "expo",
+      "name": "eas-simulator",
+      "description": "Run and control a user's app on a remote iOS/Android simulator hosted on EAS cloud. Read before running any `eas simulator:*` commands - it has the current syntax for this experimental API. Use",
+      "dir": "plugins/expo/skills/eas-simulator",
+      "acts_on_computer": true,
+      "body_chars": 25329,
+      "files": [
+        "agents/openai.yaml",
+        "references/controllers.md",
+        "references/logs-and-crashes.md",
+        "references/run-your-app.md",
+        "references/troubleshooting.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "expo:eas-update",
+      "pack": "expo",
+      "name": "eas-update",
+      "description": "Configure and use EAS Update for over-the-air JavaScript and asset updates with expo-updates and EAS CLI. Use when setting up OTA updates, running eas update:configure or eas update, publishing to",
+      "dir": "plugins/expo/skills/eas-update",
+      "acts_on_computer": true,
+      "body_chars": 9207,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "expo:eas-update-insights",
+      "pack": "expo",
+      "name": "eas-update-insights",
+      "description": "Check the health of published EAS Update: crash rates, install/launch counts, unique users, payload size, and the split between embedded and OTA users per channel. Use when the user asks how an update",
+      "dir": "plugins/expo/skills/eas-update-insights",
+      "acts_on_computer": true,
+      "body_chars": 11836,
+      "files": [
+        "agents/openai.yaml",
+        "references/channel-insights-schema.md",
+        "references/update-insights-schema.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "expo:eas-workflows",
+      "pack": "expo",
+      "name": "eas-workflows",
+      "description": "Helps understand and write EAS workflow YAML files for Expo projects. Use this skill when the user asks about CI/CD or workflows in an Expo or EAS context, mentions .eas/workflows/, or wants help with",
+      "dir": "plugins/expo/skills/eas-workflows",
+      "acts_on_computer": true,
+      "body_chars": 4439,
+      "files": [
+        "agents/openai.yaml",
+        "scripts/package.json"
+      ],
+      "license": "MIT License",
+      "broken": null
+    },
+    {
+      "id": "expo:expo-animation",
+      "pack": "expo",
+      "name": "expo-animation",
+      "description": "Build animations in React Native and Expo, making the decisions in the order that determines whether they feel right — should it animate, which thread it runs on, which properties, spring or timing,",
+      "dir": "plugins/expo/skills/expo-animation",
+      "acts_on_computer": true,
+      "body_chars": 18311,
+      "files": [
+        "RECIPES.md",
+        "agents/openai.yaml"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "expo:expo-app-clip",
+      "pack": "expo",
+      "name": "expo-app-clip",
+      "description": "Add an iOS App Clip target to an Expo app. Use when the user mentions App Clip, AASA, apple-app-site-association, appclips, smart app banner, or wants to ship a lightweight iOS Clip invoked from a URL",
+      "dir": "plugins/expo/skills/expo-app-clip",
+      "acts_on_computer": true,
+      "body_chars": 9364,
+      "files": [
+        "agents/openai.yaml",
+        "references/native-module.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "expo:expo-brownfield",
+      "pack": "expo",
+      "name": "expo-brownfield",
+      "description": "Integrate Expo and React Native into an existing native iOS or Android app. Use for brownfield, embedding a React Native screen in SwiftUI/UIKit or Kotlin, or AAR/XCFramework packaging. Covers",
+      "dir": "plugins/expo/skills/expo-brownfield",
+      "acts_on_computer": true,
+      "body_chars": 5492,
+      "files": [
+        "agents/openai.yaml",
+        "references/brownfield-integrated.md",
+        "references/brownfield-isolated.md",
+        "references/comparison.md",
+        "references/feature-integration.md",
+        "references/troubleshooting.md",
+        "references/version-compatibility.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "expo:expo-data-fetching",
+      "pack": "expo",
+      "name": "expo-data-fetching",
+      "description": "Use when implementing or debugging ANY network request, API call, or data fetching. Covers fetch API, React Query, SWR, error handling, caching, offline support, loading/empty/error screen states, and",
+      "dir": "plugins/expo/skills/expo-data-fetching",
+      "acts_on_computer": true,
+      "body_chars": 13336,
+      "files": [
+        "agents/openai.yaml",
+        "references/expo-router-loaders.md",
+        "references/offline-and-cancellation.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "expo:expo-design-system",
+      "pack": "expo",
+      "name": "expo-design-system",
+      "description": "Build and maintain a design system inside an Expo app - a reusable theme of design tokens (color, spacing, typography, radius, shadow, motion), reusable component structure with variant/size/state",
+      "dir": "plugins/expo/skills/expo-design-system",
+      "acts_on_computer": true,
+      "body_chars": 18407,
+      "files": [
+        "agents/openai.yaml",
+        "references/audit.md",
+        "references/native-slop.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "expo:expo-dev-client",
+      "pack": "expo",
+      "name": "expo-dev-client",
+      "description": "Build and distribute Expo development clients locally or via TestFlight for internal testing. For production TestFlight releases and store submission, use the eas-app-stores skill.",
+      "dir": "plugins/expo/skills/expo-dev-client",
+      "acts_on_computer": true,
+      "body_chars": 5211,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "expo:expo-dom",
+      "pack": "expo",
+      "name": "expo-dom",
+      "description": "Use Expo DOM components to run web code in a webview on native and as-is on web. Migrate web code to native incrementally. For the end-to-end migration of a whole web app, use the expo-web-to-native",
+      "dir": "plugins/expo/skills/expo-dom",
+      "acts_on_computer": true,
+      "body_chars": 10077,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "expo:expo-examples",
+      "pack": "expo",
+      "name": "expo-examples",
+      "description": "Expo's official example projects - the expo/examples repo of ~70 `with-*` integrations (Stripe, Clerk, Supabase, OpenAI, maps, Reanimated, SQLite, Skia, NativeWind, and more). Use when integrating a",
+      "dir": "plugins/expo/skills/expo-examples",
+      "acts_on_computer": true,
+      "body_chars": 6127,
+      "files": [
+        "agents/openai.yaml",
+        "references/catalog.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "expo:expo-module",
+      "pack": "expo",
+      "name": "expo-module",
+      "description": "Guide for creating and writing Expo native modules and views using the Expo Modules API (Swift, Kotlin, TypeScript). Covers module definition DSL, native views, shared objects, config plugins,",
+      "dir": "plugins/expo/skills/expo-module",
+      "acts_on_computer": true,
+      "body_chars": 6012,
+      "files": [
+        "agents/openai.yaml",
+        "references/config-plugin.md",
+        "references/create-expo-module.md",
+        "references/lifecycle.md",
+        "references/module-config.md",
+        "references/native-module.md",
+        "references/native-view.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "expo:expo-native-ui",
+      "pack": "expo",
+      "name": "expo-native-ui",
+      "description": "Build beautiful, native-feeling Expo screens. Covers Apple HIG styling, semantic colors, native controls, SF Symbols, media, visual effects, gradients, storage, and responsive layout. For routing and",
+      "dir": "plugins/expo/skills/expo-native-ui",
+      "acts_on_computer": true,
+      "body_chars": 12214,
+      "files": [
+        "agents/openai.yaml",
+        "references/controls.md",
+        "references/gradients.md",
+        "references/icons.md",
+        "references/media.md",
+        "references/storage.md",
+        "references/visual-effects.md",
+        "references/webgpu-three.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "expo:expo-overview",
+      "pack": "expo",
+      "name": "expo-overview",
+      "description": "Entry point and router for every Expo or EAS task. Load this skill first — before writing code and before choosing another expo-* / eas-* skill — when the request, PRD, or spec mentions Expo, EAS,",
+      "dir": "plugins/expo/skills/expo-overview",
+      "acts_on_computer": true,
+      "body_chars": 8433,
+      "files": [
+        "agents/openai.yaml",
+        "references/launch-without-dev-menu.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "expo:expo-project-structure",
+      "pack": "expo",
+      "name": "expo-project-structure",
+      "description": "Folder structure for a new Expo app. Use when scaffolding or laying out a new Expo project with Expo Router, or deciding where a file should live in one. For new projects only — never restructure an",
+      "dir": "plugins/expo/skills/expo-project-structure",
+      "acts_on_computer": true,
+      "body_chars": 5872,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "expo:expo-router",
+      "pack": "expo",
+      "name": "expo-router",
+      "description": "Navigation and routing for Expo Router. Covers file-based routes, groups and dynamic routes, folder organization, Link with previews and context menus, native Stack, page titles, modals and form",
+      "dir": "plugins/expo/skills/expo-router",
+      "acts_on_computer": true,
+      "body_chars": 6726,
+      "files": [
+        "agents/openai.yaml",
+        "references/form-sheet.md",
+        "references/route-structure.md",
+        "references/search.md",
+        "references/tabs.md",
+        "references/toolbar-and-headers.md",
+        "references/zoom-transitions.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "expo:expo-ui",
+      "pack": "expo",
+      "name": "expo-ui",
+      "description": "Build native UI with the @expo/ui package: real SwiftUI on iOS and Jetpack Compose on Android. Default to @expo/ui for sheets (BottomSheet), pickers, sliders, toggles, menus, and grouped-form sections",
+      "dir": "plugins/expo/skills/expo-ui",
+      "acts_on_computer": true,
+      "body_chars": 6012,
+      "files": [
+        "agents/openai.yaml",
+        "references/drop-in-replacements.md",
+        "references/jetpack-compose.md",
+        "references/swift-ui.md",
+        "references/universal.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "expo:expo-upgrade",
+      "pack": "expo",
+      "name": "expo-upgrade",
+      "description": "Guidelines for upgrading Expo SDK versions and fixing dependency issues",
+      "dir": "plugins/expo/skills/expo-upgrade",
+      "acts_on_computer": true,
+      "body_chars": 7562,
+      "files": [
+        "agents/openai.yaml",
+        "references/expo-av-to-audio.md",
+        "references/expo-av-to-video.md",
+        "references/native-tabs.md",
+        "references/new-architecture.md",
+        "references/react-19.md",
+        "references/react-compiler.md",
+        "references/react-navigation-to-expo-router.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "expo:expo-web-to-native",
+      "pack": "expo",
+      "name": "expo-web-to-native",
+      "description": "Migrate an existing web React app to a native iOS/Android app with Expo. Use when the user wants to turn a website into a mobile app, port a Next.js/Vite/CRA React codebase to React Native, reuse web",
+      "dir": "plugins/expo/skills/expo-web-to-native",
+      "acts_on_computer": true,
+      "body_chars": 9832,
+      "files": [
+        "agents/openai.yaml",
+        "references/false-friends.md",
+        "references/native-patterns.md",
+        "references/run-as-goal.md",
+        "references/verify-on-device.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    }
+  ],
+  "skipped": [],
+  "checksum": "f4d626afcad1d8236379115b01e755e8d13734573c9d600d1c0146a54e7e39f4"
+}

@@ -1,0 +1,26 @@
+{
+  "on": [
+    "superpowers:brainstorming",
+    "superpowers:diagnosing-superpowers",
+    "superpowers:executing-plans",
+    "superpowers:finishing-a-development-branch",
+    "superpowers:receiving-code-review",
+    "superpowers:requesting-code-review",
+    "superpowers:systematic-debugging",
+    "superpowers:test-driven-development",
+    "superpowers:using-superpowers",
+    "superpowers:verification-before-completion",
+    "superpowers:writing-plans",
+    "superpowers:writing-skills",
+    "anthropic:frontend-design",
+    "agent-skills:code-simplification",
+    "agent-skills:documentation-and-adrs",
+    "emil:emil-design-eng",
+    "emil:animate",
+    "engineer:react-expert",
+    "engineer:typescript-pro",
+    "engineer:python-pro",
+    "engineer:javascript-pro",
+    "engineer:rust-engineer"
+  ]
+}

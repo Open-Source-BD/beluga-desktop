@@ -1,0 +1,337 @@
+{
+  "id": "apollo",
+  "title": "Apollo GraphQL",
+  "repo": "apollographql/skills",
+  "commit": "9dda1397730370aeb8df4ff8f2015c34c86b5003",
+  "license": "MIT",
+  "license_files": [
+    "LICENSE"
+  ],
+  "skills": [
+    {
+      "id": "apollo:apollo-client",
+      "pack": "apollo",
+      "name": "apollo-client",
+      "description": "Guide for building React applications with Apollo Client 4.x. Use this skill when: (1) setting up Apollo Client in a React project, (2) writing GraphQL queries or mutations with hooks, (3) configuring",
+      "dir": "skills/apollo-client",
+      "acts_on_computer": false,
+      "body_chars": 6771,
+      "files": [
+        "references/caching.md",
+        "references/error-handling.md",
+        "references/fragments.md",
+        "references/integration-client.md",
+        "references/integration-nextjs.md",
+        "references/integration-react-router.md",
+        "references/integration-tanstack-start.md",
+        "references/mutations.md",
+        "references/queries.md",
+        "references/state-management.md",
+        "references/suspense-hooks.md",
+        "references/troubleshooting.md",
+        "references/typescript-codegen.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "apollo:apollo-connectors",
+      "pack": "apollo",
+      "name": "apollo-connectors",
+      "description": "DEPRECATED: superseded by the graphos-factory skill (npx skills add apollographql/skills@graphos-factory), which builds and maintains a Connectors subgraph from a REST API with recorded decisions and",
+      "dir": "skills/apollo-connectors",
+      "acts_on_computer": true,
+      "body_chars": 6426,
+      "files": [
+        "references/entities.md",
+        "references/grammar.md",
+        "references/methods.md",
+        "references/troubleshooting.md",
+        "references/validation.md",
+        "references/variables.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "apollo:apollo-federation",
+      "pack": "apollo",
+      "name": "apollo-federation",
+      "description": "Guide for authoring Apollo Federation subgraph schemas. Use this skill when: (1) creating new subgraph schemas for a federated supergraph, (2) defining or modifying entities with @key, (3) sharing",
+      "dir": "skills/apollo-federation",
+      "acts_on_computer": false,
+      "body_chars": 3299,
+      "files": [
+        "references/composition.md",
+        "references/directives.md",
+        "references/schema-patterns.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "apollo:apollo-ios",
+      "pack": "apollo",
+      "name": "apollo-ios",
+      "description": "Guide for building Apple-platform applications with Apollo iOS, the strongly-typed GraphQL client for Swift. Use this skill when: (1) adding Apollo iOS to a Swift Package Manager or Xcode project, (2)",
+      "dir": "skills/apollo-ios",
+      "acts_on_computer": true,
+      "body_chars": 7213,
+      "files": [
+        "references/caching.md",
+        "references/codegen.md",
+        "references/custom-scalars.md",
+        "references/interceptors.md",
+        "references/operations.md",
+        "references/setup.md",
+        "references/subscriptions.md",
+        "references/testing.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "apollo:apollo-kotlin",
+      "pack": "apollo",
+      "name": "apollo-kotlin",
+      "description": "Guide for building applications with Apollo Kotlin, the GraphQL client library for Android and Kotlin. Use this skill when: (1) setting up Apollo Kotlin in a Gradle project for Android, Kotlin/JVM, or",
+      "dir": "skills/apollo-kotlin",
+      "acts_on_computer": false,
+      "body_chars": 1487,
+      "files": [
+        "references/caching.md",
+        "references/migrating-from-4.md",
+        "references/operations.md",
+        "references/setup.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "apollo:apollo-mcp-server",
+      "pack": "apollo",
+      "name": "apollo-mcp-server",
+      "description": "Guide for using Apollo MCP Server to connect AI agents with GraphQL APIs. Use this skill when: (1) setting up or configuring Apollo MCP Server, (2) defining MCP tools from GraphQL operations, (3)",
+      "dir": "skills/apollo-mcp-server",
+      "acts_on_computer": true,
+      "body_chars": 8161,
+      "files": [
+        "references/auth.md",
+        "references/best-practices.md",
+        "references/configuration.md",
+        "references/deploy.md",
+        "references/error-handling.md",
+        "references/mcp-apps.md",
+        "references/prompts.md",
+        "references/rhai-scripting.md",
+        "references/telemetry.md",
+        "references/tools.md",
+        "references/troubleshooting.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "apollo:apollo-router",
+      "pack": "apollo",
+      "name": "apollo-router",
+      "description": "Version-aware guide for configuring and running Apollo Router for federated GraphQL supergraphs. Generates correct YAML for both Router v1.x and v2.x. Use this skill when: (1) setting up Apollo Router",
+      "dir": "skills/apollo-router",
+      "acts_on_computer": false,
+      "body_chars": 20569,
+      "files": [
+        "divergence-map.md",
+        "references/configuration.md",
+        "references/connectors.md",
+        "references/headers.md",
+        "references/plugins.md",
+        "references/response-caching.md",
+        "references/telemetry.md",
+        "references/troubleshooting.md",
+        "templates/v1/development.yaml",
+        "templates/v1/production.yaml",
+        "templates/v1/sections/auth.yaml",
+        "templates/v1/sections/cors.yaml",
+        "templates/v1/sections/headers.yaml",
+        "templates/v1/sections/limits.yaml",
+        "templates/v1/sections/telemetry.yaml",
+        "templates/v1/sections/traffic-shaping.yaml",
+        "templates/v2/development.yaml",
+        "templates/v2/production.yaml",
+        "templates/v2/sections/auth.yaml",
+        "templates/v2/sections/connectors.yaml",
+        "templates/v2/sections/cors.yaml",
+        "templates/v2/sections/headers.yaml",
+        "templates/v2/sections/limits.yaml",
+        "templates/v2/sections/response-caching.yaml",
+        "templates/v2/sections/telemetry.yaml",
+        "templates/v2/sections/traffic-shaping.yaml",
+        "validation/checklist.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "apollo:apollo-router-plugin-creator",
+      "pack": "apollo",
+      "name": "apollo-router-plugin-creator",
+      "description": "Guide for writing Apollo Router native Rust plugins. Use this skill when: (1) users want to create a new router plugin, (2) users want to add service hooks (router_service, supergraph_service,",
+      "dir": "skills/apollo-router-plugin-creator",
+      "acts_on_computer": false,
+      "body_chars": 15761,
+      "files": [
+        "references/examples.md",
+        "references/existing-plugins.md",
+        "references/service-hooks.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "apollo:apollo-server",
+      "pack": "apollo",
+      "name": "apollo-server",
+      "description": "Guide for building GraphQL servers with Apollo Server 5.x. Use this skill when: (1) setting up a new Apollo Server project, (2) writing resolvers or defining GraphQL schemas, (3) implementing",
+      "dir": "skills/apollo-server",
+      "acts_on_computer": true,
+      "body_chars": 6567,
+      "files": [
+        "references/context-and-auth.md",
+        "references/data-sources.md",
+        "references/error-handling.md",
+        "references/plugins.md",
+        "references/resolvers.md",
+        "references/troubleshooting.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "apollo:graphos-factory",
+      "pack": "apollo",
+      "name": "graphos-factory",
+      "description": "Build and iterate on an Apollo Connectors subgraph for a GraphOS supergraph from a REST API, with or without an OpenAPI or Swagger spec, in a dedicated git workspace that records what the API offers,",
+      "dir": "skills/graphos-factory",
+      "acts_on_computer": true,
+      "body_chars": 59446,
+      "files": [
+        "graphos-factory-core/references/api-discovery.md",
+        "graphos-factory-core/references/connectors-language.md",
+        "graphos-factory-core/references/customer-context.md",
+        "graphos-factory-core/references/lessons.md",
+        "graphos-factory-core/references/mapping-language.md",
+        "graphos-factory-core/references/naming.md",
+        "graphos-factory-core/references/schema-authoring.md",
+        "graphos-factory-core/references/selection-review.md",
+        "graphos-factory-core/references/spec-intake.md",
+        "graphos-factory-core/references/testing.md",
+        "graphos-factory-core/references/workspace-contract.md",
+        "references/export-graphos.md",
+        "references/federation-subgraph.md",
+        "references/first-subgraph.md",
+        "references/verification.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "apollo:graphql-operations",
+      "pack": "apollo",
+      "name": "graphql-operations",
+      "description": "Guide for writing GraphQL operations (queries, mutations, fragments) following best practices. Use this skill when: (1) writing GraphQL queries or mutations, (2) organizing operations with fragments,",
+      "dir": "skills/graphql-operations",
+      "acts_on_computer": true,
+      "body_chars": 4667,
+      "files": [
+        "references/fragments.md",
+        "references/mutations.md",
+        "references/queries.md",
+        "references/tooling.md",
+        "references/variables.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "apollo:graphql-schema",
+      "pack": "apollo",
+      "name": "graphql-schema",
+      "description": "Guide for designing and changing GraphQL schemas following industry best practices. Use this skill whenever you create or edit GraphQL SDL, such as a `schema.graphql` file or `typeDefs`, including",
+      "dir": "skills/graphql-schema",
+      "acts_on_computer": false,
+      "body_chars": 4246,
+      "files": [
+        "references/errors.md",
+        "references/naming.md",
+        "references/pagination.md",
+        "references/security.md",
+        "references/types.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "apollo:rover",
+      "pack": "apollo",
+      "name": "rover",
+      "description": "Guide for using Apollo Rover CLI to manage GraphQL schemas and federation. Use this skill when: (1) publishing or fetching subgraph/graph schemas, (2) composing supergraph schemas locally or via",
+      "dir": "skills/rover",
+      "acts_on_computer": true,
+      "body_chars": 13299,
+      "files": [
+        "references/additional-commands.md",
+        "references/client.md",
+        "references/configuration.md",
+        "references/connectors.md",
+        "references/contracts.md",
+        "references/dev.md",
+        "references/graphs.md",
+        "references/init.md",
+        "references/persisted-queries.md",
+        "references/schema.md",
+        "references/subgraphs.md",
+        "references/supergraphs.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "apollo:rust-best-practices",
+      "pack": "apollo",
+      "name": "rust-best-practices",
+      "description": "Guide for writing idiomatic Rust code based on Apollo GraphQL's best practices handbook. Use this skill when: (1) writing new Rust code or functions, (2) reviewing or refactoring existing Rust code,",
+      "dir": "skills/rust-best-practices",
+      "acts_on_computer": true,
+      "body_chars": 3729,
+      "files": [
+        "references/chapter_01.md",
+        "references/chapter_02.md",
+        "references/chapter_03.md",
+        "references/chapter_04.md",
+        "references/chapter_05.md",
+        "references/chapter_06.md",
+        "references/chapter_07.md",
+        "references/chapter_08.md",
+        "references/chapter_09.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "apollo:skill-creator",
+      "pack": "apollo",
+      "name": "skill-creator",
+      "description": "Guide for creating effective skills for Apollo GraphQL and GraphQL development. Use this skill when: (1) users want to create a new skill, (2) users want to update an existing skill, (3) users ask",
+      "dir": "skills/skill-creator",
+      "acts_on_computer": true,
+      "body_chars": 11580,
+      "files": [
+        "references/apollo-skills.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    }
+  ],
+  "skipped": [],
+  "checksum": "d2137c9bed5de44cf58178dc3bed5270cce70815ebd2ce4ff8cb2e4a3cb05fc0"
+}

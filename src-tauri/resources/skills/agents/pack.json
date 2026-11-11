@@ -1,0 +1,2649 @@
+{
+  "id": "agents",
+  "title": "Agents",
+  "repo": "wshobson/agents",
+  "commit": "9c61ab243def98f72da12abd41cfcf5bcd91af9d",
+  "license": "MIT",
+  "license_files": [
+    "LICENSE"
+  ],
+  "skills": [
+    {
+      "id": "agents:screen-reader-testing",
+      "pack": "agents",
+      "name": "screen-reader-testing",
+      "description": "Test web applications with screen readers including VoiceOver, NVDA, and JAWS. Use when validating screen reader compatibility, debugging accessibility issues, or ensuring assistive technology",
+      "dir": "plugins/accessibility-compliance/skills/screen-reader-testing",
+      "acts_on_computer": true,
+      "body_chars": 6171,
+      "files": [
+        "references/jaws-talkback.md",
+        "references/nvda.md",
+        "references/voiceover-ios.md",
+        "references/voiceover.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:wcag-audit-patterns",
+      "pack": "agents",
+      "name": "wcag-audit-patterns",
+      "description": "Conduct WCAG 2.2 accessibility audits with automated testing, manual verification, and remediation guidance. Use when auditing websites for accessibility, fixing WCAG violations, or implementing",
+      "dir": "plugins/accessibility-compliance/skills/wcag-audit-patterns",
+      "acts_on_computer": true,
+      "body_chars": 2168,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:multi-reviewer-patterns",
+      "pack": "agents",
+      "name": "multi-reviewer-patterns",
+      "description": "Coordinate parallel code reviews across multiple quality dimensions with finding deduplication, severity calibration, and consolidated reporting. Use this skill when organizing multi-reviewer code",
+      "dir": "plugins/agent-teams/skills/multi-reviewer-patterns",
+      "acts_on_computer": false,
+      "body_chars": 4846,
+      "files": [
+        "references/review-dimensions.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:parallel-debugging",
+      "pack": "agents",
+      "name": "parallel-debugging",
+      "description": "Debug complex issues using competing hypotheses with parallel investigation, evidence collection, and root cause arbitration. Use this skill when debugging bugs with multiple potential causes,",
+      "dir": "plugins/agent-teams/skills/parallel-debugging",
+      "acts_on_computer": false,
+      "body_chars": 4413,
+      "files": [
+        "references/hypothesis-testing.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:parallel-feature-development",
+      "pack": "agents",
+      "name": "parallel-feature-development",
+      "description": "Coordinate parallel feature development with file ownership strategies, conflict avoidance rules, and integration patterns for multi-agent implementation. Use this skill when decomposing a large",
+      "dir": "plugins/agent-teams/skills/parallel-feature-development",
+      "acts_on_computer": false,
+      "body_chars": 5929,
+      "files": [
+        "references/file-ownership.md",
+        "references/merge-strategies.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:task-coordination-strategies",
+      "pack": "agents",
+      "name": "task-coordination-strategies",
+      "description": "Decompose complex tasks, design dependency graphs, and coordinate multi-agent work with proper task descriptions and workload balancing. Use this skill when breaking down work for agent teams,",
+      "dir": "plugins/agent-teams/skills/task-coordination-strategies",
+      "acts_on_computer": true,
+      "body_chars": 4282,
+      "files": [
+        "references/dependency-graphs.md",
+        "references/task-decomposition.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:team-communication-protocols",
+      "pack": "agents",
+      "name": "team-communication-protocols",
+      "description": "Structured messaging protocols for agent team communication including message type selection, plan approval, shutdown procedures, and anti-patterns to avoid. Use this skill when establishing",
+      "dir": "plugins/agent-teams/skills/team-communication-protocols",
+      "acts_on_computer": true,
+      "body_chars": 6721,
+      "files": [
+        "references/messaging-patterns.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:team-composition-patterns",
+      "pack": "agents",
+      "name": "team-composition-patterns",
+      "description": "Design optimal agent team compositions with sizing heuristics, preset configurations, and agent type selection. Use this skill when deciding how many agents to spawn for a task, when choosing between",
+      "dir": "plugins/agent-teams/skills/team-composition-patterns",
+      "acts_on_computer": true,
+      "body_chars": 7529,
+      "files": [
+        "references/agent-type-selection.md",
+        "references/preset-teams.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:fastapi-templates",
+      "pack": "agents",
+      "name": "fastapi-templates",
+      "description": "Create production-ready FastAPI projects with async patterns, dependency injection, and comprehensive error handling. Use when building new FastAPI applications or setting up backend API projects.",
+      "dir": "plugins/api-scaffolding/skills/fastapi-templates",
+      "acts_on_computer": true,
+      "body_chars": 4038,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:avoid-ai-writing",
+      "pack": "agents",
+      "name": "avoid-ai-writing",
+      "description": "Audit and rewrite prose so it stops reading as machine-generated. Use this skill when asked to remove AI-isms, clean up AI writing, edit a draft for AI tells, audit a README, changelog, release note,",
+      "dir": "plugins/avoid-ai-writing/skills/avoid-ai-writing",
+      "acts_on_computer": true,
+      "body_chars": 7217,
+      "files": [
+        "references/pattern-catalog.md",
+        "references/profiles.md",
+        "references/word-tiers.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:api-design-principles",
+      "pack": "agents",
+      "name": "api-design-principles",
+      "description": "Master REST and GraphQL API design principles to build intuitive, scalable, and maintainable APIs that delight developers. Use when designing new APIs, reviewing API specifications, or establishing",
+      "dir": "plugins/backend-development/skills/api-design-principles",
+      "acts_on_computer": true,
+      "body_chars": 3333,
+      "files": [
+        "assets/api-design-checklist.md",
+        "references/details.md",
+        "references/graphql-schema-design.md",
+        "references/rest-best-practices.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:architecture-patterns",
+      "pack": "agents",
+      "name": "architecture-patterns",
+      "description": "Implement proven backend architecture patterns including Clean Architecture, Hexagonal Architecture, and Domain-Driven Design. Use this skill when designing clean architecture for a new microservice,",
+      "dir": "plugins/backend-development/skills/architecture-patterns",
+      "acts_on_computer": true,
+      "body_chars": 7499,
+      "files": [
+        "references/advanced-patterns.md",
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:cqrs-implementation",
+      "pack": "agents",
+      "name": "cqrs-implementation",
+      "description": "Implement Command Query Responsibility Segregation for scalable architectures. Use when separating read and write models, optimizing query performance, or building event-sourced systems.",
+      "dir": "plugins/backend-development/skills/cqrs-implementation",
+      "acts_on_computer": true,
+      "body_chars": 2640,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:event-store-design",
+      "pack": "agents",
+      "name": "event-store-design",
+      "description": "Design and implement event stores for event-sourced systems. Use when building event sourcing infrastructure, choosing event store technologies, or implementing event persistence patterns.",
+      "dir": "plugins/backend-development/skills/event-store-design",
+      "acts_on_computer": true,
+      "body_chars": 3074,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:microservices-patterns",
+      "pack": "agents",
+      "name": "microservices-patterns",
+      "description": "Design microservices architectures with service boundaries, event-driven communication, and resilience patterns. Use when building distributed systems, decomposing monoliths, or implementing",
+      "dir": "plugins/backend-development/skills/microservices-patterns",
+      "acts_on_computer": true,
+      "body_chars": 1868,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:projection-patterns",
+      "pack": "agents",
+      "name": "projection-patterns",
+      "description": "Build read models and projections from event streams. Use when implementing CQRS read sides, building materialized views, or optimizing query performance in event-sourced systems.",
+      "dir": "plugins/backend-development/skills/projection-patterns",
+      "acts_on_computer": true,
+      "body_chars": 2032,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:saga-orchestration",
+      "pack": "agents",
+      "name": "saga-orchestration",
+      "description": "Implement saga patterns for distributed transactions and cross-aggregate workflows. Use this skill when implementing distributed transactions across microservices where 2PC is unavailable, designing",
+      "dir": "plugins/backend-development/skills/saga-orchestration",
+      "acts_on_computer": false,
+      "body_chars": 5432,
+      "files": [
+        "references/advanced-patterns.md",
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:temporal-python-testing",
+      "pack": "agents",
+      "name": "temporal-python-testing",
+      "description": "Test Temporal workflows with pytest, time-skipping, and mocking strategies. Covers unit testing, integration testing, replay testing, and local development setup. Use when implementing Temporal",
+      "dir": "plugins/backend-development/skills/temporal-python-testing",
+      "acts_on_computer": true,
+      "body_chars": 4642,
+      "files": [
+        "resources/integration-testing.md",
+        "resources/local-setup.md",
+        "resources/replay-testing.md",
+        "resources/unit-testing.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:workflow-orchestration-patterns",
+      "pack": "agents",
+      "name": "workflow-orchestration-patterns",
+      "description": "Design durable workflows with Temporal for distributed systems. Covers workflow vs activity separation, saga patterns, state management, and determinism constraints. Use when building long-running",
+      "dir": "plugins/backend-development/skills/workflow-orchestration-patterns",
+      "acts_on_computer": true,
+      "body_chars": 3153,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:before-you-build",
+      "pack": "agents",
+      "name": "before-you-build",
+      "description": "Pre-build product and feature risk review for founders, product managers, and AI-assisted builders. Use this skill when the user is about to build a landing page, MVP, SaaS product, internal tool,",
+      "dir": "plugins/before-you-build/skills/before-you-build",
+      "acts_on_computer": false,
+      "body_chars": 2385,
+      "files": [
+        "references/risk-checklist.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:block-no-verify-hook",
+      "pack": "agents",
+      "name": "block-no-verify-hook",
+      "description": "Configure a PreToolUse hook to prevent AI agents from skipping git pre-commit hooks with --no-verify and other bypass flags. Use when setting up Claude Code projects that enforce commit quality gates.",
+      "dir": "plugins/block-no-verify/skills/block-no-verify-hook",
+      "acts_on_computer": true,
+      "body_chars": 7255,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:defi-protocol-templates",
+      "pack": "agents",
+      "name": "defi-protocol-templates",
+      "description": "Implement DeFi protocols with production-ready templates for staking, AMMs, governance, and flash loans. Use when building decentralized finance applications or smart contract protocols.",
+      "dir": "plugins/blockchain-web3/skills/defi-protocol-templates",
+      "acts_on_computer": true,
+      "body_chars": 7221,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:nft-standards",
+      "pack": "agents",
+      "name": "nft-standards",
+      "description": "Implement NFT standards (ERC-721, ERC-1155) with proper metadata handling, minting strategies, and marketplace integration. Use when creating NFT contracts, building NFT marketplaces, or implementing",
+      "dir": "plugins/blockchain-web3/skills/nft-standards",
+      "acts_on_computer": true,
+      "body_chars": 7368,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:solidity-security",
+      "pack": "agents",
+      "name": "solidity-security",
+      "description": "Master smart contract security best practices to prevent common vulnerabilities and implement secure Solidity patterns. Use when writing smart contracts, auditing existing contracts, or implementing",
+      "dir": "plugins/blockchain-web3/skills/solidity-security",
+      "acts_on_computer": true,
+      "body_chars": 3273,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:web3-testing",
+      "pack": "agents",
+      "name": "web3-testing",
+      "description": "Test smart contracts comprehensively using Hardhat and Foundry with unit tests, integration tests, and mainnet forking. Use when testing Solidity contracts, setting up blockchain test suites, or",
+      "dir": "plugins/blockchain-web3/skills/web3-testing",
+      "acts_on_computer": true,
+      "body_chars": 7643,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:brand-landingpage",
+      "pack": "agents",
+      "name": "brand-landingpage",
+      "description": "Brand-first landing page designer — runs a brand-identity interview (colors, typography, shape language), then generates and iterates on a polished landing page via Stitch with deployment-ready HTML.",
+      "dir": "plugins/brand-landingpage/skills/brand-landingpage",
+      "acts_on_computer": true,
+      "body_chars": 15035,
+      "files": [
+        "references/interview-framework.md",
+        "references/state-and-pitfalls.md",
+        "references/stitch-architecture.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:data-storytelling",
+      "pack": "agents",
+      "name": "data-storytelling",
+      "description": "Transform data into compelling narratives using visualization, context, and persuasive structure. Use when presenting analytics to stakeholders, creating data reports, or building executive",
+      "dir": "plugins/business-analytics/skills/data-storytelling",
+      "acts_on_computer": true,
+      "body_chars": 1864,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:kpi-dashboard-design",
+      "pack": "agents",
+      "name": "kpi-dashboard-design",
+      "description": "Design effective KPI dashboards with metrics selection, visualization best practices, and real-time monitoring patterns. Use this skill when building an executive SaaS metrics dashboard tracking MRR,",
+      "dir": "plugins/business-analytics/skills/kpi-dashboard-design",
+      "acts_on_computer": true,
+      "body_chars": 4899,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:deployment-pipeline-design",
+      "pack": "agents",
+      "name": "deployment-pipeline-design",
+      "description": "Design multi-stage CI/CD pipelines with approval gates, security checks, and deployment orchestration. Use this skill when designing zero-downtime deployment pipelines, implementing canary rollout",
+      "dir": "plugins/cicd-automation/skills/deployment-pipeline-design",
+      "acts_on_computer": true,
+      "body_chars": 5153,
+      "files": [
+        "references/advanced-strategies.md",
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:github-actions-templates",
+      "pack": "agents",
+      "name": "github-actions-templates",
+      "description": "Create production-ready GitHub Actions workflows for automated testing, building, and deploying applications. Use when setting up CI/CD with GitHub Actions, automating development workflows, or",
+      "dir": "plugins/cicd-automation/skills/github-actions-templates",
+      "acts_on_computer": false,
+      "body_chars": 6791,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:gitlab-ci-patterns",
+      "pack": "agents",
+      "name": "gitlab-ci-patterns",
+      "description": "Build GitLab CI/CD pipelines with multi-stage workflows, caching, and distributed runners for scalable automation. Use when implementing GitLab CI/CD, optimizing pipeline performance, or setting up",
+      "dir": "plugins/cicd-automation/skills/gitlab-ci-patterns",
+      "acts_on_computer": false,
+      "body_chars": 5513,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:secrets-management",
+      "pack": "agents",
+      "name": "secrets-management",
+      "description": "Implement secure secrets management for CI/CD pipelines using Vault, AWS Secrets Manager, or native platform solutions. Use when handling sensitive credentials, rotating secrets, or securing CI/CD",
+      "dir": "plugins/cicd-automation/skills/secrets-management",
+      "acts_on_computer": true,
+      "body_chars": 7406,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:cost-optimization",
+      "pack": "agents",
+      "name": "cost-optimization",
+      "description": "Optimize cloud costs across AWS, Azure, GCP, and OCI through resource rightsizing, tagging strategies, reserved instances, and spending analysis. Use when reducing cloud expenses, analyzing",
+      "dir": "plugins/cloud-infrastructure/skills/cost-optimization",
+      "acts_on_computer": false,
+      "body_chars": 6544,
+      "files": [
+        "references/tagging-standards.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:hybrid-cloud-networking",
+      "pack": "agents",
+      "name": "hybrid-cloud-networking",
+      "description": "Configure secure, high-performance connectivity between on-premises infrastructure and cloud platforms using VPN and dedicated connections. Use when building hybrid cloud architectures, connecting",
+      "dir": "plugins/cloud-infrastructure/skills/hybrid-cloud-networking",
+      "acts_on_computer": true,
+      "body_chars": 5744,
+      "files": [
+        "references/direct-connect.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:istio-traffic-management",
+      "pack": "agents",
+      "name": "istio-traffic-management",
+      "description": "Configure Istio traffic management including routing, load balancing, circuit breakers, and canary deployments. Use when implementing service mesh traffic policies, progressive delivery, or resilience",
+      "dir": "plugins/cloud-infrastructure/skills/istio-traffic-management",
+      "acts_on_computer": true,
+      "body_chars": 6541,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:linkerd-patterns",
+      "pack": "agents",
+      "name": "linkerd-patterns",
+      "description": "Implement Linkerd service mesh patterns for lightweight, security-focused service mesh deployments. Use when setting up Linkerd, configuring traffic policies, or implementing zero-trust networking",
+      "dir": "plugins/cloud-infrastructure/skills/linkerd-patterns",
+      "acts_on_computer": true,
+      "body_chars": 7011,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:mtls-configuration",
+      "pack": "agents",
+      "name": "mtls-configuration",
+      "description": "Configure mutual TLS (mTLS) for zero-trust service-to-service communication. Use when implementing zero-trust networking, certificate management, or securing internal service communication.",
+      "dir": "plugins/cloud-infrastructure/skills/mtls-configuration",
+      "acts_on_computer": true,
+      "body_chars": 2115,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:multi-cloud-architecture",
+      "pack": "agents",
+      "name": "multi-cloud-architecture",
+      "description": "Design multi-cloud architectures using a decision framework to select and integrate services across AWS, Azure, GCP, and OCI. Use when building multi-cloud systems, avoiding vendor lock-in, or",
+      "dir": "plugins/cloud-infrastructure/skills/multi-cloud-architecture",
+      "acts_on_computer": false,
+      "body_chars": 5403,
+      "files": [
+        "references/multi-cloud-patterns.md",
+        "references/service-comparison.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:service-mesh-observability",
+      "pack": "agents",
+      "name": "service-mesh-observability",
+      "description": "Implement comprehensive observability for service meshes including distributed tracing, metrics, and visualization. Use when setting up mesh monitoring, debugging latency issues, or implementing SLOs",
+      "dir": "plugins/cloud-infrastructure/skills/service-mesh-observability",
+      "acts_on_computer": true,
+      "body_chars": 2145,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:terraform-module-library",
+      "pack": "agents",
+      "name": "terraform-module-library",
+      "description": "Build reusable Terraform modules for AWS, Azure, GCP, and OCI infrastructure following infrastructure-as-code best practices. Use when creating infrastructure modules, standardizing cloud",
+      "dir": "plugins/cloud-infrastructure/skills/terraform-module-library",
+      "acts_on_computer": false,
+      "body_chars": 5100,
+      "files": [
+        "references/aws-modules.md",
+        "references/oci-modules.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:context-driven-development",
+      "pack": "agents",
+      "name": "context-driven-development",
+      "description": "Creates and maintains project context artifacts (product.md, tech-stack.md, workflow.md, tracks.md) in a `conductor/` directory. Scaffolds new projects from scratch, extracts context from existing",
+      "dir": "plugins/conductor/skills/context-driven-development",
+      "acts_on_computer": true,
+      "body_chars": 1517,
+      "files": [
+        "references/artifact-templates.md",
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:track-management",
+      "pack": "agents",
+      "name": "track-management",
+      "description": "Use this skill when creating, managing, or working with Conductor tracks - the logical work units for features, bugs, and refactors. Applies to spec.md, plan.md, and track lifecycle operations.",
+      "dir": "plugins/conductor/skills/track-management",
+      "acts_on_computer": true,
+      "body_chars": 1426,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:workflow-patterns",
+      "pack": "agents",
+      "name": "workflow-patterns",
+      "description": "Use this skill when implementing tasks according to Conductor's TDD workflow, handling phase checkpoints, managing git commits for tasks, or understanding the verification protocol.",
+      "dir": "plugins/conductor/skills/workflow-patterns",
+      "acts_on_computer": true,
+      "body_chars": 1460,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:social-evidence-research",
+      "pack": "agents",
+      "name": "social-evidence-research",
+      "description": "Research public discussion on social platforms and keep every report claim tied to the source material that supports it. Use when researching or comparing how a product, event, or topic is discussed",
+      "dir": "plugins/content-marketing/skills/social-evidence-research",
+      "acts_on_computer": true,
+      "body_chars": 5231,
+      "files": [
+        "references/acceptance-examples.md",
+        "references/evidence-record.md",
+        "references/report-template.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:airflow-dag-patterns",
+      "pack": "agents",
+      "name": "airflow-dag-patterns",
+      "description": "Build production Apache Airflow DAGs with best practices for operators, sensors, testing, and deployment. Use when creating data pipelines, orchestrating workflows, or scheduling batch jobs.",
+      "dir": "plugins/data-engineering/skills/airflow-dag-patterns",
+      "acts_on_computer": true,
+      "body_chars": 2895,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:data-quality-frameworks",
+      "pack": "agents",
+      "name": "data-quality-frameworks",
+      "description": "Implement data quality validation with Great Expectations, dbt tests, and data contracts. Use when building data quality pipelines, implementing validation rules, or establishing data contracts.",
+      "dir": "plugins/data-engineering/skills/data-quality-frameworks",
+      "acts_on_computer": true,
+      "body_chars": 4199,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:dbt-transformation-patterns",
+      "pack": "agents",
+      "name": "dbt-transformation-patterns",
+      "description": "Master dbt (data build tool) for analytics engineering with model organization, testing, documentation, and incremental strategies. Use when building data transformations, creating data models, or",
+      "dir": "plugins/data-engineering/skills/dbt-transformation-patterns",
+      "acts_on_computer": true,
+      "body_chars": 2819,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:spark-optimization",
+      "pack": "agents",
+      "name": "spark-optimization",
+      "description": "Optimize Apache Spark jobs with partitioning, caching, shuffle optimization, and memory tuning. Use when improving Spark performance, debugging slow jobs, or scaling data processing pipelines.",
+      "dir": "plugins/data-engineering/skills/spark-optimization",
+      "acts_on_computer": true,
+      "body_chars": 2914,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:postgresql-table-design",
+      "pack": "agents",
+      "name": "postgresql-table-design",
+      "description": "Use this skill when designing or reviewing a PostgreSQL-specific schema. Covers best-practices, data types, indexing, constraints, performance patterns, and advanced features",
+      "dir": "plugins/database-design/skills/postgresql-table-design",
+      "acts_on_computer": false,
+      "body_chars": 7679,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:auth-implementation-patterns",
+      "pack": "agents",
+      "name": "auth-implementation-patterns",
+      "description": "Master authentication and authorization patterns including JWT, OAuth2, session management, and RBAC to build secure, scalable access control systems. Use when implementing auth systems, securing",
+      "dir": "plugins/developer-essentials/skills/auth-implementation-patterns",
+      "acts_on_computer": true,
+      "body_chars": 2388,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:bazel-build-optimization",
+      "pack": "agents",
+      "name": "bazel-build-optimization",
+      "description": "Optimize Bazel builds for large-scale monorepos. Use when configuring Bazel, implementing remote execution, or optimizing build performance for enterprise codebases.",
+      "dir": "plugins/developer-essentials/skills/bazel-build-optimization",
+      "acts_on_computer": true,
+      "body_chars": 1786,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:code-review-excellence",
+      "pack": "agents",
+      "name": "code-review-excellence",
+      "description": "Master effective code review practices to provide constructive feedback, catch bugs early, and foster knowledge sharing while maintaining team morale. Use when reviewing pull requests, establishing",
+      "dir": "plugins/developer-essentials/skills/code-review-excellence",
+      "acts_on_computer": true,
+      "body_chars": 6474,
+      "files": [
+        "references/review-patterns.md",
+        "references/review-techniques.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:debugging-strategies",
+      "pack": "agents",
+      "name": "debugging-strategies",
+      "description": "Master systematic debugging techniques, profiling tools, and root cause analysis to efficiently track down bugs across any codebase or technology stack. Use when investigating bugs, performance",
+      "dir": "plugins/developer-essentials/skills/debugging-strategies",
+      "acts_on_computer": true,
+      "body_chars": 5935,
+      "files": [
+        "references/tools-and-techniques.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:e2e-testing-patterns",
+      "pack": "agents",
+      "name": "e2e-testing-patterns",
+      "description": "Master end-to-end testing with Playwright and Cypress to build reliable test suites that catch bugs, improve confidence, and enable fast deployment. Use when implementing E2E tests, debugging flaky",
+      "dir": "plugins/developer-essentials/skills/e2e-testing-patterns",
+      "acts_on_computer": true,
+      "body_chars": 3882,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:error-handling-patterns",
+      "pack": "agents",
+      "name": "error-handling-patterns",
+      "description": "Master error handling patterns across languages including exceptions, Result types, error propagation, and graceful degradation to build resilient applications. Use when implementing error handling,",
+      "dir": "plugins/developer-essentials/skills/error-handling-patterns",
+      "acts_on_computer": true,
+      "body_chars": 3785,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:git-advanced-workflows",
+      "pack": "agents",
+      "name": "git-advanced-workflows",
+      "description": "Master advanced Git workflows including rebasing, cherry-picking, bisect, worktrees, and reflog to maintain clean history and recover from any situation. Use when managing complex Git histories,",
+      "dir": "plugins/developer-essentials/skills/git-advanced-workflows",
+      "acts_on_computer": true,
+      "body_chars": 5252,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:monorepo-management",
+      "pack": "agents",
+      "name": "monorepo-management",
+      "description": "Master monorepo management with Turborepo, Nx, and pnpm workspaces to build efficient, scalable multi-package repositories with optimized builds and dependency management. Use when setting up",
+      "dir": "plugins/developer-essentials/skills/monorepo-management",
+      "acts_on_computer": true,
+      "body_chars": 5073,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:nx-workspace-patterns",
+      "pack": "agents",
+      "name": "nx-workspace-patterns",
+      "description": "Configure and optimize Nx monorepo workspaces. Use when setting up Nx, configuring project boundaries, optimizing build caching, or implementing affected commands.",
+      "dir": "plugins/developer-essentials/skills/nx-workspace-patterns",
+      "acts_on_computer": true,
+      "body_chars": 1973,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:sql-optimization-patterns",
+      "pack": "agents",
+      "name": "sql-optimization-patterns",
+      "description": "Master SQL query optimization, indexing strategies, and EXPLAIN analysis to dramatically improve database performance and eliminate slow queries. Use when debugging slow queries, designing database",
+      "dir": "plugins/developer-essentials/skills/sql-optimization-patterns",
+      "acts_on_computer": true,
+      "body_chars": 5661,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:turborepo-caching",
+      "pack": "agents",
+      "name": "turborepo-caching",
+      "description": "Configure Turborepo for efficient monorepo builds with local and remote caching. Use when setting up Turborepo, optimizing build pipelines, or implementing distributed caching.",
+      "dir": "plugins/developer-essentials/skills/turborepo-caching",
+      "acts_on_computer": true,
+      "body_chars": 7886,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:spark-environment-setup",
+      "pack": "agents",
+      "name": "spark-environment-setup",
+      "description": "Set up a working ML training/inference environment on NVIDIA DGX Spark (GB10, aarch64, CUDA 13). Use when installing PyTorch/Unsloth/TRL/vLLM on DGX Spark, hitting libcudart or wheel-ABI errors on",
+      "dir": "plugins/dgx-spark-ops/skills/spark-environment-setup",
+      "acts_on_computer": true,
+      "body_chars": 7751,
+      "files": [
+        "references/container-workflow.md",
+        "references/stack-matrix.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:spark-memory-thermal-ops",
+      "pack": "agents",
+      "name": "spark-memory-thermal-ops",
+      "description": "Manage unified memory and thermals during long-running ML jobs on NVIDIA DGX Spark. Use when planning memory headroom for a training run on GB10, when a job OOMs on unified memory, or when monitoring",
+      "dir": "plugins/dgx-spark-ops/skills/spark-memory-thermal-ops",
+      "acts_on_computer": true,
+      "body_chars": 7627,
+      "files": [
+        "references/uma-accounting.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:spark-training-gotchas",
+      "pack": "agents",
+      "name": "spark-training-gotchas",
+      "description": "Preflight and diagnose the ten known failure modes for ML training on NVIDIA DGX Spark. Use when a training run on DGX Spark fails to start, OOMs below the 128GB limit, slows down mid-run, or before",
+      "dir": "plugins/dgx-spark-ops/skills/spark-training-gotchas",
+      "acts_on_computer": true,
+      "body_chars": 7644,
+      "files": [
+        "references/gotcha-checks.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:architecture-decision-records",
+      "pack": "agents",
+      "name": "architecture-decision-records",
+      "description": "Write and maintain Architecture Decision Records (ADRs) following best practices for technical decision documentation. Use when documenting significant technical decisions, reviewing past",
+      "dir": "plugins/documentation-generation/skills/architecture-decision-records",
+      "acts_on_computer": true,
+      "body_chars": 4681,
+      "files": [
+        "references/decision-templates.md",
+        "references/deprecation-rfc-templates.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:changelog-automation",
+      "pack": "agents",
+      "name": "changelog-automation",
+      "description": "Automate changelog generation from commits, PRs, and releases following Keep a Changelog format. Use when setting up release workflows, generating release notes, or standardizing commit conventions.",
+      "dir": "plugins/documentation-generation/skills/changelog-automation",
+      "acts_on_computer": true,
+      "body_chars": 3095,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:openapi-spec-generation",
+      "pack": "agents",
+      "name": "openapi-spec-generation",
+      "description": "Generate and maintain OpenAPI 3.1 specifications from code, design-first specs, and validation patterns. Use when creating API documentation, generating SDKs, or ensuring API contract compliance.",
+      "dir": "plugins/documentation-generation/skills/openapi-spec-generation",
+      "acts_on_computer": true,
+      "body_chars": 1795,
+      "files": [
+        "references/code-first-and-tooling.md",
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:grounded-vault",
+      "pack": "agents",
+      "name": "grounded-vault",
+      "description": "Use when maintaining a durable Markdown knowledge store that agents compile from sources, when every number or quote in a wiki page must trace back to an immutable source, or when compiled pages need",
+      "dir": "plugins/documentation-standards/skills/grounded-vault",
+      "acts_on_computer": true,
+      "body_chars": 5029,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:hads",
+      "pack": "agents",
+      "name": "hads",
+      "description": "Use when writing technical documentation that needs to be readable by both humans and AI models, converting existing docs to HADS format, validating a HADS document, or optimizing documentation for",
+      "dir": "plugins/documentation-standards/skills/hads",
+      "acts_on_computer": true,
+      "body_chars": 5803,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:dotnet-backend-patterns",
+      "pack": "agents",
+      "name": "dotnet-backend-patterns",
+      "description": "Master C#/.NET backend development patterns for building robust APIs, MCP servers, and enterprise applications. Covers async/await, dependency injection, Entity Framework Core, Dapper, configuration,",
+      "dir": "plugins/dotnet-contribution/skills/dotnet-backend-patterns",
+      "acts_on_computer": true,
+      "body_chars": 25919,
+      "files": [
+        "references/dapper-patterns.md",
+        "references/ef-core-best-practices.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:file-conversion",
+      "pack": "agents",
+      "name": "file-conversion",
+      "description": "Use when the user needs a local file converted between common image, audio, video, document, or data formats. Select installed tools, preserve originals, and verify the output.",
+      "dir": "plugins/file-conversion/skills/file-conversion",
+      "acts_on_computer": true,
+      "body_chars": 7963,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:angular-migration",
+      "pack": "agents",
+      "name": "angular-migration",
+      "description": "Migrate from AngularJS to Angular using hybrid mode, incremental component rewriting, and dependency injection updates. Use when upgrading AngularJS applications, planning framework migrations, or",
+      "dir": "plugins/framework-migration/skills/angular-migration",
+      "acts_on_computer": true,
+      "body_chars": 6847,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:database-migration",
+      "pack": "agents",
+      "name": "database-migration",
+      "description": "Execute database migrations across ORMs and platforms with zero-downtime strategies, data transformation, and rollback procedures. Use when migrating databases, changing schemas, performing data",
+      "dir": "plugins/framework-migration/skills/database-migration",
+      "acts_on_computer": true,
+      "body_chars": 7843,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:dependency-upgrade",
+      "pack": "agents",
+      "name": "dependency-upgrade",
+      "description": "Manage major dependency version upgrades with compatibility analysis, staged rollout, and comprehensive testing. Use when upgrading framework versions, updating major dependencies, or managing",
+      "dir": "plugins/framework-migration/skills/dependency-upgrade",
+      "acts_on_computer": true,
+      "body_chars": 7353,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:react-modernization",
+      "pack": "agents",
+      "name": "react-modernization",
+      "description": "Upgrade React applications to latest versions, migrate from class components to hooks, and adopt concurrent features. Use when modernizing React codebases, migrating to React Hooks, or upgrading to",
+      "dir": "plugins/framework-migration/skills/react-modernization",
+      "acts_on_computer": true,
+      "body_chars": 6542,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:nextjs-app-router-patterns",
+      "pack": "agents",
+      "name": "nextjs-app-router-patterns",
+      "description": "Master Next.js 14+ App Router with Server Components, streaming, parallel routes, and advanced data fetching. Use when building Next.js applications, implementing SSR/SSG, or optimizing React Server",
+      "dir": "plugins/frontend-mobile-development/skills/nextjs-app-router-patterns",
+      "acts_on_computer": true,
+      "body_chars": 3392,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:react-native-architecture",
+      "pack": "agents",
+      "name": "react-native-architecture",
+      "description": "Build production React Native apps with Expo, navigation, native modules, offline sync, and cross-platform patterns. Use when developing mobile apps, implementing native integrations, or architecting",
+      "dir": "plugins/frontend-mobile-development/skills/react-native-architecture",
+      "acts_on_computer": true,
+      "body_chars": 3243,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:react-state-management",
+      "pack": "agents",
+      "name": "react-state-management",
+      "description": "Master modern React state management with Redux Toolkit, Zustand, Jotai, and React Query. Use when setting up global state, managing server state, or choosing between state management solutions.",
+      "dir": "plugins/frontend-mobile-development/skills/react-state-management",
+      "acts_on_computer": true,
+      "body_chars": 3751,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:tailwind-design-system",
+      "pack": "agents",
+      "name": "tailwind-design-system",
+      "description": "Build scalable design systems with Tailwind CSS v4, design tokens, component libraries, and responsive patterns. Use when creating component libraries, implementing design systems, or standardizing UI",
+      "dir": "plugins/frontend-mobile-development/skills/tailwind-design-system",
+      "acts_on_computer": true,
+      "body_chars": 5004,
+      "files": [
+        "references/advanced-patterns.md",
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:godot-gdscript-patterns",
+      "pack": "agents",
+      "name": "godot-gdscript-patterns",
+      "description": "Master Godot 4 GDScript patterns including signals, scenes, state machines, and optimization. Use when building Godot games, implementing game systems, or learning GDScript best practices.",
+      "dir": "plugins/game-development/skills/godot-gdscript-patterns",
+      "acts_on_computer": true,
+      "body_chars": 1892,
+      "files": [
+        "references/advanced-patterns.md",
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:unity-ecs-patterns",
+      "pack": "agents",
+      "name": "unity-ecs-patterns",
+      "description": "Master Unity ECS (Entity Component System) with DOTS, Jobs, and Burst for high-performance game development. Use when building data-oriented games, optimizing performance, or working with large entity",
+      "dir": "plugins/game-development/skills/unity-ecs-patterns",
+      "acts_on_computer": true,
+      "body_chars": 1810,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:hermes-tweet",
+      "pack": "agents",
+      "name": "hermes-tweet",
+      "description": "Install and operate Hermes Tweet, a Hermes Agent plugin for X/Twitter research, timeline reading, tweet analysis, and approval-gated private or state-changing operations. Use this skill when",
+      "dir": "plugins/hermes-tweet/skills/hermes-tweet",
+      "acts_on_computer": true,
+      "body_chars": 4815,
+      "files": [
+        "references/endpoint-contract.md",
+        "references/workflows.md"
+      ],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "agents:employment-contract-templates",
+      "pack": "agents",
+      "name": "employment-contract-templates",
+      "description": "Create employment contracts, offer letters, and HR policy documents following legal best practices. Use when drafting employment agreements, creating HR policies, or standardizing employment",
+      "dir": "plugins/hr-legal-compliance/skills/employment-contract-templates",
+      "acts_on_computer": true,
+      "body_chars": 2101,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:gdpr-data-handling",
+      "pack": "agents",
+      "name": "gdpr-data-handling",
+      "description": "Implement GDPR-compliant data handling with consent management, data subject rights, and privacy by design. Use when building systems that process EU personal data, implementing privacy controls, or",
+      "dir": "plugins/hr-legal-compliance/skills/gdpr-data-handling",
+      "acts_on_computer": true,
+      "body_chars": 2346,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:connectivity-triage",
+      "pack": "agents",
+      "name": "connectivity-triage",
+      "description": "Use this skill when debugging active macOS connectivity failures, when an API or MCP service times out or disconnects, when DNS resolution is failing or inconsistent, or when video calls or other",
+      "dir": "plugins/incident-response/skills/connectivity-triage",
+      "acts_on_computer": true,
+      "body_chars": 7670,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:incident-runbook-templates",
+      "pack": "agents",
+      "name": "incident-runbook-templates",
+      "description": "Create structured incident response runbooks with step-by-step procedures, escalation paths, and recovery actions. Use this skill when building a service outage runbook for a payment processing",
+      "dir": "plugins/incident-response/skills/incident-runbook-templates",
+      "acts_on_computer": true,
+      "body_chars": 4920,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:on-call-handoff-patterns",
+      "pack": "agents",
+      "name": "on-call-handoff-patterns",
+      "description": "Master on-call shift handoffs with context transfer, escalation procedures, and documentation. Use this skill when transitioning on-call responsibilities between engineers and ensuring the incoming",
+      "dir": "plugins/incident-response/skills/on-call-handoff-patterns",
+      "acts_on_computer": true,
+      "body_chars": 2991,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:postmortem-writing",
+      "pack": "agents",
+      "name": "postmortem-writing",
+      "description": "Write effective blameless postmortems with root cause analysis, timelines, and action items. Use when conducting incident reviews, writing postmortem documents, or improving incident response",
+      "dir": "plugins/incident-response/skills/postmortem-writing",
+      "acts_on_computer": true,
+      "body_chars": 6545,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:javascript-testing-patterns",
+      "pack": "agents",
+      "name": "javascript-testing-patterns",
+      "description": "Implement comprehensive testing strategies using Jest, Vitest, and Testing Library for unit tests, integration tests, and end-to-end testing with mocking, fixtures, and test-driven development. Use",
+      "dir": "plugins/javascript-typescript/skills/javascript-testing-patterns",
+      "acts_on_computer": true,
+      "body_chars": 14266,
+      "files": [
+        "references/advanced-testing-patterns.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:modern-javascript-patterns",
+      "pack": "agents",
+      "name": "modern-javascript-patterns",
+      "description": "Master ES6+ features including async/await, destructuring, spread operators, arrow functions, promises, modules, iterators, generators, and functional programming patterns for writing clean, efficient",
+      "dir": "plugins/javascript-typescript/skills/modern-javascript-patterns",
+      "acts_on_computer": true,
+      "body_chars": 1813,
+      "files": [
+        "references/advanced-patterns.md",
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:nodejs-backend-patterns",
+      "pack": "agents",
+      "name": "nodejs-backend-patterns",
+      "description": "Build production-ready Node.js backend services with Express/Fastify, implementing middleware patterns, error handling, authentication, database integration, and API design best practices. Use when",
+      "dir": "plugins/javascript-typescript/skills/nodejs-backend-patterns",
+      "acts_on_computer": true,
+      "body_chars": 1658,
+      "files": [
+        "references/advanced-patterns.md",
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:typescript-advanced-types",
+      "pack": "agents",
+      "name": "typescript-advanced-types",
+      "description": "Master TypeScript's advanced type system including generics, conditional types, mapped types, template literals, and utility types for building type-safe applications. Use when implementing complex",
+      "dir": "plugins/javascript-typescript/skills/typescript-advanced-types",
+      "acts_on_computer": true,
+      "body_chars": 7676,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:gitops-workflow",
+      "pack": "agents",
+      "name": "gitops-workflow",
+      "description": "Implement GitOps workflows with ArgoCD and Flux for automated, declarative Kubernetes deployments with continuous reconciliation. Use when implementing GitOps practices, automating Kubernetes",
+      "dir": "plugins/kubernetes-operations/skills/gitops-workflow",
+      "acts_on_computer": true,
+      "body_chars": 5660,
+      "files": [
+        "references/argocd-setup.md",
+        "references/sync-policies.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:helm-chart-scaffolding",
+      "pack": "agents",
+      "name": "helm-chart-scaffolding",
+      "description": "Design, organize, and manage Helm charts for templating and packaging Kubernetes applications with reusable configurations. Use when creating Helm charts, packaging Kubernetes applications, or",
+      "dir": "plugins/kubernetes-operations/skills/helm-chart-scaffolding",
+      "acts_on_computer": true,
+      "body_chars": 1824,
+      "files": [
+        "references/chart-structure.md",
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:k8s-manifest-generator",
+      "pack": "agents",
+      "name": "k8s-manifest-generator",
+      "description": "Create production-ready Kubernetes manifests for Deployments, Services, ConfigMaps, and Secrets following best practices and security standards. Use when generating Kubernetes YAML manifests, creating",
+      "dir": "plugins/kubernetes-operations/skills/k8s-manifest-generator",
+      "acts_on_computer": true,
+      "body_chars": 2769,
+      "files": [
+        "assets/configmap-template.yaml",
+        "assets/deployment-template.yaml",
+        "assets/service-template.yaml",
+        "references/deployment-spec.md",
+        "references/details.md",
+        "references/service-spec.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:k8s-security-policies",
+      "pack": "agents",
+      "name": "k8s-security-policies",
+      "description": "Implement Kubernetes security policies including NetworkPolicy, PodSecurityPolicy, and RBAC for production-grade security. Use when securing Kubernetes clusters, implementing network isolation, or",
+      "dir": "plugins/kubernetes-operations/skills/k8s-security-policies",
+      "acts_on_computer": true,
+      "body_chars": 6911,
+      "files": [
+        "assets/network-policy-template.yaml",
+        "references/rbac-patterns.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:embedding-strategies",
+      "pack": "agents",
+      "name": "embedding-strategies",
+      "description": "Select and optimize embedding models for semantic search and RAG applications. Use when choosing embedding models, implementing chunking strategies, or optimizing embedding quality for specific",
+      "dir": "plugins/llm-application-dev/skills/embedding-strategies",
+      "acts_on_computer": true,
+      "body_chars": 2586,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:hybrid-search-implementation",
+      "pack": "agents",
+      "name": "hybrid-search-implementation",
+      "description": "Combine vector and keyword search for improved retrieval. Use when implementing RAG systems, building search engines, or when neither approach alone provides sufficient recall.",
+      "dir": "plugins/llm-application-dev/skills/hybrid-search-implementation",
+      "acts_on_computer": true,
+      "body_chars": 1754,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:langchain-architecture",
+      "pack": "agents",
+      "name": "langchain-architecture",
+      "description": "Design LLM applications using LangChain 1.x and LangGraph for agents, memory, and tool integration. Use when building LangChain applications, implementing AI agents, or creating complex LLM workflows.",
+      "dir": "plugins/llm-application-dev/skills/langchain-architecture",
+      "acts_on_computer": true,
+      "body_chars": 7770,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:llm-evaluation",
+      "pack": "agents",
+      "name": "llm-evaluation",
+      "description": "Implement comprehensive evaluation strategies for LLM applications using automated metrics, human feedback, and benchmarking. Use when testing LLM performance, measuring AI application quality, or",
+      "dir": "plugins/llm-application-dev/skills/llm-evaluation",
+      "acts_on_computer": true,
+      "body_chars": 3653,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:prompt-engineering-patterns",
+      "pack": "agents",
+      "name": "prompt-engineering-patterns",
+      "description": "This skill should be used when the user asks to \"optimize a prompt\", \"improve prompt performance\", \"design a prompt template\", \"write better prompts\", \"debug prompt issues\", \"use chain-of-thought\",",
+      "dir": "plugins/llm-application-dev/skills/prompt-engineering-patterns",
+      "acts_on_computer": true,
+      "body_chars": 4817,
+      "files": [
+        "assets/few-shot-examples.json",
+        "assets/prompt-template-library.md",
+        "references/chain-of-thought.md",
+        "references/details.md",
+        "references/few-shot-learning.md",
+        "references/prompt-optimization.md",
+        "references/prompt-templates.md",
+        "references/system-prompts.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:rag-implementation",
+      "pack": "agents",
+      "name": "rag-implementation",
+      "description": "Build Retrieval-Augmented Generation (RAG) systems for LLM applications with vector databases and semantic search. Use when implementing knowledge-grounded AI, building document Q&A systems, or",
+      "dir": "plugins/llm-application-dev/skills/rag-implementation",
+      "acts_on_computer": true,
+      "body_chars": 4300,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:similarity-search-patterns",
+      "pack": "agents",
+      "name": "similarity-search-patterns",
+      "description": "Implement efficient similarity search with vector databases. Use when building semantic search, implementing nearest neighbor queries, or optimizing retrieval performance.",
+      "dir": "plugins/llm-application-dev/skills/similarity-search-patterns",
+      "acts_on_computer": true,
+      "body_chars": 2079,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:vector-index-tuning",
+      "pack": "agents",
+      "name": "vector-index-tuning",
+      "description": "Optimize vector index performance for latency, recall, and memory. Use when tuning HNSW parameters, selecting quantization strategies, or scaling vector search infrastructure.",
+      "dir": "plugins/llm-application-dev/skills/vector-index-tuning",
+      "acts_on_computer": true,
+      "body_chars": 2004,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:checkpoint-promotion",
+      "pack": "agents",
+      "name": "checkpoint-promotion",
+      "description": "Gate fine-tuned checkpoints with drift budgets, paired comparison, and forgetting checks before promotion. Use after a training run produces a checkpoint, when deciding whether a tuned model ships, or",
+      "dir": "plugins/llm-finetuning/skills/checkpoint-promotion",
+      "acts_on_computer": false,
+      "body_chars": 7732,
+      "files": [
+        "references/gate-templates.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:dataset-curation",
+      "pack": "agents",
+      "name": "dataset-curation",
+      "description": "Prepare, format, and validate datasets for supervised fine-tuning and preference training. Use when converting raw data into training format, applying chat templates, configuring sequence packing,",
+      "dir": "plugins/llm-finetuning/skills/dataset-curation",
+      "acts_on_computer": false,
+      "body_chars": 7599,
+      "files": [
+        "references/formats-and-templates.md",
+        "references/synthetic-data.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:eval-harness-first",
+      "pack": "agents",
+      "name": "eval-harness-first",
+      "description": "Build the evaluation harness that gates every fine-tuning run — golden sets, per-failure-mode graders, judge calibration, and base-model baselines. Use when starting a fine-tuning effort, when",
+      "dir": "plugins/llm-finetuning/skills/eval-harness-first",
+      "acts_on_computer": false,
+      "body_chars": 7504,
+      "files": [
+        "references/grader-templates.md",
+        "references/judge-calibration.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:finetuning-method-selection",
+      "pack": "agents",
+      "name": "finetuning-method-selection",
+      "description": "Decide whether to fine-tune at all, and route to the right method (SFT, DPO/ORPO/KTO, GRPO/RLVR, continued pretraining) and base model. Use when starting any fine-tuning effort, when unsure whether",
+      "dir": "plugins/llm-finetuning/skills/finetuning-method-selection",
+      "acts_on_computer": true,
+      "body_chars": 7468,
+      "files": [
+        "references/memory-math.md",
+        "references/model-catalog.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:grpo-rlvr-training",
+      "pack": "agents",
+      "name": "grpo-rlvr-training",
+      "description": "Train reasoning and verifiable-task behavior with GRPO and reinforcement learning from verifiable rewards (RLVR). Use when task success is algorithmically checkable (math, code, tool calls, structured",
+      "dir": "plugins/llm-finetuning/skills/grpo-rlvr-training",
+      "acts_on_computer": false,
+      "body_chars": 7435,
+      "files": [
+        "references/grpo-memory.md",
+        "references/reward-functions.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:lora-qlora-recipes",
+      "pack": "agents",
+      "name": "lora-qlora-recipes",
+      "description": "Configure LoRA and QLoRA supervised fine-tuning with current best-practice hyperparameters. Use when writing or reviewing a LoRA/QLoRA training configuration, choosing rank/alpha/target modules, or",
+      "dir": "plugins/llm-finetuning/skills/lora-qlora-recipes",
+      "acts_on_computer": true,
+      "body_chars": 7328,
+      "files": [
+        "references/hyperparameters.md",
+        "references/unsloth-trl-mapping.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:preference-optimization",
+      "pack": "agents",
+      "name": "preference-optimization",
+      "description": "Align a fine-tuned model with preference data using DPO, ORPO, KTO, or SimPO. Use when preference pairs or thumbs-up/down feedback exist, when choosing between preference-optimization methods, or when",
+      "dir": "plugins/llm-finetuning/skills/preference-optimization",
+      "acts_on_computer": false,
+      "body_chars": 7538,
+      "files": [
+        "references/method-configs.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:quantized-export",
+      "pack": "agents",
+      "name": "quantized-export",
+      "description": "Export a promoted fine-tuned model in the right deployment format — merged safetensors, LoRA-only, GGUF with imatrix, or FP8. Use after a checkpoint passes promotion, when choosing a quantization",
+      "dir": "plugins/llm-finetuning/skills/quantized-export",
+      "acts_on_computer": true,
+      "body_chars": 7596,
+      "files": [
+        "references/export-commands.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:trace-to-training-data",
+      "pack": "agents",
+      "name": "trace-to-training-data",
+      "description": "Convert evaluation traces and production logs into SFT examples and preference pairs. Use when graded traces or failure examples exist and need to become training data, when applying rejection",
+      "dir": "plugins/llm-finetuning/skills/trace-to-training-data",
+      "acts_on_computer": false,
+      "body_chars": 5872,
+      "files": [
+        "references/conversion-recipes.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:vision-sft",
+      "pack": "agents",
+      "name": "vision-sft",
+      "description": "Fine-tune vision-language models (VLMs) with supervised learning on image+text data. Use when adapting a VLM to a visual domain or task, configuring frozen-vision-tower LoRA, or debugging a VLM",
+      "dir": "plugins/llm-finetuning/skills/vision-sft",
+      "acts_on_computer": false,
+      "body_chars": 7543,
+      "files": [
+        "references/collators-and-pitfalls.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:ml-pipeline-workflow",
+      "pack": "agents",
+      "name": "ml-pipeline-workflow",
+      "description": "Build end-to-end MLOps pipelines from data preparation through model training, validation, and production deployment. Use when creating ML pipelines, implementing MLOps practices, or automating model",
+      "dir": "plugins/machine-learning-ops/skills/ml-pipeline-workflow",
+      "acts_on_computer": false,
+      "body_chars": 6793,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:recsys-pipeline-architect",
+      "pack": "agents",
+      "name": "recsys-pipeline-architect",
+      "description": "Design composable recommendation, ranking, and feed pipelines using the six-stage Source→Hydrator→Filter→Scorer→Selector→SideEffect framework popularized by xAI's open-sourced X For You algorithm. Use",
+      "dir": "plugins/machine-learning-ops/skills/recsys-pipeline-architect",
+      "acts_on_computer": true,
+      "body_chars": 7665,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:distributed-tracing",
+      "pack": "agents",
+      "name": "distributed-tracing",
+      "description": "Implement distributed tracing with Jaeger and Tempo to track requests across microservices and identify performance bottlenecks. Use when debugging microservices, analyzing request flows, or",
+      "dir": "plugins/observability-monitoring/skills/distributed-tracing",
+      "acts_on_computer": true,
+      "body_chars": 1814,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:grafana-dashboards",
+      "pack": "agents",
+      "name": "grafana-dashboards",
+      "description": "Create and manage production Grafana dashboards for real-time visualization of system and application metrics. Use when building monitoring dashboards, visualizing metrics, or creating operational",
+      "dir": "plugins/observability-monitoring/skills/grafana-dashboards",
+      "acts_on_computer": false,
+      "body_chars": 7392,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:prometheus-configuration",
+      "pack": "agents",
+      "name": "prometheus-configuration",
+      "description": "Set up Prometheus for comprehensive metric collection, storage, and monitoring of infrastructure and applications. Use when implementing metrics collection, setting up monitoring infrastructure, or",
+      "dir": "plugins/observability-monitoring/skills/prometheus-configuration",
+      "acts_on_computer": true,
+      "body_chars": 1514,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:slo-implementation",
+      "pack": "agents",
+      "name": "slo-implementation",
+      "description": "Define and implement Service Level Indicators (SLIs) and Service Level Objectives (SLOs) with error budgets and alerting. Use when establishing reliability targets, implementing SRE practices, or",
+      "dir": "plugins/observability-monitoring/skills/slo-implementation",
+      "acts_on_computer": true,
+      "body_chars": 6449,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:billing-automation",
+      "pack": "agents",
+      "name": "billing-automation",
+      "description": "Build automated billing systems for recurring payments, invoicing, subscription lifecycle, and dunning management. Use when implementing subscription billing, automating invoicing, or managing",
+      "dir": "plugins/payment-processing/skills/billing-automation",
+      "acts_on_computer": true,
+      "body_chars": 1622,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:paypal-integration",
+      "pack": "agents",
+      "name": "paypal-integration",
+      "description": "Integrate PayPal payment processing with support for express checkout, subscriptions, and refund management. Use when implementing PayPal payments, processing online transactions, or building",
+      "dir": "plugins/payment-processing/skills/paypal-integration",
+      "acts_on_computer": true,
+      "body_chars": 3745,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:pci-compliance",
+      "pack": "agents",
+      "name": "pci-compliance",
+      "description": "Implement PCI DSS compliance requirements for secure handling of payment card data and payment systems. Use when securing payment processing, achieving PCI compliance, or implementing payment card",
+      "dir": "plugins/payment-processing/skills/pci-compliance",
+      "acts_on_computer": true,
+      "body_chars": 7434,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:stripe-integration",
+      "pack": "agents",
+      "name": "stripe-integration",
+      "description": "Implement Stripe payment processing for robust, PCI-compliant payment flows including checkout, subscriptions, and webhooks. Use when integrating Stripe payments, building subscription systems, or",
+      "dir": "plugins/payment-processing/skills/stripe-integration",
+      "acts_on_computer": true,
+      "body_chars": 3897,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:evaluation-methodology",
+      "pack": "agents",
+      "name": "evaluation-methodology",
+      "description": "PluginEval quality methodology, covering dimensions, rubrics, and scoring formulas. Use this skill when understanding how plugin quality is measured, when interpreting a low score on a specific",
+      "dir": "plugins/plugin-eval/skills/evaluation-methodology",
+      "acts_on_computer": true,
+      "body_chars": 7447,
+      "files": [
+        "references/improving-scores.md",
+        "references/rubrics.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:pptx-deck-context",
+      "pack": "agents",
+      "name": "pptx-deck-context",
+      "description": "Use when preparing the narrative, sources, and design context for a new editable PPTX deck.",
+      "dir": "plugins/pptx-deck-creation/skills/pptx-deck-context",
+      "acts_on_computer": false,
+      "body_chars": 1521,
+      "files": [
+        "references/design-profiles.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:pptx-quality-gates",
+      "pack": "agents",
+      "name": "pptx-quality-gates",
+      "description": "Use when validating or repairing an editable PPTX deck for geometry, accessibility, native editability, source lineage, and OOXML package integrity.",
+      "dir": "plugins/pptx-deck-creation/skills/pptx-quality-gates",
+      "acts_on_computer": false,
+      "body_chars": 1437,
+      "files": [
+        "references/audit-checklist.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:pptx-reference-deck-analysis",
+      "pack": "agents",
+      "name": "pptx-reference-deck-analysis",
+      "description": "Use when analyzing a reference PPTX for read-only structure, theme, typography, layout rhythm, diagnostics, derived template catalogs, or safe OOXML package inspection.",
+      "dir": "plugins/pptx-deck-creation/skills/pptx-reference-deck-analysis",
+      "acts_on_computer": false,
+      "body_chars": 2527,
+      "files": [
+        "references/ooxml-parsing.md",
+        "references/reference-deck-analysis-patterns.md",
+        "references/reference-deck-analysis.md",
+        "requirements.txt"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:pptx-slide-specification",
+      "pack": "agents",
+      "name": "pptx-slide-specification",
+      "description": "Use when authoring or repairing a coordinate-explicit JSON specification for an editable PPTX deck.",
+      "dir": "plugins/pptx-deck-creation/skills/pptx-slide-specification",
+      "acts_on_computer": false,
+      "body_chars": 1799,
+      "files": [
+        "references/layout-contract.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:pptx-visual-assets",
+      "pack": "agents",
+      "name": "pptx-visual-assets",
+      "description": "Use when selecting and placing approved supporting icons, images, SVGs, diagrams, or infographics in an editable PPTX deck.",
+      "dir": "plugins/pptx-deck-creation/skills/pptx-visual-assets",
+      "acts_on_computer": false,
+      "body_chars": 1202,
+      "files": [
+        "references/asset-guidance.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:protect-mcp-setup",
+      "pack": "agents",
+      "name": "protect-mcp-setup",
+      "description": "Configure Cedar policy enforcement and Ed25519 signed receipts for Claude Code tool calls. Use when setting up projects that need cryptographic audit trails, policy-gated tool execution, or",
+      "dir": "plugins/protect-mcp/skills/protect-mcp-setup",
+      "acts_on_computer": true,
+      "body_chars": 8177,
+      "files": [
+        "references/receipt-format.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:async-python-patterns",
+      "pack": "agents",
+      "name": "async-python-patterns",
+      "description": "Master Python asyncio, concurrent programming, and async/await patterns for high-performance applications. Use when building async APIs, concurrent systems, or I/O-bound applications requiring",
+      "dir": "plugins/python-development/skills/async-python-patterns",
+      "acts_on_computer": true,
+      "body_chars": 7267,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:python-anti-patterns",
+      "pack": "agents",
+      "name": "python-anti-patterns",
+      "description": "Use this skill when reviewing Python code for common anti-patterns to avoid. Use as a checklist when reviewing code, before finalizing implementations, or when debugging issues that might stem from",
+      "dir": "plugins/python-development/skills/python-anti-patterns",
+      "acts_on_computer": false,
+      "body_chars": 7893,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:python-background-jobs",
+      "pack": "agents",
+      "name": "python-background-jobs",
+      "description": "Python background job patterns including task queues, workers, and event-driven architecture. Use when implementing async task processing, job queues, long-running operations, or decoupling work from",
+      "dir": "plugins/python-development/skills/python-background-jobs",
+      "acts_on_computer": true,
+      "body_chars": 7032,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:python-code-style",
+      "pack": "agents",
+      "name": "python-code-style",
+      "description": "Python code style, linting, formatting, naming conventions, and documentation standards. Use when writing new code, reviewing style, configuring linters, writing docstrings, or establishing project",
+      "dir": "plugins/python-development/skills/python-code-style",
+      "acts_on_computer": true,
+      "body_chars": 7715,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:python-configuration",
+      "pack": "agents",
+      "name": "python-configuration",
+      "description": "Python configuration management via environment variables and typed settings. Use when externalizing config, setting up pydantic-settings, managing secrets, or implementing environment-specific",
+      "dir": "plugins/python-development/skills/python-configuration",
+      "acts_on_computer": true,
+      "body_chars": 6134,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:python-design-patterns",
+      "pack": "agents",
+      "name": "python-design-patterns",
+      "description": "Python design patterns including KISS, Separation of Concerns, Single Responsibility, and composition over inheritance. Use this skill when designing a new service or component from scratch and",
+      "dir": "plugins/python-development/skills/python-design-patterns",
+      "acts_on_computer": true,
+      "body_chars": 4019,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:python-error-handling",
+      "pack": "agents",
+      "name": "python-error-handling",
+      "description": "Python error handling patterns including input validation, exception hierarchies, and partial failure handling. Use when implementing validation logic, designing exception strategies, handling batch",
+      "dir": "plugins/python-development/skills/python-error-handling",
+      "acts_on_computer": true,
+      "body_chars": 5869,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:python-observability",
+      "pack": "agents",
+      "name": "python-observability",
+      "description": "Python observability patterns including structured logging, metrics, and distributed tracing. Use when adding logging, implementing metrics collection, setting up tracing, or debugging production",
+      "dir": "plugins/python-development/skills/python-observability",
+      "acts_on_computer": true,
+      "body_chars": 6844,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:python-packaging",
+      "pack": "agents",
+      "name": "python-packaging",
+      "description": "Create distributable Python packages with proper project structure, setup.py/pyproject.toml, and publishing to PyPI. Use when packaging Python libraries, creating CLI tools, or distributing Python",
+      "dir": "plugins/python-development/skills/python-packaging",
+      "acts_on_computer": true,
+      "body_chars": 3394,
+      "files": [
+        "references/advanced-patterns.md",
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:python-performance-optimization",
+      "pack": "agents",
+      "name": "python-performance-optimization",
+      "description": "Profile and optimize Python code using cProfile, memory profilers, and performance best practices. Use when debugging slow Python code, optimizing bottlenecks, or improving application performance.",
+      "dir": "plugins/python-development/skills/python-performance-optimization",
+      "acts_on_computer": true,
+      "body_chars": 2995,
+      "files": [
+        "references/advanced-patterns.md",
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:python-project-structure",
+      "pack": "agents",
+      "name": "python-project-structure",
+      "description": "Python project organization, module architecture, and public API design. Use when setting up new projects, organizing modules, defining public interfaces with __all__, or planning directory layouts.",
+      "dir": "plugins/python-development/skills/python-project-structure",
+      "acts_on_computer": false,
+      "body_chars": 6119,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:python-resilience",
+      "pack": "agents",
+      "name": "python-resilience",
+      "description": "Python resilience patterns including automatic retries, exponential backoff, timeouts, and fault-tolerant decorators. Use when adding retry logic, implementing timeouts, building fault-tolerant",
+      "dir": "plugins/python-development/skills/python-resilience",
+      "acts_on_computer": true,
+      "body_chars": 5749,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:python-resource-management",
+      "pack": "agents",
+      "name": "python-resource-management",
+      "description": "Python resource management with context managers, cleanup patterns, and streaming. Use when managing connections, file handles, implementing cleanup logic, or building streaming responses with",
+      "dir": "plugins/python-development/skills/python-resource-management",
+      "acts_on_computer": true,
+      "body_chars": 6793,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:python-testing-patterns",
+      "pack": "agents",
+      "name": "python-testing-patterns",
+      "description": "Implement comprehensive testing strategies with pytest, fixtures, mocking, and test-driven development. Use when writing Python tests, setting up test suites, or implementing testing best practices.",
+      "dir": "plugins/python-development/skills/python-testing-patterns",
+      "acts_on_computer": true,
+      "body_chars": 7031,
+      "files": [
+        "references/advanced-patterns.md",
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:python-type-safety",
+      "pack": "agents",
+      "name": "python-type-safety",
+      "description": "Python type safety with type hints, generics, protocols, and strict type checking. Use when adding type annotations, implementing generic classes, defining structural interfaces, or configuring",
+      "dir": "plugins/python-development/skills/python-type-safety",
+      "acts_on_computer": true,
+      "body_chars": 5508,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:uv-package-manager",
+      "pack": "agents",
+      "name": "uv-package-manager",
+      "description": "Master the uv package manager for fast Python dependency management, virtual environments, and modern Python project workflows. Use when setting up Python projects, managing dependencies, or",
+      "dir": "plugins/python-development/skills/uv-package-manager",
+      "acts_on_computer": true,
+      "body_chars": 6821,
+      "files": [
+        "references/advanced-patterns.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:backtesting-frameworks",
+      "pack": "agents",
+      "name": "backtesting-frameworks",
+      "description": "Build robust backtesting systems for trading strategies with proper handling of look-ahead bias, survivorship bias, and transaction costs. Use when developing trading algorithms, validating",
+      "dir": "plugins/quantitative-trading/skills/backtesting-frameworks",
+      "acts_on_computer": true,
+      "body_chars": 2606,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:risk-metrics-calculation",
+      "pack": "agents",
+      "name": "risk-metrics-calculation",
+      "description": "Calculate portfolio risk metrics including VaR, CVaR, Sharpe, Sortino, and drawdown analysis. Use when measuring portfolio risk, implementing risk limits, or building risk monitoring systems.",
+      "dir": "plugins/quantitative-trading/skills/risk-metrics-calculation",
+      "acts_on_computer": true,
+      "body_chars": 1763,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:anti-reversing-techniques",
+      "pack": "agents",
+      "name": "anti-reversing-techniques",
+      "description": "Understand anti-reversing, obfuscation, and protection techniques encountered during software analysis. Use this skill when analyzing malware evasion techniques, when implementing anti-debugging",
+      "dir": "plugins/reverse-engineering/skills/anti-reversing-techniques",
+      "acts_on_computer": true,
+      "body_chars": 3509,
+      "files": [
+        "references/advanced-techniques.md",
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:binary-analysis-patterns",
+      "pack": "agents",
+      "name": "binary-analysis-patterns",
+      "description": "Master binary analysis patterns including disassembly, decompilation, control flow analysis, and code pattern recognition. Use when analyzing executables, understanding compiled code, or performing",
+      "dir": "plugins/reverse-engineering/skills/binary-analysis-patterns",
+      "acts_on_computer": false,
+      "body_chars": 7576,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:memory-forensics",
+      "pack": "agents",
+      "name": "memory-forensics",
+      "description": "Master memory forensics techniques including memory acquisition, process analysis, and artifact extraction using Volatility and related tools. Use when analyzing memory dumps, investigating incidents,",
+      "dir": "plugins/reverse-engineering/skills/memory-forensics",
+      "acts_on_computer": true,
+      "body_chars": 8130,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:protocol-reverse-engineering",
+      "pack": "agents",
+      "name": "protocol-reverse-engineering",
+      "description": "Master network protocol reverse engineering including packet analysis, protocol dissection, and custom protocol documentation. Use when analyzing network traffic, understanding proprietary protocols,",
+      "dir": "plugins/reverse-engineering/skills/protocol-reverse-engineering",
+      "acts_on_computer": true,
+      "body_chars": 5730,
+      "files": [
+        "references/binary-encryption-analysis.md",
+        "references/protocol-documentation.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:review-agent-setup",
+      "pack": "agents",
+      "name": "review-agent-setup",
+      "description": "Configure human-in-the-loop gating for AI agent review actions in Claude Code. Use when setting up a project where an agent may post PR reviews, comments, merges, or edit CI configuration, and you",
+      "dir": "plugins/review-agent-governance/skills/review-agent-setup",
+      "acts_on_computer": true,
+      "body_chars": 5770,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:attack-tree-construction",
+      "pack": "agents",
+      "name": "attack-tree-construction",
+      "description": "Build comprehensive attack trees to visualize threat paths. Use when mapping attack scenarios, identifying defense gaps, or communicating security risks to stakeholders.",
+      "dir": "plugins/security-scanning/skills/attack-tree-construction",
+      "acts_on_computer": true,
+      "body_chars": 2268,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:sast-configuration",
+      "pack": "agents",
+      "name": "sast-configuration",
+      "description": "Configure Static Application Security Testing (SAST) tools for automated vulnerability detection in application code. Use when setting up security scanning, implementing DevSecOps practices, or",
+      "dir": "plugins/security-scanning/skills/sast-configuration",
+      "acts_on_computer": true,
+      "body_chars": 5516,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:security-requirement-extraction",
+      "pack": "agents",
+      "name": "security-requirement-extraction",
+      "description": "Derive security requirements from threat models and business context. Use when translating threats into actionable requirements, creating security user stories, or building security test cases.",
+      "dir": "plugins/security-scanning/skills/security-requirement-extraction",
+      "acts_on_computer": true,
+      "body_chars": 2273,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:stride-analysis-patterns",
+      "pack": "agents",
+      "name": "stride-analysis-patterns",
+      "description": "Apply STRIDE methodology to systematically identify threats. Use when analyzing system security, conducting threat modeling sessions, or creating security documentation.",
+      "dir": "plugins/security-scanning/skills/stride-analysis-patterns",
+      "acts_on_computer": true,
+      "body_chars": 2217,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:threat-mitigation-mapping",
+      "pack": "agents",
+      "name": "threat-mitigation-mapping",
+      "description": "Map identified threats to appropriate security controls and mitigations. Use when prioritizing security investments, creating remediation plans, or validating control effectiveness.",
+      "dir": "plugins/security-scanning/skills/threat-mitigation-mapping",
+      "acts_on_computer": true,
+      "body_chars": 2732,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:bash-defensive-patterns",
+      "pack": "agents",
+      "name": "bash-defensive-patterns",
+      "description": "Master defensive Bash programming techniques for production-grade scripts. Use when writing robust shell scripts, CI/CD pipelines, or system utilities requiring fault tolerance and safety.",
+      "dir": "plugins/shell-scripting/skills/bash-defensive-patterns",
+      "acts_on_computer": true,
+      "body_chars": 1750,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:bats-testing-patterns",
+      "pack": "agents",
+      "name": "bats-testing-patterns",
+      "description": "Master Bash Automated Testing System (Bats) for comprehensive shell script testing. Use when writing tests for shell scripts, CI/CD pipelines, or requiring test-driven development of shell utilities.",
+      "dir": "plugins/shell-scripting/skills/bats-testing-patterns",
+      "acts_on_computer": true,
+      "body_chars": 4922,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:shellcheck-configuration",
+      "pack": "agents",
+      "name": "shellcheck-configuration",
+      "description": "Master ShellCheck static analysis configuration and usage for shell script quality. Use when setting up linting infrastructure, fixing code issues, or ensuring script portability.",
+      "dir": "plugins/shell-scripting/skills/shellcheck-configuration",
+      "acts_on_computer": true,
+      "body_chars": 1377,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:scan",
+      "pack": "agents",
+      "name": "scan",
+      "description": "Scans the codebase to generate project-doc.md and AGENTS.md. Use when bootstrapping a new agent-driven repo, refreshing project documentation after architectural changes, or running a delta scan to",
+      "dir": "plugins/ship-mate/skills/scan",
+      "acts_on_computer": true,
+      "body_chars": 5913,
+      "files": [
+        "references/agents-template.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:signed-audit-trails-recipe",
+      "pack": "agents",
+      "name": "signed-audit-trails-recipe",
+      "description": "Step-by-step cookbook for setting up cryptographically signed audit trails on Claude Code tool calls. Use when explaining, evaluating, or demonstrating the pattern before committing to the protect-mcp",
+      "dir": "plugins/signed-audit-trails/skills/signed-audit-trails-recipe",
+      "acts_on_computer": true,
+      "body_chars": 9731,
+      "files": [
+        "references/cedar-policy.md",
+        "references/ci-cd.md",
+        "references/hook-wiring.md",
+        "references/receipt-format.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:ai-debt-detector",
+      "pack": "agents",
+      "name": "ai-debt-detector",
+      "description": "Use after generating code, after accepting AI suggestions, or when reviewing AI-written modules. Also use when code works but feels brittle, when error handling seems thin, when orphaned resources or",
+      "dir": "plugins/skill-forge-essentials/skills/ai-debt-detector",
+      "acts_on_computer": false,
+      "body_chars": 2973,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:session-guard",
+      "pack": "agents",
+      "name": "session-guard",
+      "description": "Use when working on complex multi-step tasks, when a session is getting long (40+ tool calls), when the agent starts ignoring rules it followed earlier, when conventions drift, when output quality",
+      "dir": "plugins/skill-forge-essentials/skills/session-guard",
+      "acts_on_computer": true,
+      "body_chars": 3559,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:visual-edit-precision",
+      "pack": "agents",
+      "name": "visual-edit-precision",
+      "description": "Use when making UI/frontend changes guided by visual context, when the user selects elements visually, draws annotations, or provides screenshots alongside change requests. Also use when editing",
+      "dir": "plugins/skill-forge-essentials/skills/visual-edit-precision",
+      "acts_on_computer": true,
+      "body_chars": 1819,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:social-publishing",
+      "pack": "agents",
+      "name": "social-publishing",
+      "description": "Schedule and publish social media posts across 13 platforms (X, LinkedIn, Instagram, Facebook Pages, TikTok, Discord, Telegram, YouTube, Reddit, WordPress, Pinterest) via the SocialClaw API. Use when",
+      "dir": "plugins/social-publishing/skills/social-publishing",
+      "acts_on_computer": true,
+      "body_chars": 3154,
+      "files": [],
+      "license": "MIT",
+      "broken": null
+    },
+    {
+      "id": "agents:competitive-landscape",
+      "pack": "agents",
+      "name": "competitive-landscape",
+      "description": "Analyze competition, identify differentiation opportunities, and develop winning market positioning strategies using Porter's Five Forces, Blue Ocean Strategy, and positioning maps. Use this skill",
+      "dir": "plugins/startup-business-analyst/skills/competitive-landscape",
+      "acts_on_computer": false,
+      "body_chars": 7099,
+      "files": [
+        "references/market-forces-and-blue-ocean.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:market-sizing-analysis",
+      "pack": "agents",
+      "name": "market-sizing-analysis",
+      "description": "Calculate TAM/SAM/SOM for market opportunities using top-down, bottom-up, and value theory methodologies. Use this skill when sizing markets, estimating addressable revenue, validating market",
+      "dir": "plugins/startup-business-analyst/skills/market-sizing-analysis",
+      "acts_on_computer": true,
+      "body_chars": 2107,
+      "files": [
+        "examples/saas-market-sizing.md",
+        "references/data-sources.md",
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:startup-financial-modeling",
+      "pack": "agents",
+      "name": "startup-financial-modeling",
+      "description": "Build comprehensive 3-5 year financial models with revenue projections, cost structures, cash flow analysis, and scenario planning for early-stage startups. Use this skill when creating financial",
+      "dir": "plugins/startup-business-analyst/skills/startup-financial-modeling",
+      "acts_on_computer": false,
+      "body_chars": 7314,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:startup-metrics-framework",
+      "pack": "agents",
+      "name": "startup-metrics-framework",
+      "description": "Track, calculate, and optimize key performance metrics for SaaS, marketplace, consumer, and B2B startups from seed through Series A, including unit economics, growth efficiency, and cash management.",
+      "dir": "plugins/startup-business-analyst/skills/startup-metrics-framework",
+      "acts_on_computer": false,
+      "body_chars": 6614,
+      "files": [
+        "references/universal-and-saas-metrics.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:team-composition-analysis",
+      "pack": "agents",
+      "name": "team-composition-analysis",
+      "description": "Design optimal team structures, hiring plans, compensation strategies, and equity allocation for early-stage startups from pre-seed through Series A. Use this skill when planning headcount,",
+      "dir": "plugins/startup-business-analyst/skills/team-composition-analysis",
+      "acts_on_computer": false,
+      "body_chars": 7016,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:superself",
+      "pack": "agents",
+      "name": "superself",
+      "description": "Use when a project keeps its state in Superself (a `<!-- superself:begin` block in AGENTS.md or CLAUDE.md, or `self setup` resolves the directory to a registered project): read `self context` at",
+      "dir": "plugins/superself/skills/superself",
+      "acts_on_computer": false,
+      "body_chars": 4896,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:go-concurrency-patterns",
+      "pack": "agents",
+      "name": "go-concurrency-patterns",
+      "description": "Master Go concurrency with goroutines, channels, sync primitives, and context. Use when building concurrent Go applications, implementing worker pools, or debugging race conditions.",
+      "dir": "plugins/systems-programming/skills/go-concurrency-patterns",
+      "acts_on_computer": true,
+      "body_chars": 2537,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:memory-safety-patterns",
+      "pack": "agents",
+      "name": "memory-safety-patterns",
+      "description": "Implement memory-safe programming with RAII, ownership, smart pointers, and resource management across Rust, C++, and C. Use when writing safe systems code, managing resources, or preventing memory",
+      "dir": "plugins/systems-programming/skills/memory-safety-patterns",
+      "acts_on_computer": true,
+      "body_chars": 2327,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:rust-async-patterns",
+      "pack": "agents",
+      "name": "rust-async-patterns",
+      "description": "Master Rust async programming with Tokio, async traits, error handling, and concurrent patterns. Use when building async Rust applications, implementing concurrent systems, or debugging async code.",
+      "dir": "plugins/systems-programming/skills/rust-async-patterns",
+      "acts_on_computer": true,
+      "body_chars": 2423,
+      "files": [
+        "references/details.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:accessibility-compliance",
+      "pack": "agents",
+      "name": "accessibility-compliance",
+      "description": "Implement WCAG 2.2 compliant interfaces with mobile accessibility, inclusive design patterns, and assistive technology support. Use when auditing accessibility, implementing ARIA patterns, building",
+      "dir": "plugins/ui-design/skills/accessibility-compliance",
+      "acts_on_computer": true,
+      "body_chars": 2091,
+      "files": [
+        "references/aria-patterns.md",
+        "references/details.md",
+        "references/mobile-accessibility.md",
+        "references/wcag-guidelines.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:design-system-patterns",
+      "pack": "agents",
+      "name": "design-system-patterns",
+      "description": "Build scalable design systems with design tokens, theming infrastructure, and component architecture patterns. Use when creating design tokens, implementing theme switching, building component",
+      "dir": "plugins/ui-design/skills/design-system-patterns",
+      "acts_on_computer": true,
+      "body_chars": 3705,
+      "files": [
+        "references/component-architecture.md",
+        "references/design-tokens.md",
+        "references/details.md",
+        "references/theming-architecture.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:interaction-design",
+      "pack": "agents",
+      "name": "interaction-design",
+      "description": "Design and implement microinteractions, motion design, transitions, and user feedback patterns. Use when adding polish to UI interactions, implementing loading states, or creating delightful user",
+      "dir": "plugins/ui-design/skills/interaction-design",
+      "acts_on_computer": false,
+      "body_chars": 7316,
+      "files": [
+        "references/animation-libraries.md",
+        "references/microinteraction-patterns.md",
+        "references/scroll-animations.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:mobile-android-design",
+      "pack": "agents",
+      "name": "mobile-android-design",
+      "description": "Master Material Design 3 and Jetpack Compose patterns for building native Android apps. Use when designing Android interfaces, implementing Compose UI, or following Google's Material Design",
+      "dir": "plugins/ui-design/skills/mobile-android-design",
+      "acts_on_computer": false,
+      "body_chars": 3545,
+      "files": [
+        "references/android-navigation.md",
+        "references/compose-components.md",
+        "references/details.md",
+        "references/material3-theming.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:mobile-ios-design",
+      "pack": "agents",
+      "name": "mobile-ios-design",
+      "description": "Master iOS Human Interface Guidelines and SwiftUI patterns for building native iOS apps. Use when designing iOS interfaces, implementing SwiftUI views, or ensuring apps follow Apple's design",
+      "dir": "plugins/ui-design/skills/mobile-ios-design",
+      "acts_on_computer": false,
+      "body_chars": 6672,
+      "files": [
+        "references/hig-patterns.md",
+        "references/ios-navigation.md",
+        "references/swiftui-components.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:react-native-design",
+      "pack": "agents",
+      "name": "react-native-design",
+      "description": "Master React Native styling, navigation, and Reanimated animations for cross-platform mobile development. Use when building React Native apps, implementing navigation patterns, or creating performant",
+      "dir": "plugins/ui-design/skills/react-native-design",
+      "acts_on_computer": false,
+      "body_chars": 3689,
+      "files": [
+        "references/details.md",
+        "references/navigation-patterns.md",
+        "references/reanimated-patterns.md",
+        "references/styling-patterns.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:responsive-design",
+      "pack": "agents",
+      "name": "responsive-design",
+      "description": "Implement modern responsive layouts using container queries, fluid typography, CSS Grid, and mobile-first breakpoint strategies. Use when building adaptive interfaces, implementing fluid layouts, or",
+      "dir": "plugins/ui-design/skills/responsive-design",
+      "acts_on_computer": true,
+      "body_chars": 1698,
+      "files": [
+        "references/breakpoint-strategies.md",
+        "references/container-queries.md",
+        "references/details.md",
+        "references/fluid-layouts.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:visual-design-foundations",
+      "pack": "agents",
+      "name": "visual-design-foundations",
+      "description": "Apply typography, color theory, spacing systems, and iconography principles to create cohesive visual designs. Use when establishing design tokens, building style guides, or improving visual hierarchy",
+      "dir": "plugins/ui-design/skills/visual-design-foundations",
+      "acts_on_computer": false,
+      "body_chars": 6946,
+      "files": [
+        "references/color-systems.md",
+        "references/spacing-iconography.md",
+        "references/typography-systems.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "agents:web-component-design",
+      "pack": "agents",
+      "name": "web-component-design",
+      "description": "Master React, Vue, and Svelte component patterns including CSS-in-JS, composition strategies, and reusable component architecture. Use when building UI component libraries, designing component APIs,",
+      "dir": "plugins/ui-design/skills/web-component-design",
+      "acts_on_computer": false,
+      "body_chars": 7186,
+      "files": [
+        "references/accessibility-patterns.md",
+        "references/component-patterns.md",
+        "references/css-styling-approaches.md"
+      ],
+      "license": null,
+      "broken": null
+    }
+  ],
+  "skipped": [],
+  "checksum": "1bf45f8cdd3ed6ec181d792de3738313197738d059ad22e90ac541d874122003"
+}

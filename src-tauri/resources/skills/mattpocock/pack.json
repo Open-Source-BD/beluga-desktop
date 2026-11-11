@@ -1,0 +1,471 @@
+{
+  "id": "mattpocock",
+  "title": "Matt Pocock",
+  "repo": "mattpocock/skills",
+  "commit": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
+  "license": "MIT",
+  "license_files": [
+    "LICENSE"
+  ],
+  "skills": [
+    {
+      "id": "mattpocock:ask-matt",
+      "pack": "mattpocock",
+      "name": "ask-matt",
+      "description": "Ask which skill or flow fits your situation. A router over the skills in this repo.",
+      "dir": "skills/engineering/ask-matt",
+      "acts_on_computer": true,
+      "body_chars": 12428,
+      "files": [
+        "PHASE-BOUNDARIES.md",
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:code-review",
+      "pack": "mattpocock",
+      "name": "code-review",
+      "description": "Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes: Standards (does the code follow this repo's documented coding standards?) and Spec (does the code match what",
+      "dir": "skills/engineering/code-review",
+      "acts_on_computer": false,
+      "body_chars": 6229,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:codebase-design",
+      "pack": "mattpocock",
+      "name": "codebase-design",
+      "description": "Shared vocabulary for designing deep modules. Use when the user wants to design or improve a module's interface, find deepening opportunities, decide where a seam goes, make code more testable or",
+      "dir": "skills/engineering/codebase-design",
+      "acts_on_computer": false,
+      "body_chars": 5756,
+      "files": [
+        "DEEPENING.md",
+        "DESIGN-IT-TWICE.md",
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:diagnosing-bugs",
+      "pack": "mattpocock",
+      "name": "diagnosing-bugs",
+      "description": "Diagnosis loop for hard bugs and performance regressions. Use when the user says \"diagnose\"/\"debug this\", or reports something broken/throwing/failing/slow.",
+      "dir": "skills/engineering/diagnosing-bugs",
+      "acts_on_computer": true,
+      "body_chars": 8460,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:domain-modeling",
+      "pack": "mattpocock",
+      "name": "domain-modeling",
+      "description": "Build and sharpen a project's domain model. Use when discussing codebase terminology, writing or editing a GLOSSARY.md, or recording or editing an ADR.",
+      "dir": "skills/engineering/domain-modeling",
+      "acts_on_computer": false,
+      "body_chars": 3026,
+      "files": [
+        "ADR-FORMAT.md",
+        "GLOSSARY-FORMAT.md",
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:grill-with-docs",
+      "pack": "mattpocock",
+      "name": "grill-with-docs",
+      "description": "A relentless interview to sharpen a plan or design, which also creates docs (ADR's and glossary) as we go.",
+      "dir": "skills/engineering/grill-with-docs",
+      "acts_on_computer": false,
+      "body_chars": 65,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:implement",
+      "pack": "mattpocock",
+      "name": "implement",
+      "description": "Implement a piece of work based on a spec or set of tickets.",
+      "dir": "skills/engineering/implement",
+      "acts_on_computer": false,
+      "body_chars": 490,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:implement-spec",
+      "pack": "mattpocock",
+      "name": "implement-spec",
+      "description": "Implement the result of /to-spec and /to-tickets in code.",
+      "dir": "skills/engineering/implement-spec",
+      "acts_on_computer": true,
+      "body_chars": 2701,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:improve-codebase-architecture",
+      "pack": "mattpocock",
+      "name": "improve-codebase-architecture",
+      "description": "Scan a codebase for deepening opportunities, present them as a visual HTML report, then grill through whichever one you pick.",
+      "dir": "skills/engineering/improve-codebase-architecture",
+      "acts_on_computer": true,
+      "body_chars": 5811,
+      "files": [
+        "HTML-REPORT.md",
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:pr",
+      "pack": "mattpocock",
+      "name": "pr",
+      "description": "Use when writing a PR body.",
+      "dir": "skills/engineering/pr",
+      "acts_on_computer": false,
+      "body_chars": 3856,
+      "files": [
+        "CREDITS.md",
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:prototype",
+      "pack": "mattpocock",
+      "name": "prototype",
+      "description": "Build a throwaway prototype to answer a design question. Use when the user wants to sanity-check whether a state model or logic feels right, or explore what a UI should look like.",
+      "dir": "skills/engineering/prototype",
+      "acts_on_computer": false,
+      "body_chars": 2705,
+      "files": [
+        "LOGIC.md",
+        "UI.md",
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:research",
+      "pack": "mattpocock",
+      "name": "research",
+      "description": "Investigate a question against high-trust primary sources and capture the findings as a Markdown file in the repo. Use when the user wants a topic researched, docs or API facts gathered, or reading",
+      "dir": "skills/engineering/research",
+      "acts_on_computer": true,
+      "body_chars": 556,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:retro",
+      "pack": "mattpocock",
+      "name": "retro",
+      "description": "Conduct a retrospective on a coding session.",
+      "dir": "skills/engineering/retro",
+      "acts_on_computer": true,
+      "body_chars": 4257,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:setup-matt-pocock-skills",
+      "pack": "mattpocock",
+      "name": "setup-matt-pocock-skills",
+      "description": "Configure this repo for the engineering skills: set up its issue tracker, triage label vocabulary, and domain doc layout. Run once before first use of the other engineering skills.",
+      "dir": "skills/engineering/setup-matt-pocock-skills",
+      "acts_on_computer": true,
+      "body_chars": 7259,
+      "files": [
+        "agents/openai.yaml",
+        "domain.md",
+        "issue-tracker-github.md",
+        "issue-tracker-gitlab.md",
+        "issue-tracker-local.md",
+        "triage-labels.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:tdd",
+      "pack": "mattpocock",
+      "name": "tdd",
+      "description": "Test-driven development. Use when the user wants to build features or fix bugs test-first, mentions \"red-green-refactor\", or wants integration tests.",
+      "dir": "skills/engineering/tdd",
+      "acts_on_computer": true,
+      "body_chars": 3439,
+      "files": [
+        "agents/openai.yaml",
+        "mocking.md",
+        "tests.md"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:to-spec",
+      "pack": "mattpocock",
+      "name": "to-spec",
+      "description": "Turn the current conversation into a spec and publish it to the project issue tracker: no interview, just synthesis of what you've already discussed.",
+      "dir": "skills/engineering/to-spec",
+      "acts_on_computer": true,
+      "body_chars": 2824,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:to-tickets",
+      "pack": "mattpocock",
+      "name": "to-tickets",
+      "description": "Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker (edges as text in one file per ticket",
+      "dir": "skills/engineering/to-tickets",
+      "acts_on_computer": false,
+      "body_chars": 5486,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:triage",
+      "pack": "mattpocock",
+      "name": "triage",
+      "description": "Move issues and external PRs through a state machine of triage roles, categorise, verify, grill if needed, and write agent-ready briefs.",
+      "dir": "skills/engineering/triage",
+      "acts_on_computer": true,
+      "body_chars": 6355,
+      "files": [
+        "AGENT-BRIEF.md",
+        "OUT-OF-SCOPE.md",
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:wayfinder",
+      "pack": "mattpocock",
+      "name": "wayfinder",
+      "description": "Plan a huge chunk of work (more than one agent session can hold) as a shared map of decision tickets on your issue tracker, and resolve them one at a time until the way to the destination is clear.",
+      "dir": "skills/engineering/wayfinder",
+      "acts_on_computer": true,
+      "body_chars": 12141,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:wizard",
+      "pack": "mattpocock",
+      "name": "wizard",
+      "description": "Generate an interactive bash wizard that walks a human through steps only they can perform. Use when provisioning infrastructure, setting up credentials or CI secrets, walking an unfamiliar",
+      "dir": "skills/engineering/wizard",
+      "acts_on_computer": true,
+      "body_chars": 3766,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:git-guardrails-claude-code",
+      "pack": "mattpocock",
+      "name": "git-guardrails-claude-code",
+      "description": "Set up Claude Code hooks to block dangerous git commands (push, reset --hard, clean, branch -D, etc.) before they execute. Use when user wants to prevent destructive git operations, add git safety",
+      "dir": "skills/misc/git-guardrails-claude-code",
+      "acts_on_computer": true,
+      "body_chars": 2014,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:migrate-to-shoehorn",
+      "pack": "mattpocock",
+      "name": "migrate-to-shoehorn",
+      "description": "Migrate test files from `as` type assertions to @total-typescript/shoehorn. Use when user mentions shoehorn, wants to replace `as` in tests, or needs partial test data.",
+      "dir": "skills/misc/migrate-to-shoehorn",
+      "acts_on_computer": true,
+      "body_chars": 2574,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:scaffold-exercises",
+      "pack": "mattpocock",
+      "name": "scaffold-exercises",
+      "description": "Create exercise directory structures with sections, problems, solutions, and explainers that pass linting. Use when user wants to scaffold exercises, create exercise stubs, or set up a new course",
+      "dir": "skills/misc/scaffold-exercises",
+      "acts_on_computer": true,
+      "body_chars": 3337,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:setup-pre-commit",
+      "pack": "mattpocock",
+      "name": "setup-pre-commit",
+      "description": "Set up Husky pre-commit hooks with lint-staged (Prettier), type checking, and tests in the current repo. Use when user wants to add pre-commit hooks, set up Husky, configure lint-staged, or add",
+      "dir": "skills/misc/setup-pre-commit",
+      "acts_on_computer": true,
+      "body_chars": 1974,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:grill-me",
+      "pack": "mattpocock",
+      "name": "grill-me",
+      "description": "A relentless interview to sharpen a plan or design.",
+      "dir": "skills/productivity/grill-me",
+      "acts_on_computer": false,
+      "body_chars": 37,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:grilling",
+      "pack": "mattpocock",
+      "name": "grilling",
+      "description": "Grill the user relentlessly about a plan, decision, or idea. Use when the user wants to stress-test their thinking, or uses any 'grill' trigger phrases.",
+      "dir": "skills/productivity/grilling",
+      "acts_on_computer": false,
+      "body_chars": 1875,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:handoff",
+      "pack": "mattpocock",
+      "name": "handoff",
+      "description": "Compact the current conversation into a handoff document for another agent to pick up.",
+      "dir": "skills/productivity/handoff",
+      "acts_on_computer": true,
+      "body_chars": 729,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:teach",
+      "pack": "mattpocock",
+      "name": "teach",
+      "description": "Teach the user a new skill or concept, within this workspace.",
+      "dir": "skills/productivity/teach",
+      "acts_on_computer": false,
+      "body_chars": 9553,
+      "files": [
+        "GLOSSARY-FORMAT.md",
+        "LEARNING-RECORD-FORMAT.md",
+        "MISSION-FORMAT.md",
+        "RESOURCES-FORMAT.md",
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:to-questionnaire",
+      "pack": "mattpocock",
+      "name": "to-questionnaire",
+      "description": "Turn a decision you can't fully answer into a questionnaire for someone else to fill in.",
+      "dir": "skills/productivity/to-questionnaire",
+      "acts_on_computer": true,
+      "body_chars": 2737,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:wait-what",
+      "pack": "mattpocock",
+      "name": "wait-what",
+      "description": "Stop. That last message did not land: re-pitch it.",
+      "dir": "skills/productivity/wait-what",
+      "acts_on_computer": false,
+      "body_chars": 274,
+      "files": [
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "mattpocock:writing-for-agents",
+      "pack": "mattpocock",
+      "name": "writing-for-agents",
+      "description": "Writing documents for agents. Use when creating or editing skills, or modifying AGENTS.md or CLAUDE.md.",
+      "dir": "skills/productivity/writing-for-agents",
+      "acts_on_computer": false,
+      "body_chars": 10731,
+      "files": [
+        "SKILL-MECHANICS.md",
+        "agents/openai.yaml"
+      ],
+      "license": null,
+      "broken": null
+    }
+  ],
+  "skipped": [],
+  "checksum": "b77e25081594dce4cbebeeb028335e71af3ca3df8ff3f96b022345c5c152a041"
+}

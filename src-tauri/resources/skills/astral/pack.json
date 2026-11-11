@@ -1,0 +1,51 @@
+{
+  "id": "astral",
+  "title": "Astral",
+  "repo": "astral-sh/agent-plugins",
+  "commit": "855418fb9ebfada49a8345a5c3ada9db2cdc2419",
+  "license": "Apache-2.0 and MIT",
+  "license_files": [
+    "LICENSE-APACHE",
+    "LICENSE-MIT"
+  ],
+  "skills": [
+    {
+      "id": "astral:ruff",
+      "pack": "astral",
+      "name": "ruff",
+      "description": "Guide for using ruff, the extremely fast Python linter and formatter. Use this when linting, formatting, or fixing Python code.",
+      "dir": "plugins/astral/skills/ruff",
+      "acts_on_computer": true,
+      "body_chars": 4179,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "astral:ty",
+      "pack": "astral",
+      "name": "ty",
+      "description": "Guide for using ty, the extremely fast Python type checker and language server. Use this when type checking Python code or setting up type checking in Python projects.",
+      "dir": "plugins/astral/skills/ty",
+      "acts_on_computer": true,
+      "body_chars": 3210,
+      "files": [],
+      "license": null,
+      "broken": null
+    },
+    {
+      "id": "astral:uv",
+      "pack": "astral",
+      "name": "uv",
+      "description": "Guide for using uv, the Python package and project manager. Use this when working with Python projects, scripts, packages, or tools.",
+      "dir": "plugins/astral/skills/uv",
+      "acts_on_computer": true,
+      "body_chars": 4490,
+      "files": [],
+      "license": null,
+      "broken": null
+    }
+  ],
+  "skipped": [],
+  "checksum": "2fe5e4427a26361c67d6ebc66614eb86a957bc0ea84a8eaabadd33be2b0d6e35"
+}
