@@ -2,6 +2,7 @@ pub mod auth;
 pub mod brand;
 pub mod commands;
 pub mod engine;
+pub mod folder;
 pub mod openrouter;
 pub mod secrets;
 pub mod skills;
@@ -66,6 +67,9 @@ pub fn run() {
             h::activate_skill,
             h::deactivate_skill,
             h::chat_fullness,
+            h::set_chat_folder,
+            h::folder_files,
+            h::attach_folder_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

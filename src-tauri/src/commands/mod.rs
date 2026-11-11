@@ -7,6 +7,7 @@ pub mod chat_state;
 pub mod chats;
 pub mod compact;
 pub mod export;
+pub mod folder;
 pub mod handlers;
 pub mod models;
 pub mod skills;

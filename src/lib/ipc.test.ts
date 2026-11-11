@@ -75,6 +75,30 @@ describe("ipc", () => {
       { chatId: "c", modelId: "m/a", draftChars: 12 },
     ],
     [
+      "setChatFolder",
+      () => ipc.setChatFolder("c", "/home/me/proj"),
+      "set_chat_folder",
+      { chatId: "c", path: "/home/me/proj" },
+    ],
+    [
+      "setChatFolder clears with null",
+      () => ipc.setChatFolder("c", null),
+      "set_chat_folder",
+      { chatId: "c", path: null },
+    ],
+    [
+      "folderFiles",
+      () => ipc.folderFiles("c", "read"),
+      "folder_files",
+      { chatId: "c", query: "read" },
+    ],
+    [
+      "attachFolderFile",
+      () => ipc.attachFolderFile("c", "src/a.ts"),
+      "attach_folder_file",
+      { chatId: "c", path: "src/a.ts" },
+    ],
+    [
       "openAuthUrl",
       () => ipc.openAuthUrl("https://openrouter.ai/auth"),
       "plugin:opener|open_url",

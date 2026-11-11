@@ -333,6 +333,32 @@ export const deactivateSkill = (chatId: string, skillId: string) =>
 export const chatFullness = (chatId: string, modelId: string, draftChars: number) =>
   invoke<Fullness>("chat_fullness", { chatId, modelId, draftChars });
 
+export interface FileEntry {
+  /** Relative to the chat's folder, with forward slashes. */
+  path: string;
+  is_dir: boolean;
+  bytes: number;
+}
+
+/** `total`: entries matching among those walked; `cut`: the walk stopped at 5,000 files. */
+export interface FileList {
+  entries: FileEntry[];
+  total: number;
+  cut: boolean;
+}
+
+/** Sets the chat's folder (an absolute path to an existing folder), or clears it with `null`. */
+export const setChatFolder = (chatId: string, path: string | null) =>
+  invoke<void>("set_chat_folder", { chatId, path });
+
+/** The first 50 entries of the chat's folder matching `query`; empty when no folder is set. */
+export const folderFiles = (chatId: string, query: string) =>
+  invoke<FileList>("folder_files", { chatId, query });
+
+/** A file of the chat's folder (or a folder's listing) as an attachment for `sendMessage`. */
+export const attachFolderFile = (chatId: string, path: string) =>
+  invoke<AttachmentInput>("attach_folder_file", { chatId, path });
+
 /** Opens an OpenRouter page in the browser (allowed only for https://openrouter.ai/*). */
 export const openAuthUrl = (url: string) =>
   invoke<void>("plugin:opener|open_url", { url });

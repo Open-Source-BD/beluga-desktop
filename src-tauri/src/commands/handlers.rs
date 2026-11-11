@@ -7,9 +7,10 @@ use super::chat_state::{ChatState, Fullness};
 use super::chats::{ChatUsage, TakenMessage};
 use super::skills::SkillsStatus;
 use super::turn::{AttachmentInput, TurnResult};
-use super::{auth, chat_state, chats, compact, export, models, skills, turn};
+use super::{auth, chat_state, chats, compact, export, folder, models, skills, turn};
 use crate::auth::callback::PRODUCTION_TIMEOUT;
 use crate::engine::{EngineEvent, UiError};
+use crate::folder::FileList;
 use crate::openrouter::key_info::KeyStatus;
 use crate::openrouter::models::ModelInfo;
 use crate::skills::library::{PackView, SkillDetail};
@@ -249,4 +250,31 @@ pub async fn chat_fullness(
     draft_chars: u64,
 ) -> Result<Fullness, UiError> {
     chat_state::chat_fullness(&state, &chat_id, &model_id, draft_chars)
+}
+
+#[tauri::command]
+pub async fn set_chat_folder(
+    state: S<'_>,
+    chat_id: String,
+    path: Option<String>,
+) -> Result<(), UiError> {
+    folder::set_chat_folder(&state, &chat_id, path)
+}
+
+#[tauri::command]
+pub async fn folder_files(
+    state: S<'_>,
+    chat_id: String,
+    query: String,
+) -> Result<FileList, UiError> {
+    folder::folder_files(&state, &chat_id, &query)
+}
+
+#[tauri::command]
+pub async fn attach_folder_file(
+    state: S<'_>,
+    chat_id: String,
+    path: String,
+) -> Result<AttachmentInput, UiError> {
+    folder::attach_folder_file(&state, &chat_id, &path)
 }

@@ -95,8 +95,8 @@ impl TurnResult {
 }
 
 const MAX_ATTACHMENTS: usize = 5;
-const MAX_TEXT_BYTES: usize = 200_000;
-const MAX_IMAGE_BYTES: usize = 5_000_000;
+pub(super) const MAX_TEXT_BYTES: usize = 200_000;
+pub(super) const MAX_IMAGE_BYTES: usize = 5_000_000;
 const BLIND_MODEL: &str =
     "This model cannot read images. Pick a model that can, or remove the image.";
 
@@ -111,14 +111,22 @@ pub(super) fn decode(a: &StoredAttachment) -> Option<Vec<u8>> {
         .ok()
 }
 
+pub(super) fn not_attachable(name: &str) -> UiError {
+    UiError::other(&format!("{name} is not a text file or image."))
+}
+
+pub(super) fn too_large(name: &str) -> UiError {
+    UiError::other(&format!("{name} is too large to attach."))
+}
+
 /// The web view is not a trust boundary: check count, size and kind here.
 fn validate(attachments: &[StoredAttachment]) -> Result<(), UiError> {
     if attachments.len() > MAX_ATTACHMENTS {
         return Err(UiError::other("You can attach up to 5 files."));
     }
     for a in attachments {
-        let unsupported = || UiError::other(&format!("{} is not a text file or image.", a.name));
-        let too_large = || UiError::other(&format!("{} is too large to attach.", a.name));
+        let unsupported = || not_attachable(&a.name);
+        let too_large = || too_large(&a.name);
         let bytes = decode(a).ok_or_else(unsupported)?;
         if is_image(a) {
             if bytes.len() > MAX_IMAGE_BYTES {

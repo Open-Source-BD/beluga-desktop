@@ -1,6 +1,6 @@
 use super::auth::{self, StorageChoice};
 use super::turn::{TurnResult, TurnStatus};
-use super::{chat_state, chats, compact, export, models, turn};
+use super::{chat_state, chats, compact, export, folder, models, turn};
 use crate::engine::{EngineEvent, UiError};
 use crate::openrouter::models::{ModelCache, ModelInfo};
 use crate::secrets::{KeyStore, SecretError, SessionStore, StorageKind};
@@ -945,6 +945,24 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
     record(to(&chat_state::activate_skill(&h.state, &id, "p:a", "m/a")));
     record(to(&chat_state::deactivate_skill(&h.state, &id, "p:a")));
     record(to(&chat_state::chat_fullness(&h.state, &id, "m/a", 10)));
+    // The folder commands, with a folder set and not.
+    record(to(&folder::folder_files(&h.state, &id, "")));
+    record(to(&folder::attach_folder_file(&h.state, &id, "a.txt")));
+    let tree = tempfile::tempdir().unwrap();
+    std::fs::write(tree.path().join("a.txt"), "hello").unwrap();
+    record(to(&folder::set_chat_folder(
+        &h.state,
+        &id,
+        Some(tree.path().to_str().unwrap().to_string()),
+    )));
+    let listed = folder::folder_files(&h.state, &id, "a");
+    assert_eq!(listed.as_ref().map(|l| l.total), Ok(1));
+    record(to(&listed));
+    let attached = folder::attach_folder_file(&h.state, &id, "a.txt");
+    assert!(attached.is_ok(), "{attached:?}");
+    record(to(&attached));
+    record(to(&folder::attach_folder_file(&h.state, &id, "../x")));
+    record(to(&folder::set_chat_folder(&h.state, &id, None)));
     // The success path, in a harness that has a skill to activate.
     let f = skills_fx(&server.uri(), &[("a", 10)], &[]);
     let skill_chat = chats::create_chat(&f.h.state, "m/a").unwrap().id;
@@ -2707,4 +2725,145 @@ fn registering_only_if_free_refuses_a_busy_chat_and_registers_a_free_one() {
     let (replacing, _) = turn::register_turn(&h.state, "busy", turn::Register::Replace).unwrap();
     assert!(running.is_cancelled());
     assert_eq!(h.state.turns().get("busy").map(|t| t.id), Some(replacing));
+}
+
+// ---- folder files ----
+
+fn folder_chat(h: &Harness) -> (String, tempfile::TempDir) {
+    let id = chats::create_chat(&h.state, "m/a").unwrap().id;
+    let dir = tempfile::tempdir().unwrap();
+    folder::set_chat_folder(
+        &h.state,
+        &id,
+        Some(dir.path().to_str().unwrap().to_string()),
+    )
+    .unwrap();
+    (id, dir)
+}
+
+fn decoded(a: &turn::AttachmentInput) -> Vec<u8> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(&a.data_base64)
+        .unwrap()
+}
+
+#[test]
+fn set_chat_folder_refuses_a_missing_path_and_a_file() {
+    let h = signed_out("http://unused");
+    let id = chats::create_chat(&h.state, "m/a").unwrap().id;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("f.txt");
+    std::fs::write(&file, "x").unwrap();
+    let refused = Err(UiError::other("That folder could not be opened."));
+    for bad in [
+        dir.path().join("missing").to_str().unwrap().to_string(),
+        file.to_str().unwrap().to_string(),
+        "relative/dir".to_string(),
+    ] {
+        assert_eq!(folder::set_chat_folder(&h.state, &id, Some(bad)), refused);
+    }
+    assert_eq!(h.state.store.folder(&id).unwrap(), None);
+    assert_eq!(
+        folder::set_chat_folder(&h.state, "nope", None),
+        Err(UiError::other("That chat no longer exists."))
+    );
+
+    // A folder is stored by its real path, and `None` clears it.
+    let ok = folder::set_chat_folder(&h.state, &id, Some(dir.path().to_str().unwrap().into()));
+    assert_eq!(ok, Ok(()));
+    let real = std::fs::canonicalize(dir.path()).unwrap();
+    assert_eq!(h.state.store.folder(&id).unwrap().as_deref(), real.to_str());
+    assert_eq!(folder::set_chat_folder(&h.state, &id, None), Ok(()));
+    assert_eq!(h.state.store.folder(&id).unwrap(), None);
+}
+
+#[test]
+fn folder_files_with_no_folder_returns_an_empty_list() {
+    let h = signed_out("http://unused");
+    let id = chats::create_chat(&h.state, "m/a").unwrap().id;
+    let list = folder::folder_files(&h.state, &id, "x").unwrap();
+    assert_eq!((list.entries.len(), list.total, list.cut), (0, 0, false));
+    assert_eq!(
+        folder::folder_files(&h.state, "nope", ""),
+        Err(UiError::other("That chat no longer exists."))
+    );
+    assert_eq!(
+        folder::attach_folder_file(&h.state, &id, "a.txt"),
+        Err(UiError::other("Open a folder first."))
+    );
+}
+
+#[test]
+fn folder_files_shows_at_most_50_entries() {
+    let h = signed_out("http://unused");
+    let (id, dir) = folder_chat(&h);
+    for i in 0..60 {
+        std::fs::write(dir.path().join(format!("f{i:02}.txt")), "x").unwrap();
+    }
+    let list = folder::folder_files(&h.state, &id, "").unwrap();
+    assert_eq!((list.entries.len(), list.total), (50, 60));
+}
+
+#[test]
+fn attach_folder_file_applies_the_200_000_byte_text_limit_with_plan_1_copy() {
+    let h = signed_out("http://unused");
+    let (id, dir) = folder_chat(&h);
+    std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+    std::fs::write(dir.path().join("sub/ok.txt"), "x".repeat(200_000)).unwrap();
+    std::fs::write(dir.path().join("sub/big.txt"), "x".repeat(200_001)).unwrap();
+    std::fs::write(dir.path().join("blob.bin"), [0u8, 159, 146, 150]).unwrap();
+    std::fs::write(dir.path().join("nul.txt"), b"a\0b").unwrap();
+    std::fs::write(dir.path().join("big.png"), vec![0u8; 5_000_001]).unwrap();
+    std::fs::write(dir.path().join("pic.JPG"), [1u8, 2, 3]).unwrap();
+
+    let ok = folder::attach_folder_file(&h.state, &id, "sub\\ok.txt").unwrap();
+    assert_eq!(
+        (ok.name.as_str(), ok.mime.as_str()),
+        ("sub/ok.txt", "text/plain")
+    );
+    assert_eq!(decoded(&ok).len(), 200_000);
+    assert_eq!(
+        folder::attach_folder_file(&h.state, &id, "sub/big.txt"),
+        Err(UiError::other("sub/big.txt is too large to attach."))
+    );
+    assert_eq!(
+        folder::attach_folder_file(&h.state, &id, "big.png"),
+        Err(UiError::other("big.png is too large to attach."))
+    );
+    for bad in ["blob.bin", "nul.txt"] {
+        assert_eq!(
+            folder::attach_folder_file(&h.state, &id, bad),
+            Err(UiError::other(&format!(
+                "{bad} is not a text file or image."
+            )))
+        );
+    }
+    let pic = folder::attach_folder_file(&h.state, &id, "pic.JPG").unwrap();
+    assert_eq!(
+        (pic.mime.as_str(), decoded(&pic)),
+        ("image/jpeg", vec![1, 2, 3])
+    );
+    assert_eq!(
+        folder::attach_folder_file(&h.state, &id, "../outside.txt"),
+        Err(UiError::other("That file is outside the folder."))
+    );
+}
+
+#[test]
+fn attach_folder_file_on_a_directory_returns_its_listing() {
+    let h = signed_out("http://unused");
+    let (id, dir) = folder_chat(&h);
+    std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+    std::fs::write(dir.path().join("sub/a.txt"), "abc").unwrap();
+    let sub = folder::attach_folder_file(&h.state, &id, "sub").unwrap();
+    assert_eq!(
+        (sub.name.as_str(), sub.mime.as_str()),
+        ("sub/ listing.txt", "text/plain")
+    );
+    assert_eq!(decoded(&sub), b"sub/a.txt\t3");
+    let root = folder::attach_folder_file(&h.state, &id, "").unwrap();
+    let name = dir.path().file_name().unwrap().to_str().unwrap();
+    assert_eq!(root.name, format!("{name}/ listing.txt"));
+    assert_eq!(decoded(&root), b"sub/a.txt\t3");
 }
