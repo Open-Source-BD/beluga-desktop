@@ -3,14 +3,18 @@ import Composer from "../chat/Composer";
 import EmptyChat from "../chat/EmptyChat";
 import ErrorNotice from "../chat/ErrorNotice";
 import { toUiError } from "../chat/errors";
+import ModelPicker from "../models/ModelPicker";
+import { chooseModel } from "../models/defaultModel";
 import Thread from "../chat/Thread";
 import { useChat } from "../chat/useChat";
 import {
   createChat,
   deleteChat,
   listChats,
+  listModels,
   renameChat,
   type ChatSummary,
+  type ModelInfo,
   type UiError,
 } from "../../lib/ipc";
 import Sidebar from "./Sidebar";
@@ -33,8 +37,10 @@ function readLastModel(): string | null {
 export default function Shell({ onOpenSettings, onSignInAgain }: Props) {
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Task 11 adds the setter with the model picker.
-  const [modelId] = useState<string | null>(readLastModel);
+  const [models, setModels] = useState<ModelInfo[] | null>(null);
+  const [modelsFailed, setModelsFailed] = useState(false);
+  const [modelId, setModelId] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [startError, setStartError] = useState<UiError | null>(null);
 
@@ -42,6 +48,25 @@ export default function Shell({ onOpenSettings, onSignInAgain }: Props) {
     listChats().then(setChats, () => {});
   }, []);
   useEffect(refreshChats, [refreshChats]);
+
+  const loadModels = useCallback((force: boolean) => {
+    setModels(null);
+    setModelsFailed(false);
+    listModels(force).then(
+      (list) => {
+        setModels(list);
+        const id = chooseModel(list, [readLastModel()]);
+        setModelId((cur) => (cur && list.some((m) => m.id === cur) ? cur : id));
+        if (id === null) setPickerOpen(true);
+      },
+      () => {
+        setModels([]);
+        setModelsFailed(true);
+        setPickerOpen(true);
+      },
+    );
+  }, []);
+  useEffect(() => loadModels(false), [loadModels]);
 
   const chat = useChat(selectedId, refreshChats);
   const selected = chats.find((c) => c.id === selectedId);
@@ -68,22 +93,46 @@ export default function Shell({ onOpenSettings, onSignInAgain }: Props) {
   };
 
   const select = (id: string | null) => {
+    if (models) {
+      const own = chats.find((c) => c.id === id)?.model_id;
+      setModelId(chooseModel(models, [own, readLastModel()]));
+    }
     setSelectedId(id);
     setStartError(null);
   };
 
-  // Task 11 opens the model picker here.
-  const pickModel = () => {};
+  const pickModel = () => setPickerOpen(true);
+
+  const chooseFromPicker = (id: string) => {
+    setModelId(id);
+    try {
+      localStorage.setItem("lastModel", id);
+    } catch {
+      // Remembering the choice is a convenience; ignore storage failures.
+    }
+  };
 
   const composer = (
     <Composer
       onSend={handleSend}
       onStop={chat.stop}
       streaming={chat.status === "streaming"}
-      disabled={creating}
-      noModel={modelId === null}
+      disabled={creating || models === null}
+      noModel={models !== null && modelId === null}
       hasMessages={hasMessages}
-      slots={{ model: null }}
+      slots={{
+        model: (
+          <ModelPicker
+            models={models}
+            loadFailed={modelsFailed}
+            value={modelId}
+            onChange={chooseFromPicker}
+            onRetry={() => loadModels(true)}
+            open={pickerOpen}
+            onOpenChange={setPickerOpen}
+          />
+        ),
+      }}
     />
   );
 

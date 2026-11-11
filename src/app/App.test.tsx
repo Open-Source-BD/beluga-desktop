@@ -21,6 +21,7 @@ vi.mock("../lib/ipc", () => ({
   signInWithKey: vi.fn(),
   resolveKeyStorage: vi.fn(),
   openAuthUrl: vi.fn(),
+  listModels: vi.fn(async () => []),
   listChats: vi.fn(async () => []),
   getMessages: vi.fn(async () => []),
   createChat: vi.fn(),
