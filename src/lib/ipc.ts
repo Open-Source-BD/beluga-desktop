@@ -241,6 +241,16 @@ export interface SkillDetail {
   files: string[];
 }
 
+export interface SkillsStatus {
+  /** Set when the bundled skills are missing. */
+  builtin_error: string | null;
+  packs: number;
+  skills: number;
+  on: number;
+}
+
+export const skillsStatus = () => invoke<SkillsStatus>("skills_status");
+
 export const listPacks = () => invoke<PackView[]>("list_packs");
 
 export const getSkill = (id: string) => invoke<SkillDetail>("get_skill", { id });

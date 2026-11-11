@@ -48,6 +48,7 @@ describe("ipc", () => {
     ["deleteChat", () => ipc.deleteChat("c"), "delete_chat", { id: "c" }],
     ["chatUsage", () => ipc.chatUsage("c"), "chat_usage", { chatId: "c" }],
     ["monthSpend", () => ipc.monthSpend(), "month_spend", undefined],
+    ["skillsStatus", () => ipc.skillsStatus(), "skills_status", undefined],
     ["listPacks", () => ipc.listPacks(), "list_packs", undefined],
     ["getSkill", () => ipc.getSkill("p:s"), "get_skill", { id: "p:s" }],
     ["setSkillOn", () => ipc.setSkillOn("p:s", true), "set_skill_on", { id: "p:s", on: true }],

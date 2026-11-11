@@ -12,6 +12,26 @@ fn local(_: crate::store::StoreError) -> UiError {
     UiError::other("Could not save your skill settings on this computer.")
 }
 
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct SkillsStatus {
+    pub builtin_error: Option<String>,
+    pub packs: u32,
+    pub skills: u32,
+    pub on: u32,
+}
+
+/// What loaded, so the Skills screen can say when the bundled skills are missing.
+pub fn skills_status(s: &AppState) -> Result<SkillsStatus, UiError> {
+    let packs = s.library.packs(&s.store);
+    let skills = packs.iter().flat_map(|p| &p.skills);
+    Ok(SkillsStatus {
+        builtin_error: s.library.builtin_error(),
+        packs: packs.len() as u32,
+        skills: skills.clone().count() as u32,
+        on: skills.filter(|k| k.on).count() as u32,
+    })
+}
+
 pub fn list_packs(s: &AppState) -> Result<Vec<PackView>, UiError> {
     Ok(s.library.packs(&s.store))
 }

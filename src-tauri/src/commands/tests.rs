@@ -1316,3 +1316,25 @@ fn skill_file_returns_a_text_attachment() {
     assert!(!a.data_base64.is_empty());
     assert!(super::skills::skill_file(&h.state, &id, "../pack.json").is_err());
 }
+
+#[test]
+fn skills_status_counts_the_real_tree() {
+    let h = real_skills_harness();
+    let st = super::skills::skills_status(&h.state).unwrap();
+    assert_eq!(
+        (st.builtin_error, st.packs, st.skills, st.on),
+        (None, 15, 795, 21)
+    );
+    let v = serde_json::to_value(super::skills::skills_status(&h.state).unwrap()).unwrap();
+    let mut k: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
+    k.sort();
+    assert_eq!(k, ["builtin_error", "on", "packs", "skills"]);
+}
+
+#[test]
+fn skills_status_reports_a_missing_builtin_tree() {
+    let h = harness_with("http://unused.invalid", Arc::new(SessionStore::default()));
+    let st = super::skills::skills_status(&h.state).unwrap();
+    assert!(st.builtin_error.is_some());
+    assert_eq!(st.packs, 0);
+}

@@ -51,6 +51,7 @@ pub fn run() {
             h::send_message,
             h::retry_turn,
             h::stop,
+            h::skills_status,
             h::list_packs,
             h::get_skill,
             h::set_skill_on,
@@ -71,6 +72,7 @@ fn builtin_skills_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/skills")
         }
         Ok(dir) => dir,
-        Err(_) => std::path::PathBuf::from("skills"),
+        // Never a relative path: that would read from the current directory.
+        Err(_) => std::path::PathBuf::from("/nonexistent/builtin-skills"),
     }
 }

@@ -23,6 +23,9 @@ const PACK_SWITCH_PREFIX: &str = "pack/";
 /// A file longer than this is not attached.
 const MAX_FILE_BYTES: u64 = 200_000;
 const SKILL_FILE: &str = "SKILL.md";
+const BUILTIN_MISSING: &str =
+    "The built-in skills could not be found. Reinstall the app to restore them.";
+const OUTSIDE: &str = "This skill's files are outside its folder.";
 const NOT_AVAILABLE: &str = "This skill is not available. Check it in Skills.";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -85,6 +88,14 @@ pub struct Library {
 }
 
 impl Library {
+    /// Set when the bundled skills are missing or unreadable.
+    pub fn builtin_error(&self) -> Option<String> {
+        let ok = self.builtin_dir.is_dir()
+            && std::fs::read_to_string(self.builtin_dir.join(DEFAULTS_FILE))
+                .is_ok_and(|t| serde_json::from_str::<serde_json::Value>(&t).is_ok());
+        (!ok).then(|| BUILTIN_MISSING.to_string())
+    }
+
     pub fn load(builtin_dir: &Path, data_skills_dir: &Path) -> Library {
         let lib = Library {
             builtin_dir: builtin_dir.to_path_buf(),
@@ -157,6 +168,13 @@ impl Library {
                     pack.commit = m.commit;
                 }
                 pack.skills = m.skills;
+                for e in &mut pack.skills {
+                    if !valid_rel_path(&e.dir, true)
+                        || !e.files.iter().all(|f| valid_rel_path(f, false))
+                    {
+                        e.broken = Some(OUTSIDE.to_string());
+                    }
+                }
                 pack.skills
                     .sort_by(|a, b| (&a.name, &a.id).cmp(&(&b.name, &b.id)));
             }
@@ -203,7 +221,7 @@ impl Library {
 
     /// One of the files the entry lists, as bytes.
     pub fn skill_file(&self, id: &str, file: &str) -> Result<Vec<u8>, UiError> {
-        if file.contains("..") || file.starts_with('/') || file.starts_with('\\') {
+        if !valid_rel_path(file, false) {
             return Err(UiError::other("That file is not part of this skill."));
         }
         let path = self.entry_path(id, file, |e| e.files.iter().any(|f| f == file))?;
@@ -228,14 +246,17 @@ impl Library {
         if !allowed(entry) {
             return Err(UiError::other("That file is not part of this skill."));
         }
-        if entry.dir.split(['/', '\\']).any(|c| c == "..") || Path::new(&entry.dir).is_absolute() {
+        if entry.broken.as_deref() == Some(OUTSIDE)
+            || !valid_rel_path(&entry.dir, true)
+            || !valid_rel_path(file, false)
+        {
             return Err(UiError::other(NOT_AVAILABLE));
         }
         let mut path = pack.root.clone();
         if entry.dir != "." {
-            path.push(&entry.dir);
+            path.extend(entry.dir.split(['/', '\\']));
         }
-        path.push(file);
+        path.extend(file.split(['/', '\\']));
         Ok(path)
     }
 
@@ -246,6 +267,18 @@ impl Library {
         let loaded = self.loaded.read().unwrap_or_else(|e| e.into_inner());
         find(&loaded, id).is_some_and(|(p, e)| skill_on(p, e, store, &defaults))
     }
+}
+
+/// Manifest paths use `/`; accept `\\` too. Every segment must be non-empty,
+/// not `..`, and free of `:` (drive prefixes). `.` alone is allowed only for
+/// a skill's `dir`. Checked on the string, so it holds on every platform.
+pub fn valid_rel_path(s: &str, allow_dot: bool) -> bool {
+    if allow_dot && s == "." {
+        return true;
+    }
+    !s.is_empty()
+        && s.split(['/', '\\'])
+            .all(|seg| !seg.is_empty() && seg != ".." && seg != "." && !seg.contains(':'))
 }
 
 fn find<'a>(loaded: &'a [LoadedPack], id: &str) -> Option<(&'a LoadedPack, &'a SkillEntry)> {
@@ -585,6 +618,108 @@ mod tests {
         assert!(l.packs(&f.store).iter().any(|p| p.id == "late"));
     }
 
+    #[test]
+    fn relative_paths_are_validated_as_strings_on_every_platform() {
+        for bad in [
+            "C:\\x",
+            "C:x",
+            "/etc/passwd",
+            "..\\..\\x",
+            "a/../../b",
+            "",
+            "a//b",
+            "\\x",
+            "a/",
+        ] {
+            assert!(!valid_rel_path(bad, false), "{bad}");
+            assert!(!valid_rel_path(bad, true), "{bad}");
+        }
+        for ok in ["v1..2.md", "references/notes.md", "skills/one", "a\\b.md"] {
+            assert!(valid_rel_path(ok, false), "{ok}");
+        }
+        assert!(valid_rel_path(".", true));
+        assert!(!valid_rel_path(".", false));
+    }
+
+    #[test]
+    fn a_manifest_entry_with_a_bad_dir_or_file_is_listed_as_broken() {
+        let f = fx();
+        for (dir, files) in [
+            ("C:\\x", vec![]),
+            ("../out", vec![]),
+            ("skills/ok", vec!["C:\\Windows\\win.ini"]),
+        ] {
+            let mut e = entry("evil", "e", &[], None);
+            e.dir = dir.to_string();
+            e.files = files.iter().map(|x| x.to_string()).collect();
+            let root = f.data.join("packs");
+            let d = root.join("evil");
+            fs::create_dir_all(&d).unwrap();
+            let manifest = serde_json::json!({
+                "id": "evil", "title": "t", "repo": "o/evil", "commit": "c", "license": "MIT",
+                "license_files": [], "skills": [e], "skipped": [], "checksum": "x",
+            });
+            fs::write(d.join("pack.json"), manifest.to_string()).unwrap();
+            let l = lib(&f);
+            let packs = l.packs(&f.store);
+            let evil = packs.iter().find(|p| p.id == "evil").unwrap();
+            assert_eq!(
+                evil.skills[0].broken.as_deref(),
+                Some("This skill's files are outside its folder.")
+            );
+            assert!(l.skill_body("evil:e").is_err());
+            assert!(l.skill_file("evil:e", "x.md").is_err());
+        }
+    }
+
+    #[test]
+    fn a_file_name_with_two_dots_inside_is_allowed() {
+        let f = fx();
+        let p = f.builtin.join("alpha/skills/one/v1..2.md");
+        fs::write(&p, "x").unwrap();
+        let mut m = read_manifest(&f.builtin.join("alpha")).unwrap();
+        m.skills
+            .iter_mut()
+            .find(|s| s.name == "one")
+            .unwrap()
+            .files
+            .push("v1..2.md".into());
+        fs::write(
+            f.builtin.join("alpha/pack.json"),
+            serde_json::to_string(&m).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(lib(&f).skill_file("alpha:one", "v1..2.md").unwrap(), b"x");
+    }
+
+    #[test]
+    fn a_missing_builtin_dir_reports_the_exact_text_and_lists_no_builtin_packs() {
+        let f = fx();
+        let l = Library::load(&f.builtin.join("nowhere"), &f.data);
+        assert_eq!(
+            l.builtin_error().as_deref(),
+            Some("The built-in skills could not be found. Reinstall the app to restore them.")
+        );
+        assert!(
+            l.packs(&f.store)
+                .iter()
+                .all(|p| p.origin != PackOrigin::BuiltIn)
+        );
+    }
+
+    #[test]
+    fn a_builtin_dir_without_default_skills_json_reports_it_too() {
+        let f = fx();
+        fs::remove_file(f.builtin.join("default-skills.json")).unwrap();
+        assert!(lib(&f).builtin_error().is_some());
+    }
+
+    #[test]
+    fn a_healthy_builtin_dir_reports_no_error() {
+        let f = fx();
+        assert_eq!(lib(&f).builtin_error(), None);
+    }
+
     fn real_dir() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/skills")
     }
@@ -601,6 +736,7 @@ mod tests {
                 .iter()
                 .all(|p| p.error.is_none() && p.origin == PackOrigin::BuiltIn)
         );
+        assert_eq!(l.builtin_error(), None);
         assert_eq!(packs[0].id, "superpowers", "lock order");
         assert_eq!(packs.iter().map(|p| p.skills.len()).sum::<usize>(), 795);
         let on = packs

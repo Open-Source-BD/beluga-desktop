@@ -4,6 +4,7 @@
 
 use super::auth::{AuthStatus, AuthUrl, StorageChoice};
 use super::chats::ChatUsage;
+use super::skills::SkillsStatus;
 use super::turn::{AttachmentInput, TurnResult};
 use super::{auth, chats, models, skills, turn};
 use crate::auth::callback::PRODUCTION_TIMEOUT;
@@ -174,4 +175,9 @@ pub async fn skill_file(
     file: String,
 ) -> Result<AttachmentInput, UiError> {
     skills::skill_file(&state, &id, &file)
+}
+
+#[tauri::command]
+pub async fn skills_status(state: S<'_>) -> Result<SkillsStatus, UiError> {
+    skills::skills_status(&state)
 }
