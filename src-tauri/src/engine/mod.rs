@@ -35,6 +35,11 @@ impl UiError {
         )
     }
 
+    /// A local failure (store, file, or app state), shown with a fixed message.
+    pub(crate) fn other(message: &str) -> Self {
+        Self::new("other", message, false)
+    }
+
     /// The saved key could not be read at the start of a turn.
     pub(crate) fn key_unreadable() -> Self {
         Self::new(

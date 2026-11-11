@@ -33,10 +33,15 @@ eventsource-stream = "0.2"
 futures-util = "0.3"
 bytes = "1"
 async-trait = "0.1"
+rusqlite = { version = "0.41", features = ["bundled"] }
+tauri-plugin-opener = "2"
+uuid = { version = "1", features = ["v4"] }
+time = "0.3"
 
 [dev-dependencies]
 wiremock = "0.6"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }
+tempfile = "3"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

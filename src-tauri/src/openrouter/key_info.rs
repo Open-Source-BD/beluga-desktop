@@ -1,15 +1,15 @@
 use super::error::ApiError;
 use super::{endpoint, get_text};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct FreeDaily {
     pub used: u32,
     pub limit: u32,
     pub remaining: u32,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct KeyStatus {
     pub is_free_tier: bool,
     pub free_daily: Option<FreeDaily>,

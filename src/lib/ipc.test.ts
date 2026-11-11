@@ -1,0 +1,100 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { invoke, listen } = vi.hoisted(() => ({
+  invoke: vi.fn(),
+  listen: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke,
+  Channel: class<T> {
+    onmessage: (m: T) => void;
+    constructor(onmessage: (m: T) => void) {
+      this.onmessage = onmessage;
+    }
+  },
+}));
+vi.mock("@tauri-apps/api/event", () => ({ listen }));
+
+import * as ipc from "./ipc";
+
+describe("ipc", () => {
+  beforeEach(() => {
+    invoke.mockReset().mockResolvedValue(undefined);
+    listen.mockReset().mockResolvedValue(() => {});
+  });
+
+  // [call, command name, argument object or undefined]
+  const cases: [string, () => Promise<unknown>, string, unknown][] = [
+    ["authStatus", () => ipc.authStatus(), "auth_status", undefined],
+    ["signInStart", () => ipc.signInStart(), "sign_in_start", undefined],
+    ["signInCodeUrl", () => ipc.signInCodeUrl(), "sign_in_code_url", undefined],
+    ["signInCancel", () => ipc.signInCancel(), "sign_in_cancel", undefined],
+    ["signInWithCode", () => ipc.signInWithCode("c1"), "sign_in_with_code", { code: "c1" }],
+    ["signInWithKey", () => ipc.signInWithKey("k"), "sign_in_with_key", { key: "k" }],
+    [
+      "resolveKeyStorage",
+      () => ipc.resolveKeyStorage("session"),
+      "resolve_key_storage",
+      { choice: "session" },
+    ],
+    ["signOut", () => ipc.signOut(), "sign_out", undefined],
+    ["listModels", () => ipc.listModels(true), "list_models", { force: true }],
+    ["keyStatus", () => ipc.keyStatus(), "key_status", undefined],
+    ["listChats", () => ipc.listChats(), "list_chats", undefined],
+    ["getMessages", () => ipc.getMessages("c"), "get_messages", { chatId: "c" }],
+    ["createChat", () => ipc.createChat("m/a"), "create_chat", { modelId: "m/a" }],
+    ["renameChat", () => ipc.renameChat("c", "T"), "rename_chat", { id: "c", title: "T" }],
+    ["deleteChat", () => ipc.deleteChat("c"), "delete_chat", { id: "c" }],
+    ["chatUsage", () => ipc.chatUsage("c"), "chat_usage", { chatId: "c" }],
+    ["monthSpend", () => ipc.monthSpend(), "month_spend", undefined],
+    ["stop", () => ipc.stop("c"), "stop", { chatId: "c" }],
+    [
+      "openAuthUrl",
+      () => ipc.openAuthUrl("https://openrouter.ai/auth"),
+      "plugin:opener|open_url",
+      { url: "https://openrouter.ai/auth" },
+    ],
+  ];
+
+  it.each(cases)("%s invokes the right command with camelCase keys", async (_, call, cmd, args) => {
+    await call();
+    expect(invoke).toHaveBeenCalledTimes(1);
+    if (args === undefined) {
+      expect(invoke).toHaveBeenCalledWith(cmd);
+    } else {
+      expect(invoke).toHaveBeenCalledWith(cmd, args);
+    }
+  });
+
+  it("sendMessage passes a channel that delivers engine events", async () => {
+    const seen: ipc.EngineEvent[] = [];
+    const att = { name: "a.txt", mime: "text/plain", data_base64: "aGk=" };
+    await ipc.sendMessage("c", "hi", [att], "m/a", (e) => seen.push(e));
+    expect(invoke).toHaveBeenCalledTimes(1);
+    const [cmd, args] = invoke.mock.calls[0];
+    expect(cmd).toBe("send_message");
+    expect(Object.keys(args).sort()).toEqual(
+      ["attachments", "chatId", "modelId", "onEvent", "text"].sort(),
+    );
+    expect(args).toMatchObject({ chatId: "c", text: "hi", attachments: [att], modelId: "m/a" });
+    args.onEvent.onmessage({ type: "text_delta", text: "Hel" });
+    expect(seen).toEqual([{ type: "text_delta", text: "Hel" }]);
+  });
+
+  it("onAuthFinished unwraps the event payload", async () => {
+    const handler = vi.fn();
+    await ipc.onAuthFinished(handler);
+    expect(listen).toHaveBeenCalledWith("auth://finished", expect.any(Function));
+    listen.mock.calls[0][1]({ payload: { ok: false, reason: "denied" } });
+    expect(handler).toHaveBeenCalledWith({ ok: false, reason: "denied" });
+  });
+
+  it("onAuthRevoked listens to auth://revoked", async () => {
+    const handler = vi.fn();
+    await ipc.onAuthRevoked(handler);
+    expect(listen).toHaveBeenCalledWith("auth://revoked", expect.any(Function));
+    listen.mock.calls[0][1]({ payload: null });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+});
