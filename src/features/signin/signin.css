@@ -1,0 +1,188 @@
+.signin {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 100vh;
+  background: var(--ice);
+}
+.signin-pitch {
+  background: var(--pitch);
+  color: #e6eff3;
+  padding: 40px 40px 32px;
+  display: flex;
+  flex-direction: column;
+}
+.signin-pitch h2 {
+  font-weight: 500;
+  font-size: 38px;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+  margin: auto 0 12px;
+  color: #fff;
+}
+.signin-pitch p {
+  margin: 0;
+  color: #a9c0cc;
+  max-width: 36ch;
+}
+.signin-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: "Bricolage Grotesque Variable", sans-serif;
+  font-weight: 600;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  color: #fff;
+}
+.signin-form {
+  padding: 40px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  background: var(--ice);
+  max-width: 480px;
+}
+.signin-form h1 {
+  font-weight: 600;
+  font-size: 21px;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.signin-form p {
+  margin: 0 0 6px;
+  color: var(--mid);
+  max-width: 38ch;
+}
+.signin-big,
+.signin-alt {
+  font: inherit;
+  padding: 12px 16px;
+  border-radius: 10px;
+  text-align: center;
+  cursor: pointer;
+}
+.signin-big {
+  font-weight: 600;
+  font-size: 14.5px;
+  border: 0;
+  background: var(--sonar);
+  color: var(--on-accent);
+}
+.signin-alt {
+  font-weight: 500;
+  border: 1px solid var(--field-line);
+  background: var(--white);
+  color: var(--deep);
+}
+.signin-big:disabled,
+.signin-alt:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.signin-paste {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.signin-paste label {
+  font-weight: 500;
+  font-size: 13px;
+}
+.signin-paste input {
+  font: inherit;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--field-line);
+  background: var(--white);
+  color: var(--deep);
+}
+.signin-paste input::placeholder {
+  color: var(--ph);
+}
+.signin-link {
+  font: inherit;
+  font-size: 13px;
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--sonar);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.signin-waiting {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.signin-error {
+  color: var(--ask-ink);
+  background: var(--amber-soft);
+  border: 1px solid var(--ask-line);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.signin-form .signin-notice {
+  color: var(--deep);
+  background: var(--floe);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.signin-form .signin-allowance,
+.signin-form .signin-fine {
+  font-size: 12.5px;
+  color: var(--mid);
+  margin: 0;
+}
+.signin-form .signin-fine {
+  margin-top: 6px;
+}
+
+.keydlg-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--shadow);
+  padding: 16px;
+}
+.keydlg {
+  background: var(--ice);
+  color: var(--deep);
+  border: 1px solid var(--frame);
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 440px;
+  box-shadow: 0 24px 60px -20px var(--shadow);
+}
+.keydlg h2 {
+  font-weight: 600;
+  font-size: 19px;
+  margin: 0 0 8px;
+}
+.keydlg p {
+  margin: 0 0 12px;
+  color: var(--text2);
+}
+.keydlg-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 760px) {
+  .signin {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+  .signin-pitch h2 {
+    margin-top: 32px;
+    font-size: 30px;
+  }
+  .signin-form {
+    max-width: none;
+    padding: 28px 20px;
+  }
+}
