@@ -89,8 +89,8 @@ fn begin_sign_in(s: &AppState) -> (pkce::Pkce, String, u64, CancellationToken, A
     (pkce, state_param, id, cancel, quiet)
 }
 
-/// Save a key that OpenRouter accepted. With no keychain service, the key is
-/// held in memory until `resolve_key_storage`.
+/// Save a key that OpenRouter accepted. If the keychain cannot take it, the
+/// key is held in memory until `resolve_key_storage`.
 fn save_key(s: &AppState, key: String) -> Result<(), UiError> {
     stop_pending_sign_in(s);
     match s.keys.set(&key) {
@@ -99,11 +99,13 @@ fn save_key(s: &AppState, key: String) -> Result<(), UiError> {
             s.signed_out.store(false, Ordering::SeqCst);
             Ok(())
         }
-        Err(SecretError::Unavailable) => {
+        // No keychain service, or one that refused to save (on macOS: the
+        // password prompt was declined, or the entry belongs to another
+        // build of the app). Either way the user picks where the key goes.
+        Err(SecretError::Unavailable | SecretError::Other(_)) => {
             *s.pending_key() = Some(HeldKey(key));
             Err(UiError::keychain_unavailable())
         }
-        Err(SecretError::Other(_)) => Err(could_not_save()),
     }
 }
 

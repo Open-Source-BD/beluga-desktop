@@ -222,7 +222,7 @@ describe("SignIn", () => {
     const onSignedIn = await renderSignIn();
     await user.click(screen.getByRole("button", { name: "Sign in with OpenRouter" }));
     await finish({ ok: false, reason: "keychain_unavailable" });
-    const dialog = screen.getByRole("dialog", { name: "This computer has no keychain service" });
+    const dialog = screen.getByRole("dialog", { name: "Your key could not be saved in the keychain" });
     expect(dialog).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Keep until I quit" })).toHaveFocus();
     await user.click(screen.getByRole("button", { name: "Keep until I quit" }));

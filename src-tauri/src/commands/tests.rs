@@ -331,6 +331,45 @@ async fn sign_out_clears_the_key_and_keeps_chats() {
     assert_eq!(chats::list_chats(&h.state).unwrap(), vec![chat]);
 }
 
+/// A keychain that exists but refuses to save, as macOS does when the user
+/// declines its password prompt or the entry belongs to another build.
+struct RefusingKeychain;
+impl KeyStore for RefusingKeychain {
+    fn get(&self) -> Result<Option<String>, SecretError> {
+        Ok(None)
+    }
+    fn set(&self, _: &str) -> Result<(), SecretError> {
+        Err(SecretError::Other("keychain access denied".into()))
+    }
+    fn clear(&self) -> Result<(), SecretError> {
+        Ok(())
+    }
+    fn kind(&self) -> StorageKind {
+        StorageKind::Keychain
+    }
+}
+
+#[tokio::test]
+async fn a_keychain_that_refuses_to_save_offers_the_storage_choice() {
+    let server = MockServer::start().await;
+    mock(
+        &server,
+        "GET",
+        "/api/v1/key",
+        ResponseTemplate::new(200).set_body_string(KEY_FREE),
+    )
+    .await;
+    let h = harness_with(&server.uri(), Arc::new(RefusingKeychain));
+    let err = auth::sign_in_with_key(&h.state, KEY).await.unwrap_err();
+    assert_eq!(err.kind, "keychain_unavailable");
+    assert!(!auth::auth_status(&h.state).signed_in);
+
+    auth::resolve_key_storage(&h.state, StorageChoice::Session).unwrap();
+    let status = auth::auth_status(&h.state);
+    assert!(status.signed_in);
+    assert_eq!(status.storage, Some(StorageKind::Session));
+}
+
 /// Holds a key but cannot delete it.
 struct UndeletableKey;
 impl KeyStore for UndeletableKey {

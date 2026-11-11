@@ -26,11 +26,11 @@ impl UiError {
         }
     }
 
-    /// Produced when the app finds no keychain service on this computer.
+    /// Produced when the keychain is missing or refuses to save the key.
     pub fn keychain_unavailable() -> Self {
         Self::new(
             "keychain_unavailable",
-            "This computer has no keychain service.",
+            "Your key could not be saved in the keychain.",
             false,
         )
     }
@@ -151,7 +151,7 @@ mod tests {
     fn keychain_unavailable_fields() {
         let e = UiError::keychain_unavailable();
         assert_eq!(e.kind, "keychain_unavailable");
-        assert_eq!(e.message, "This computer has no keychain service.");
+        assert_eq!(e.message, "Your key could not be saved in the keychain.");
         assert!(!e.retryable);
     }
 }

@@ -31,32 +31,56 @@ impl<R: tauri::Runtime> EventSink for tauri::AppHandle<R> {
 /// store (after a `resolve_key_storage` choice) takes effect everywhere.
 pub struct SharedKeyStore {
     inner: RwLock<Arc<dyn KeyStore>>,
+    /// The key once read or saved, so the underlying store is touched once
+    /// per launch. On macOS every keychain read can raise a password prompt.
+    /// It stays inside the Rust core and is dropped on clear and swap.
+    remembered: Mutex<Option<String>>,
 }
 
 impl SharedKeyStore {
     pub fn new(inner: Arc<dyn KeyStore>) -> Self {
         Self {
             inner: RwLock::new(inner),
+            remembered: Mutex::new(None),
         }
     }
 
     pub fn swap(&self, next: Arc<dyn KeyStore>) {
         *self.inner.write().unwrap_or_else(|e| e.into_inner()) = next;
+        *self.remembered() = None;
     }
 
     fn current(&self) -> Arc<dyn KeyStore> {
         self.inner.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
+
+    fn remembered(&self) -> std::sync::MutexGuard<'_, Option<String>> {
+        self.remembered.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+impl std::fmt::Debug for SharedKeyStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SharedKeyStore(..)")
+    }
 }
 
 impl KeyStore for SharedKeyStore {
     fn get(&self) -> Result<Option<String>, SecretError> {
-        self.current().get()
+        if let Some(key) = self.remembered().clone() {
+            return Ok(Some(key));
+        }
+        let key = self.current().get()?;
+        self.remembered().clone_from(&key);
+        Ok(key)
     }
     fn set(&self, key: &str) -> Result<(), SecretError> {
-        self.current().set(key)
+        self.current().set(key)?;
+        *self.remembered() = Some(key.to_string());
+        Ok(())
     }
     fn clear(&self) -> Result<(), SecretError> {
+        *self.remembered() = None;
         self.current().clear()
     }
     fn kind(&self) -> StorageKind {
@@ -287,5 +311,68 @@ mod tests {
         next.set("k2").unwrap();
         shared.swap(Arc::new(next));
         assert_eq!(as_dyn.get().unwrap(), Some("k2".to_string()));
+    }
+
+    /// Counts how often the underlying store is read. On macOS every read of
+    /// the keychain can raise a password prompt.
+    #[derive(Default)]
+    struct CountingStore {
+        inner: SessionStore,
+        reads: std::sync::atomic::AtomicUsize,
+    }
+    impl KeyStore for CountingStore {
+        fn get(&self) -> Result<Option<String>, SecretError> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            self.inner.get()
+        }
+        fn set(&self, key: &str) -> Result<(), SecretError> {
+            self.inner.set(key)
+        }
+        fn clear(&self) -> Result<(), SecretError> {
+            self.inner.clear()
+        }
+        fn kind(&self) -> StorageKind {
+            StorageKind::Keychain
+        }
+    }
+
+    #[test]
+    fn the_stored_key_is_read_once_then_served_from_memory() {
+        let store = Arc::new(CountingStore::default());
+        store.inner.set("k").unwrap();
+        let shared = SharedKeyStore::new(store.clone());
+        for _ in 0..5 {
+            assert_eq!(shared.get().unwrap(), Some("k".to_string()));
+        }
+        assert_eq!(store.reads.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_saved_key_is_served_without_reading_the_store_back() {
+        let store = Arc::new(CountingStore::default());
+        let shared = SharedKeyStore::new(store.clone());
+        shared.set("k").unwrap();
+        assert_eq!(shared.get().unwrap(), Some("k".to_string()));
+        assert_eq!(store.reads.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn clear_and_swap_forget_the_remembered_key() {
+        let store = Arc::new(CountingStore::default());
+        let shared = SharedKeyStore::new(store.clone());
+        shared.set("k").unwrap();
+        shared.clear().unwrap();
+        assert_eq!(shared.get().unwrap(), None);
+
+        shared.set("k").unwrap();
+        shared.swap(Arc::new(SessionStore::default()));
+        assert_eq!(shared.get().unwrap(), None);
+    }
+
+    #[test]
+    fn the_remembered_key_never_shows_in_debug_output() {
+        let shared = SharedKeyStore::new(Arc::new(SessionStore::default()));
+        shared.set("sk-or-secret").unwrap();
+        assert!(!format!("{shared:?}").contains("sk-or-secret"));
     }
 }

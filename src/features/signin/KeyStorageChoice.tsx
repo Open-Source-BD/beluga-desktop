@@ -7,7 +7,7 @@ interface Props {
   onChoose: (choice: "session" | "file") => void;
 }
 
-/** Modal shown when the OS has no keychain. It closes only through its buttons. */
+/** Modal shown when the OS keychain is missing or refuses to save the key. It closes only through its buttons. */
 export default function KeyStorageChoice({ busy, error, onChoose }: Props) {
   const keepRef = useRef<HTMLButtonElement>(null);
   const fileRef = useRef<HTMLButtonElement>(null);
@@ -40,7 +40,7 @@ export default function KeyStorageChoice({ busy, error, onChoose }: Props) {
         aria-describedby="keydlg-body"
         onKeyDown={trapTab}
       >
-        <h2 id="keydlg-title">This computer has no keychain service</h2>
+        <h2 id="keydlg-title">Your key could not be saved in the keychain</h2>
         <p id="keydlg-body">
           {APP_NAME} can keep your key until you quit, or save it in a file only
           your account can read. A file is less protected than a keychain.
