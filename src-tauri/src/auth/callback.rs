@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
@@ -14,6 +15,8 @@ pub const PRODUCTION_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 /// Longest request line we are willing to read.
 const MAX_REQUEST_LINE: u64 = 8 * 1024;
+/// Most connections handled at once; further ones wait in the OS backlog.
+const MAX_CONNECTIONS: usize = 8;
 /// How long a single connection may take to send its request line.
 const READ_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -57,17 +60,26 @@ impl Listener {
     ) -> Result<String, CallbackError> {
         let deadline = tokio::time::sleep(timeout);
         tokio::pin!(deadline);
+        // Each connection runs in its own task so a stalled socket cannot
+        // delay the real callback. The JoinSet aborts every task when it is
+        // dropped, so none outlives the wait.
         let serve = async {
+            let mut conns: JoinSet<Outcome> = JoinSet::new();
             loop {
-                let (stream, _) = self
-                    .listener
-                    .accept()
-                    .await
-                    .map_err(|e| CallbackError::Io(e.to_string()))?;
-                match handle(stream, expected_state).await {
-                    Outcome::Code(code) => return Ok(code),
-                    Outcome::Denied => return Err(CallbackError::Denied),
-                    Outcome::Ignored => {}
+                tokio::select! {
+                    accepted = self.listener.accept(), if conns.len() < MAX_CONNECTIONS => {
+                        let (stream, _) =
+                            accepted.map_err(|e| CallbackError::Io(e.to_string()))?;
+                        let state = expected_state.to_owned();
+                        conns.spawn(async move { handle(stream, &state).await });
+                    }
+                    Some(done) = conns.join_next(), if !conns.is_empty() => {
+                        match done {
+                            Ok(Outcome::Code(code)) => return Ok(code),
+                            Ok(Outcome::Denied) => return Err(CallbackError::Denied),
+                            Ok(Outcome::Ignored) | Err(_) => {}
+                        }
+                    }
                 }
             }
         };
@@ -308,5 +320,36 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(wait.await.unwrap().unwrap(), "ok");
+    }
+
+    #[tokio::test]
+    async fn idle_connections_do_not_block_the_real_callback() {
+        let l = bind().await.unwrap();
+        let port = l.listener.local_addr().unwrap().port();
+        let url = l.callback_url.clone();
+        let wait = tokio::spawn(l.wait_for_code("ST", LONG, CancellationToken::new()));
+        let mut idle = Vec::new();
+        for _ in 0..3 {
+            idle.push(
+                tokio::net::TcpStream::connect(("127.0.0.1", port))
+                    .await
+                    .unwrap(),
+            );
+        }
+        let mut partial = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        partial.write_all(b"GET /callb").await.unwrap();
+        let r = tokio::time::timeout(Duration::from_millis(1000), async {
+            client()
+                .get(format!("{url}?code=fast&state=ST"))
+                .send()
+                .await
+                .unwrap();
+            wait.await
+        })
+        .await
+        .expect("callback was starved by idle connections");
+        assert_eq!(r.unwrap().unwrap(), "fast");
     }
 }
