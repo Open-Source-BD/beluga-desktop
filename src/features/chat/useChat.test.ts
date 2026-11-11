@@ -12,7 +12,7 @@ const ipc = vi.hoisted(() => ({
 vi.mock("../../lib/ipc", () => ipc);
 
 const msg = (id: string, role: "user" | "assistant", text: string, interrupted = false): StoredMessage => ({
-  id, role, text, attachments: [], interrupted, created_at: 1,
+  id, role, text, attachments: [], interrupted, created_at: 1, kind: "message", seq: 1,
 });
 
 const DONE: TurnResult = { status: "done", reason: null, error: null };

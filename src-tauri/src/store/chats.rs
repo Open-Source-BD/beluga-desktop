@@ -21,6 +21,23 @@ fn title_from(text: &str) -> String {
     }
 }
 
+pub(super) const MESSAGE_COLUMNS: &str =
+    "id, role, text, attachments, interrupted, created_at, kind, seq";
+
+pub(super) fn message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredMessage> {
+    let attachments: String = row.get(3)?;
+    Ok(StoredMessage {
+        id: row.get(0)?,
+        role: row.get(1)?,
+        text: row.get(2)?,
+        attachments: serde_json::from_str(&attachments).unwrap_or_default(),
+        interrupted: row.get(4)?,
+        created_at: row.get(5)?,
+        kind: row.get(6)?,
+        seq: row.get(7)?,
+    })
+}
+
 fn summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatSummary> {
     Ok(ChatSummary {
         id: row.get(0)?,
@@ -67,22 +84,10 @@ impl Store {
     /// Every message of the chat, oldest first.
     pub fn get_messages(&self, chat_id: &str) -> Result<Vec<StoredMessage>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare(
-            "SELECT id, role, text, attachments, interrupted, created_at FROM messages
-             WHERE chat_id = ?1 ORDER BY seq",
-        )?;
-        stmt.query_map([chat_id], |row| {
-            let attachments: String = row.get(3)?;
-            Ok(StoredMessage {
-                id: row.get(0)?,
-                role: row.get(1)?,
-                text: row.get(2)?,
-                attachments: serde_json::from_str(&attachments).unwrap_or_default(),
-                interrupted: row.get(4)?,
-                created_at: row.get(5)?,
-            })
-        })?
-        .collect()
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {MESSAGE_COLUMNS} FROM messages WHERE chat_id = ?1 ORDER BY seq"
+        ))?;
+        stmt.query_map([chat_id], message_row)?.collect()
     }
 
     /// Adds a message and marks the chat as active. The first user message of
@@ -95,13 +100,32 @@ impl Store {
         attachments: &[StoredAttachment],
         interrupted: bool,
     ) -> Result<StoredMessage> {
-        let msg = StoredMessage {
+        self.insert_message(chat_id, "message", role, text, attachments, interrupted)
+    }
+
+    /// Adds a note (a line shown in the thread, never sent to the model).
+    pub fn append_note(&self, chat_id: &str, text: &str) -> Result<StoredMessage> {
+        self.insert_message(chat_id, "note", "system", text, &[], false)
+    }
+
+    fn insert_message(
+        &self,
+        chat_id: &str,
+        kind: &str,
+        role: &str,
+        text: &str,
+        attachments: &[StoredAttachment],
+        interrupted: bool,
+    ) -> Result<StoredMessage> {
+        let mut msg = StoredMessage {
             id: uuid::Uuid::new_v4().to_string(),
             role: role.to_string(),
             text: text.to_string(),
             attachments: attachments.to_vec(),
             interrupted,
             created_at: now(),
+            kind: kind.to_string(),
+            seq: 0,
         };
         let attachments_json =
             serde_json::to_string(&msg.attachments).expect("attachments always serialise");
@@ -113,8 +137,8 @@ impl Store {
             |r| r.get(0),
         )?;
         tx.execute(
-            "INSERT INTO messages (id, chat_id, role, text, attachments, interrupted, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO messages (id, chat_id, role, text, attachments, interrupted, created_at, kind)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 msg.id,
                 chat_id,
@@ -122,9 +146,11 @@ impl Store {
                 msg.text,
                 attachments_json,
                 msg.interrupted,
-                msg.created_at
+                msg.created_at,
+                msg.kind
             ],
         )?;
+        msg.seq = tx.last_insert_rowid();
         tx.execute(
             "UPDATE chats SET updated_at = ?2 WHERE id = ?1",
             params![chat_id, msg.created_at],

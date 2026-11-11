@@ -92,6 +92,8 @@ export interface StoredMessage {
   attachments: StoredAttachment[];
   interrupted: boolean;
   created_at: number;
+  kind: "message" | "note";
+  seq: number;
 }
 
 export interface ChatUsage {

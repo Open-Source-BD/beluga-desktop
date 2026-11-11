@@ -118,4 +118,15 @@ describe("ipc", () => {
     listen.mock.calls[0][1]({ payload: null });
     expect(handler).toHaveBeenCalledTimes(1);
   });
+
+  it("getMessages returns stored messages with their kind and seq", async () => {
+    const note: ipc.StoredMessage = {
+      id: "n1", role: "system", text: "Note", attachments: [],
+      interrupted: false, created_at: 1, kind: "note", seq: 7,
+    };
+    invoke.mockResolvedValueOnce([note]);
+    const [m] = await ipc.getMessages("c");
+    expect(m.kind).toBe("note");
+    expect(m.seq).toBe(7);
+  });
 });

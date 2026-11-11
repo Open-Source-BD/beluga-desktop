@@ -1,7 +1,9 @@
 //! Local SQLite store for chats, messages and usage. All timestamps are UTC
 //! unix seconds.
 
+mod chat_state;
 mod chats;
+mod migrate;
 mod usage;
 
 use rusqlite::Connection;
@@ -35,38 +37,11 @@ pub struct StoredMessage {
     pub attachments: Vec<StoredAttachment>,
     pub interrupted: bool,
     pub created_at: i64,
+    /// `"message"` or `"note"`.
+    pub kind: String,
+    /// Position in the store's insertion order (the `messages.seq` column).
+    pub seq: i64,
 }
-
-const SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS chats (
-    id TEXT PRIMARY KEY NOT NULL,
-    title TEXT NOT NULL,
-    model_id TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS messages (
-    seq INTEGER PRIMARY KEY AUTOINCREMENT,
-    id TEXT NOT NULL UNIQUE,
-    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-    role TEXT NOT NULL,
-    text TEXT NOT NULL,
-    attachments TEXT NOT NULL,
-    interrupted INTEGER NOT NULL,
-    created_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS messages_chat ON messages(chat_id, seq);
-CREATE TABLE IF NOT EXISTS usage (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-    requests INTEGER NOT NULL,
-    cost_usd REAL NOT NULL,
-    created_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS usage_chat ON usage(chat_id);
-CREATE INDEX IF NOT EXISTS usage_time ON usage(created_at);
-PRAGMA user_version = 1;
-";
 
 pub struct Store {
     conn: Mutex<Connection>,
@@ -81,9 +56,9 @@ impl Store {
         Self::init(Connection::open_in_memory()?)
     }
 
-    fn init(conn: Connection) -> Result<Store> {
+    fn init(mut conn: Connection) -> Result<Store> {
         conn.pragma_update(None, "foreign_keys", true)?;
-        conn.execute_batch(SCHEMA)?;
+        migrate::migrate(&mut conn)?;
         Ok(Store {
             conn: Mutex::new(conn),
         })
