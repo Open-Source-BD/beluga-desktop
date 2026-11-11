@@ -317,11 +317,56 @@ async fn sign_out_clears_the_key_and_keeps_chats() {
     let h = signed_in("http://127.0.0.1:1");
     let chat = chats::create_chat(&h.state, "m/a").unwrap();
     auth::sign_in_code_url(&h.state);
-    auth::sign_out(&h.state);
+    auth::sign_out(&h.state).unwrap();
     assert_eq!(h.state.keys.get().unwrap(), None);
     assert!(!auth::auth_status(&h.state).signed_in);
     assert!(h.state.pending_sign_in().is_none());
     assert_eq!(chats::list_chats(&h.state).unwrap(), vec![chat]);
+}
+
+/// Holds a key but cannot delete it.
+struct UndeletableKey;
+impl KeyStore for UndeletableKey {
+    fn get(&self) -> Result<Option<String>, SecretError> {
+        Ok(Some(KEY.to_string()))
+    }
+    fn set(&self, _: &str) -> Result<(), SecretError> {
+        Ok(())
+    }
+    fn clear(&self) -> Result<(), SecretError> {
+        Err(SecretError::Other("delete refused".into()))
+    }
+    fn kind(&self) -> StorageKind {
+        StorageKind::Keychain
+    }
+}
+
+#[tokio::test]
+async fn sign_out_reports_a_failed_key_delete_after_stopping_everything() {
+    let h = harness_with("http://127.0.0.1:1", Arc::new(UndeletableKey));
+    assert!(auth::auth_status(&h.state).signed_in);
+    auth::sign_in_code_url(&h.state);
+    let turn = tokio_util::sync::CancellationToken::new();
+    h.state.turns().insert(
+        "c".to_string(),
+        crate::state::RunningTurn {
+            id: 0,
+            cancel: turn.clone(),
+        },
+    );
+    let err = auth::sign_out(&h.state).unwrap_err();
+    assert_eq!(
+        err,
+        UiError {
+            kind: "other".into(),
+            message: "Could not remove your key from this computer. Try signing out again.".into(),
+            retryable: true,
+        }
+    );
+    assert!(turn.is_cancelled());
+    assert!(h.state.turns().is_empty());
+    assert!(h.state.pending_sign_in().is_none());
+    assert!(!auth::auth_status(&h.state).signed_in);
 }
 
 #[tokio::test]
@@ -614,7 +659,7 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
     record(to(&chats::month_spend(&h.state)));
     record(to(&chats::rename_chat(&h.state, &id, "t")));
     turn::stop(&h.state, &id);
-    auth::sign_out(&h.state);
+    record(to(&auth::sign_out(&h.state)));
     record(to(&auth::auth_status(&h.state)));
     record(to(&chats::delete_chat(&h.state, &id)));
     wait_for_event(&h.events, "auth://finished").await;

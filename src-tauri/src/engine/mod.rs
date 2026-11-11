@@ -40,6 +40,15 @@ impl UiError {
         Self::new("other", message, false)
     }
 
+    /// Signing out could not delete the stored key.
+    pub(crate) fn key_not_removed() -> Self {
+        Self::new(
+            "other",
+            "Could not remove your key from this computer. Try signing out again.",
+            true,
+        )
+    }
+
     /// The saved key could not be read at the start of a turn.
     pub(crate) fn key_unreadable() -> Self {
         Self::new(

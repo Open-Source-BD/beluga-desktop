@@ -208,15 +208,17 @@ pub fn resolve_key_storage(s: &AppState, choice: StorageChoice) -> Result<(), Ui
     Ok(())
 }
 
-/// Forget the key and stop everything in flight. Chats are kept.
-pub fn sign_out(s: &AppState) {
+/// Forget the key and stop everything in flight. Chats are kept. If the key
+/// cannot be deleted, this session still reports signed out, and the error
+/// tells the user the key is still stored.
+pub fn sign_out(s: &AppState) -> Result<(), UiError> {
     s.signed_out.store(true, Ordering::SeqCst);
-    let _ = s.keys.clear();
     *s.pending_key() = None;
     stop_pending_sign_in(s);
     for (_, turn) in s.turns().drain() {
         turn.cancel.cancel();
     }
+    s.keys.clear().map_err(|_| UiError::key_not_removed())
 }
 
 pub async fn key_status(s: &AppState) -> Result<KeyStatus, UiError> {

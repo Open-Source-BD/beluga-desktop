@@ -64,8 +64,7 @@ pub async fn resolve_key_storage(state: S<'_>, choice: StorageChoice) -> Result<
 
 #[tauri::command]
 pub async fn sign_out(state: S<'_>) -> Result<(), UiError> {
-    auth::sign_out(&state);
-    Ok(())
+    auth::sign_out(&state)
 }
 
 #[tauri::command]
