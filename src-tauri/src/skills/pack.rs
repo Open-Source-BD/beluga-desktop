@@ -37,6 +37,11 @@ pub struct PackSpec {
     pub about: String,
     #[serde(default)]
     pub checksum: String,
+    /// File extensions (without the dot, any case) not copied from this
+    /// pack's skill folders, to keep the installer small. `SKILL.md` is
+    /// always copied.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub leave_out: Vec<String>,
 }
 
 /// What a vendored pack contains; written to `pack.json`.
@@ -74,6 +79,15 @@ fn child_dirs(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// True when a select or exclude pattern stays inside the source root: no
+/// empty, `..` or drive-prefixed segment, no leading `/`, no backslash.
+fn safe_pattern(pattern: &str) -> bool {
+    !pattern.is_empty()
+        && !pattern.contains('\\')
+        && !pattern.contains(':')
+        && pattern.split('/').all(|seg| !seg.is_empty() && seg != "..")
+}
+
 fn forward(rel: &Path) -> String {
     rel.components()
         .map(|c| c.as_os_str().to_string_lossy().into_owned())
@@ -83,10 +97,13 @@ fn forward(rel: &Path) -> String {
 
 /// Folders (relative to `root`, `"."` for the root itself) that match a
 /// `select` pattern and hold a `SKILL.md`, minus any whose relative path
-/// starts with an `exclude` prefix. Sorted and de-duplicated.
+/// is an `exclude` path or lies under one (whole segments). Sorted and
+/// de-duplicated. Patterns and excludes with an empty or `..` segment, a
+/// leading `/`, a drive prefix or a backslash are ignored, as are folders
+/// whose names are not valid UTF-8.
 pub fn select_skill_dirs(root: &Path, select: &[String], exclude: &[String]) -> Vec<PathBuf> {
     let mut found: Vec<String> = Vec::new();
-    for pattern in select {
+    for pattern in select.iter().filter(|p| safe_pattern(p)) {
         let mut current: Vec<PathBuf> = vec![PathBuf::new()];
         for seg in pattern.split('/').filter(|p| !p.is_empty()) {
             let mut next = Vec::new();
@@ -95,7 +112,7 @@ pub fn select_skill_dirs(root: &Path, select: &[String], exclude: &[String]) -> 
                     "." => next.push(rel.clone()),
                     "*" => {
                         for child in child_dirs(&root.join(rel)) {
-                            if let Some(name) = child.file_name() {
+                            if let Some(name) = child.file_name().and_then(|n| n.to_str()) {
                                 next.push(rel.join(name));
                             }
                         }
@@ -123,7 +140,12 @@ pub fn select_skill_dirs(root: &Path, select: &[String], exclude: &[String]) -> 
             }
         }
     }
-    found.retain(|p| !exclude.iter().any(|x| p.starts_with(x.as_str())));
+    found.retain(|p| {
+        !exclude
+            .iter()
+            .filter(|x| safe_pattern(x))
+            .any(|x| p == x || p.starts_with(&format!("{x}/")))
+    });
     found.sort();
     found.dedup();
     found.into_iter().map(PathBuf::from).collect()
@@ -140,11 +162,21 @@ fn allowed_extension(name: &str) -> bool {
         .is_some_and(|e| ALLOWED_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
 }
 
+/// True when `name`'s extension is listed in the pack's `leave_out`.
+fn left_out(leave_out: &[String], name: &str) -> bool {
+    Path::new(name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| leave_out.iter().any(|x| x.eq_ignore_ascii_case(e)))
+}
+
 /// Walks `dir` collecting the files to copy (paths relative to `dir`, forward
-/// slashes). Links, oversized files and over-long paths go to `skipped`
+/// slashes). Links, names that are not valid UTF-8, left-out types,
+/// oversized files and over-long paths go to `skipped`
 /// (paths relative to the pack root, via `prefix`).
 fn collect_files(
     pack_id: &str,
+    leave_out: &[String],
     prefix: &str,
     dir: &Path,
     rel: &str,
@@ -157,7 +189,8 @@ fn collect_files(
     let mut entries: Vec<_> = rd.flatten().collect();
     entries.sort_by_key(|e| e.file_name());
     for e in entries {
-        let name = e.file_name().to_string_lossy().into_owned();
+        let raw = e.file_name();
+        let name = raw.to_string_lossy().into_owned();
         let rel_here = if rel.is_empty() {
             name.clone()
         } else {
@@ -169,15 +202,27 @@ fn collect_files(
             format!("{prefix}/{rel_here}")
         };
         let Ok(ft) = e.file_type() else { continue };
-        if ft.is_symlink() {
+        if raw.to_str().is_none() || ft.is_symlink() {
             skipped.push(in_pack);
         } else if ft.is_dir() {
-            collect_files(pack_id, prefix, &e.path(), &rel_here, files, skipped);
+            collect_files(
+                pack_id,
+                leave_out,
+                prefix,
+                &e.path(),
+                &rel_here,
+                files,
+                skipped,
+            );
         } else if ft.is_file() {
             if rel.is_empty() && name == SKILL_FILE {
                 continue;
             }
             if !allowed_extension(&name) {
+                continue;
+            }
+            if left_out(leave_out, &name) {
+                skipped.push(in_pack);
                 continue;
             }
             if too_long(pack_id, &in_pack)
@@ -202,7 +247,8 @@ fn copy_file(from: &Path, to: &Path) -> Result<(), String> {
 }
 
 /// Licence files at the source root plus a `licenses/` folder, copied to the
-/// pack root. Returns their pack-relative names.
+/// pack root. Returns their pack-relative names. Links, oversized and
+/// non-text licence files go to `skipped`.
 fn copy_licenses(
     src_root: &Path,
     pack_id: &str,
@@ -216,8 +262,13 @@ fn copy_licenses(
         for e in entries {
             let name = e.file_name().to_string_lossy().into_owned();
             let upper = name.to_ascii_uppercase();
-            let is_file = e.file_type().is_ok_and(|t| t.is_file());
-            if is_file && LICENSE_PREFIXES.iter().any(|p| upper.starts_with(p)) {
+            if !LICENSE_PREFIXES.iter().any(|p| upper.starts_with(p)) {
+                continue;
+            }
+            let Ok(ft) = e.file_type() else { continue };
+            if ft.is_symlink() || e.file_name().to_str().is_none() {
+                skipped.push(name);
+            } else if ft.is_file() {
                 candidates.push((e.path(), name));
             }
         }
@@ -228,9 +279,11 @@ fn copy_licenses(
     }
     let mut out = Vec::new();
     for (from, rel) in candidates {
-        let small = fs::metadata(&from).is_ok_and(|m| m.len() <= MAX_FILE_BYTES);
-        let is_text = fs::read(&from).is_ok_and(|b| std::str::from_utf8(&b).is_ok());
-        if too_long(pack_id, &rel) || !small || !is_text {
+        // Size first, so an oversized file is never read into memory.
+        let usable = !too_long(pack_id, &rel)
+            && fs::symlink_metadata(&from).is_ok_and(|m| m.is_file() && m.len() <= MAX_FILE_BYTES)
+            && fs::read(&from).is_ok_and(|b| std::str::from_utf8(&b).is_ok());
+        if !usable {
             skipped.push(rel);
         } else {
             copy_file(&from, &dest.join(&rel))?;
@@ -240,7 +293,8 @@ fn copy_licenses(
     Ok(out)
 }
 
-/// Every regular file under `dir`, links reported as skipped.
+/// Every regular file under `dir`; links and names that are not valid UTF-8
+/// reported as skipped.
 fn walk_all(dir: &Path, rel: &str, files: &mut Vec<(PathBuf, String)>, skipped: &mut Vec<String>) {
     let Ok(rd) = fs::read_dir(dir) else {
         return;
@@ -248,9 +302,10 @@ fn walk_all(dir: &Path, rel: &str, files: &mut Vec<(PathBuf, String)>, skipped: 
     let mut entries: Vec<_> = rd.flatten().collect();
     entries.sort_by_key(|e| e.file_name());
     for e in entries {
-        let rel_here = format!("{rel}/{}", e.file_name().to_string_lossy());
+        let raw = e.file_name();
+        let rel_here = format!("{rel}/{}", raw.to_string_lossy());
         let Ok(ft) = e.file_type() else { continue };
-        if ft.is_symlink() {
+        if raw.to_str().is_none() || ft.is_symlink() {
             skipped.push(rel_here);
         } else if ft.is_dir() {
             walk_all(&e.path(), &rel_here, files, skipped);
@@ -262,13 +317,18 @@ fn walk_all(dir: &Path, rel: &str, files: &mut Vec<(PathBuf, String)>, skipped: 
 
 /// Copies the selected skills of `src_root` into `dest` and writes
 /// `dest/pack.json`. `overrides` maps skill id to the acts-on-computer mark
-/// and wins over the text scan.
+/// and wins over the text scan. `dest` must be missing or an empty folder.
 pub fn copy_pack(
     src_root: &Path,
     spec: &PackSpec,
     dest: &Path,
     overrides: &HashMap<String, bool>,
 ) -> Result<PackManifest, String> {
+    if let Ok(mut rd) = fs::read_dir(dest)
+        && rd.next().is_some()
+    {
+        return Err(format!("{} is not empty", dest.display()));
+    }
     fs::create_dir_all(dest).map_err(|e| format!("Could not create {}: {e}", dest.display()))?;
     let mut skills: Vec<SkillEntry> = Vec::new();
     let mut skipped: Vec<String> = Vec::new();
@@ -297,7 +357,15 @@ pub fn copy_pack(
 
         let mut files = Vec::new();
         if !is_root {
-            collect_files(&spec.id, &dir, &src_dir, "", &mut files, &mut skipped);
+            collect_files(
+                &spec.id,
+                &spec.leave_out,
+                &dir,
+                &src_dir,
+                "",
+                &mut files,
+                &mut skipped,
+            );
         }
         let skill_src = src_dir.join(SKILL_FILE);
         let mut broken = None;
@@ -413,6 +481,30 @@ pub fn tree_checksum(dir: &Path) -> String {
         .collect()
 }
 
+/// The lock file's shape: `{ "version": 1, "packs": [PackSpec, ...] }`.
+#[derive(Deserialize)]
+struct LockFile {
+    version: u32,
+    packs: Vec<PackSpec>,
+}
+
+/// Parses `skills.lock.json`, keeping the packs in file order. Fails on an
+/// unknown version or a pack id listed twice.
+pub fn load_lock(text: &str) -> Result<Vec<PackSpec>, String> {
+    let lock: LockFile =
+        serde_json::from_str(text).map_err(|e| format!("The lock file is not valid: {e}"))?;
+    if lock.version != 1 {
+        return Err(format!("Unknown lock file version {}.", lock.version));
+    }
+    let mut seen = HashSet::new();
+    for p in &lock.packs {
+        if !seen.insert(p.id.as_str()) {
+            return Err(format!("Pack {} is listed twice.", p.id));
+        }
+    }
+    Ok(lock.packs)
+}
+
 /// Reads `pack.json` from a vendored pack folder.
 pub fn read_manifest(pack_dir: &Path) -> Result<PackManifest, String> {
     let text = fs::read_to_string(pack_dir.join(MANIFEST_FILE))
@@ -457,6 +549,7 @@ mod tests {
             bundled: false,
             about: String::new(),
             checksum: String::new(),
+            leave_out: vec![],
         }
     }
 
@@ -518,6 +611,23 @@ mod tests {
     }
 
     #[test]
+    fn exclude_matches_whole_path_segments_only() {
+        let t = TempDir::new().unwrap();
+        skill(t.path(), "test", "t");
+        skill(t.path(), "test-audit", "ta");
+        skill(t.path(), "skills/in-progress/x", "x");
+        skill(t.path(), "skills/in-progress-done/y", "y");
+        let got = rels(select_skill_dirs(t.path(), &s(&["*"]), &s(&["test"])));
+        assert_eq!(got, vec!["test-audit"]);
+        let got = rels(select_skill_dirs(
+            t.path(),
+            &s(&["skills/*/*"]),
+            &s(&["skills/in-progress"]),
+        ));
+        assert_eq!(got, vec!["skills/in-progress-done/y"]);
+    }
+
+    #[test]
     fn skill_md_matched_case_sensitively() {
         let t = TempDir::new().unwrap();
         put(t.path(), "skills/a/skill.md", b"hello");
@@ -559,6 +669,38 @@ mod tests {
         assert!(out.path().join("p/skills/a/n.csv").is_file());
         assert!(!out.path().join("p/skills/a/run.sh").exists());
         assert!(!out.path().join("p/skills/a/pic.png").exists());
+    }
+
+    #[test]
+    fn left_out_extensions_are_skipped_and_listed() {
+        let t = TempDir::new().unwrap();
+        skill(t.path(), "skills/a", "a");
+        put(t.path(), "skills/a/data/big.csv", b"x");
+        put(t.path(), "skills/a/data/idx.JSON", b"x");
+        put(t.path(), "skills/a/notes.md", b"x");
+        let mut sp = spec("p", &["skills/*"]);
+        sp.leave_out = s(&["csv", "json"]);
+        let (out, m) = run(t.path(), &sp);
+        assert_eq!(m.skills[0].files, vec!["notes.md"]);
+        assert_eq!(
+            m.skipped,
+            vec!["skills/a/data/big.csv", "skills/a/data/idx.JSON"]
+        );
+        assert!(!out.path().join("p/skills/a/data").exists());
+        // SKILL.md is always copied.
+        sp.leave_out = s(&["md"]);
+        let (out, m) = run(t.path(), &sp);
+        assert!(out.path().join("p/skills/a/SKILL.md").is_file());
+        assert_eq!(m.skipped, vec!["skills/a/notes.md"]);
+    }
+
+    #[test]
+    fn leave_out_is_optional_and_omitted_when_empty() {
+        let j =
+            r#"{"id":"p","title":"T","repo":"o/r","commit":"c","select":["a"],"license":"MIT"}"#;
+        let sp: PackSpec = serde_json::from_str(j).unwrap();
+        assert!(sp.leave_out.is_empty());
+        assert!(!serde_json::to_string(&sp).unwrap().contains("leave_out"));
     }
 
     #[test]
@@ -767,22 +909,121 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs the downloaded packs folder"]
-    fn real_superpowers_pack_has_15_skills() {
-        let src = Path::new(
-            "/private/tmp/claude-501/-Users-mdshamirulislam-beluga/d1712dc0-93e3-4dba-937d-f8ef00c12fe5/scratchpad/packs/repos/obra__superpowers",
-        );
-        if !src.is_dir() {
+    fn select_ignores_unsafe_patterns_and_excludes() {
+        let t = TempDir::new().unwrap();
+        let root = t.path().join("repo");
+        skill(&root, "skills/a", "a");
+        skill(t.path(), "outside/b", "b");
+        for bad in [
+            "../outside/*",
+            "skills/../../outside/*",
+            "skills//*",
+            "skills/*/",
+            "",
+            "/skills/*",
+            "C:/skills/*",
+            "C:skills/*",
+            "skills\\*",
+        ] {
+            assert!(
+                select_skill_dirs(&root, &s(&[bad]), &[]).is_empty(),
+                "pattern {bad:?} should be ignored"
+            );
+        }
+        let abs = format!("{}/outside/*", t.path().display());
+        assert!(select_skill_dirs(&root, &s(&[&abs]), &[]).is_empty());
+        // An unsafe exclude is ignored, so it removes nothing.
+        let got = rels(select_skill_dirs(
+            &root,
+            &s(&["skills/*"]),
+            &s(&["../skills", "skills//a", "/skills", "C:/skills"]),
+        ));
+        assert_eq!(got, vec!["skills/a"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_file_name_is_skipped_and_listed() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let t = TempDir::new().unwrap();
+        skill(t.path(), "skills/a", "a");
+        put(t.path(), "skills/a/ok.md", b"x");
+        let odd = t
+            .path()
+            .join("skills/a")
+            .join(OsStr::from_bytes(b"bad\xff.md"));
+        if fs::write(&odd, b"x").is_err() {
+            // Some file systems (APFS) refuse such names; nothing to test.
             return;
         }
+        let (_out, m) = run(t.path(), &spec("p", &["skills/*"]));
+        assert_eq!(m.skills[0].files, vec!["ok.md"]);
+        assert_eq!(m.skipped.len(), 1);
+        assert!(m.skipped[0].starts_with("skills/a/bad"));
+    }
+
+    #[test]
+    fn oversized_license_is_skipped_and_listed() {
+        let t = TempDir::new().unwrap();
+        skill(t.path(), "skills/a", "a");
+        put(t.path(), "LICENSE", &vec![b'x'; 300_000]);
+        let (out, m) = run(t.path(), &spec("p", &["skills/*"]));
+        assert!(m.license_files.is_empty());
+        assert_eq!(m.skipped, vec!["LICENSE"]);
+        assert!(!out.path().join("p/LICENSE").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_root_license_is_skipped_and_listed() {
+        let t = TempDir::new().unwrap();
+        skill(t.path(), "skills/a", "a");
+        put(t.path(), "real-license.txt", b"MIT");
+        std::os::unix::fs::symlink(t.path().join("real-license.txt"), t.path().join("LICENSE"))
+            .unwrap();
+        let (out, m) = run(t.path(), &spec("p", &["skills/*"]));
+        assert!(m.license_files.is_empty());
+        assert_eq!(m.skipped, vec!["LICENSE"]);
+        assert!(!out.path().join("p/LICENSE").exists());
+    }
+
+    #[test]
+    fn copy_pack_refuses_a_non_empty_destination() {
+        let t = TempDir::new().unwrap();
+        skill(t.path(), "skills/a", "a");
         let out = TempDir::new().unwrap();
-        let m = copy_pack(
-            src,
-            &spec("superpowers", &["skills/*"]),
-            &out.path().join("superpowers"),
-            &HashMap::new(),
-        )
-        .unwrap();
-        assert_eq!(m.skills.len(), 15);
+        let dest = out.path().join("p");
+        put(&dest, "stale.md", b"old");
+        let err = copy_pack(t.path(), &spec("p", &["skills/*"]), &dest, &HashMap::new());
+        assert!(err.is_err());
+        assert!(!dest.join("skills").exists());
+        // An existing empty folder is fine.
+        let empty = out.path().join("q");
+        fs::create_dir_all(&empty).unwrap();
+        assert!(copy_pack(t.path(), &spec("p", &["skills/*"]), &empty, &HashMap::new()).is_ok());
+    }
+
+    #[test]
+    fn load_lock_reads_version_1_packs_in_order() {
+        let j = r#"{"version":1,"packs":[
+            {"id":"b","title":"B","repo":"o/b","commit":"c1","select":["skills/*"],"license":"MIT","bundled":true},
+            {"id":"a","title":"A","repo":"o/a","commit":"c2","select":["*"],"license":"MIT"}]}"#;
+        let packs = load_lock(j).unwrap();
+        assert_eq!(packs.len(), 2);
+        assert_eq!(packs[0].id, "b");
+        assert!(packs[0].bundled);
+        assert_eq!(packs[1].id, "a");
+        assert!(!packs[1].bundled);
+    }
+
+    #[test]
+    fn load_lock_rejects_bad_input() {
+        assert!(load_lock("not json").is_err());
+        assert!(load_lock(r#"{"version":2,"packs":[]}"#).is_err());
+        let dup = r#"{"version":1,"packs":[
+            {"id":"a","title":"A","repo":"o/a","commit":"c","select":["*"],"license":"MIT"},
+            {"id":"a","title":"A","repo":"o/a","commit":"c","select":["*"],"license":"MIT"}]}"#;
+        assert!(load_lock(dup).is_err());
     }
 }

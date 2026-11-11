@@ -1,0 +1,280 @@
+{
+  "packs": [
+    {
+      "about": "A software development method for coding agents built from composable skills: brainstorming, planning, test-first work, debugging and review.",
+      "bundled": true,
+      "checksum": "62a062f8ae5e89b9b93c06e887206eefeb06610a549aa3a278a68bcea4f6c637",
+      "commit": "22f0b463e7a5e579904dd6211a520321035526f7",
+      "exclude": [],
+      "id": "superpowers",
+      "license": "MIT",
+      "repo": "obra/superpowers",
+      "select": [
+        "skills/*"
+      ],
+      "title": "Superpowers"
+    },
+    {
+      "about": "Engineering workflow skills for coding agents covering each phase from spec and planning to building, testing, review and shipping.",
+      "bundled": true,
+      "checksum": "1ec0dc182de952ae0e9c99eebaa2c145f92146e29c21f03c62348b3791b4dc92",
+      "commit": "301b02b12bff98e4688e6984af6556802322bbde",
+      "exclude": [],
+      "id": "agent-skills",
+      "license": "MIT",
+      "repo": "addyosmani/agent-skills",
+      "select": [
+        "skills/*"
+      ],
+      "title": "Agent Skills"
+    },
+    {
+      "about": "Anthropic's example skills for tasks such as document creation, front-end design, art, testing and building MCP servers.",
+      "bundled": true,
+      "checksum": "12f66398512b2c7534a2c5205c21607801005ac04dce1159cb83b3e58e37e786",
+      "commit": "2c5958ecac7cee2b583967a2c4981d0f4a75c579",
+      "exclude": [
+        "template"
+      ],
+      "id": "anthropic",
+      "license": "Apache-2.0",
+      "repo": "anthropics/skills",
+      "select": [
+        "skills/*"
+      ],
+      "title": "Anthropic Skills"
+    },
+    {
+      "about": "Skills for designers and engineers on building user interfaces, with a focus on animation and interaction details.",
+      "bundled": true,
+      "checksum": "6b23d28b494b8dd588a9692f6ab02be658401cdb251ed4d42b97fb4ccf2d913c",
+      "commit": "715c1807e08c497cfd1dc4feb450a2a3300ef2a9",
+      "exclude": [],
+      "id": "emil",
+      "license": "MIT",
+      "repo": "emilkowalski/skills",
+      "select": [
+        "skills/*"
+      ],
+      "title": "Emil Kowalski"
+    },
+    {
+      "about": "Skills for full-stack developers covering languages, frameworks, infrastructure, testing and architecture.",
+      "bundled": true,
+      "checksum": "bde4a517d309fce89f739f53661fb5c2bf03bb88b08d842d1b2a37e13a72490d",
+      "commit": "078a25cc5bfd8011459be7b91d004e900c1d02d3",
+      "exclude": [],
+      "id": "engineer",
+      "license": "MIT",
+      "repo": "Jeffallan/claude-skills",
+      "select": [
+        "skills/*"
+      ],
+      "title": "Engineer Skills"
+    },
+    {
+      "about": "Role-based skills for coding agents, such as product review, architecture review, design review, code review, QA and release.",
+      "bundled": true,
+      "checksum": "cc2e87a22accd0d3b160b82ddf0c716b8f230bc05bdf6325a90bda476e9d54d2",
+      "commit": "f0cd9f8c4b453c1eadd714e4149174ee01179eae",
+      "exclude": [
+        "openclaw",
+        "qm",
+        "capy",
+        "browser-skills",
+        "test"
+      ],
+      "id": "gstack",
+      "license": "MIT",
+      "repo": "garrytan/gstack",
+      "select": [
+        ".",
+        "*"
+      ],
+      "title": "gstack"
+    },
+    {
+      "about": "A large collection of engineering skills for coding agents covering planning, testing, review, verification and many languages and frameworks.",
+      "bundled": true,
+      "checksum": "5ba50b12a14b88a3f6cb9fbd674d4096b42bf32d304c290b70e83e650722c326",
+      "commit": "d2ef2680594f9a17526a6e1a2e18b3d242c5d17b",
+      "exclude": [],
+      "id": "ecc",
+      "license": "MIT",
+      "repo": "affaan-m/ECC",
+      "select": [
+        "skills/*"
+      ],
+      "title": "ECC"
+    },
+    {
+      "about": "Small, composable engineering skills that Matt Pocock uses day to day, including planning, TypeScript and code quality.",
+      "bundled": true,
+      "checksum": "b77e25081594dce4cbebeeb028335e71af3ca3df8ff3f96b022345c5c152a041",
+      "commit": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
+      "exclude": [
+        "skills/in-progress"
+      ],
+      "id": "mattpocock",
+      "license": "MIT",
+      "repo": "mattpocock/skills",
+      "select": [
+        "skills/*/*"
+      ],
+      "title": "Matt Pocock"
+    },
+    {
+      "about": "A design vocabulary skill for coding agents for polishing, critiquing and auditing user interfaces.",
+      "bundled": true,
+      "checksum": "600e5ff0adbe29b71a79f7a732d02936d994dde06d5ad91304d4bee5ee95bea1",
+      "commit": "c1e0e5492fbb524f5df84d635ecfae7dc438ec45",
+      "exclude": [],
+      "id": "impeccable",
+      "license": "Apache-2.0",
+      "repo": "pbakaus/impeccable",
+      "select": [
+        "plugin/skills/*"
+      ],
+      "title": "Impeccable"
+    },
+    {
+      "about": "UI and UX design guidance for many platforms and frameworks, with reference data on styles, colours and typography.",
+      "bundled": true,
+      "checksum": "55e0679ce192b968f8902767da20607dba1465adf78b8054c41488f35c90e969",
+      "commit": "6ae86f61f520d6ca229d2f40e070410638c908c5",
+      "exclude": [],
+      "id": "ui-ux-pro-max",
+      "leave_out": [
+        "json",
+        "csv"
+      ],
+      "license": "MIT",
+      "repo": "nextlevelbuilder/ui-ux-pro-max-skill",
+      "select": [
+        ".claude/skills/*"
+      ],
+      "title": "UI UX Pro Max"
+    },
+    {
+      "about": "Skills from the Expo team for building, deploying, upgrading and debugging Expo apps.",
+      "bundled": true,
+      "checksum": "f4d626afcad1d8236379115b01e755e8d13734573c9d600d1c0146a54e7e39f4",
+      "commit": "a9e5bd3fa00b4e61f632e43f85da73aee1942582",
+      "exclude": [
+        "plugins/code-improver/tests"
+      ],
+      "id": "expo",
+      "license": "MIT",
+      "repo": "expo/skills",
+      "select": [
+        "plugins/*/skills/*"
+      ],
+      "title": "Expo"
+    },
+    {
+      "about": "React Native skills from Callstack, drawn from their work on production apps.",
+      "bundled": true,
+      "checksum": "1e66b7b6502eb62325623991531de3d32647e5f0510b55c1c3316033c04d101b",
+      "commit": "59e9d17446a248b21d86f078fcd0bd2d36db1ca4",
+      "exclude": [],
+      "id": "react-native",
+      "license": "MIT",
+      "repo": "callstackincubator/agent-skills",
+      "select": [
+        "skills/*"
+      ],
+      "title": "React Native"
+    },
+    {
+      "about": "Skills for working with Apollo GraphQL tools and technologies.",
+      "bundled": true,
+      "checksum": "d2137c9bed5de44cf58178dc3bed5270cce70815ebd2ce4ff8cb2e4a3cb05fc0",
+      "commit": "9dda1397730370aeb8df4ff8f2015c34c86b5003",
+      "exclude": [],
+      "id": "apollo",
+      "license": "MIT",
+      "repo": "apollographql/skills",
+      "select": [
+        "skills/*"
+      ],
+      "title": "Apollo GraphQL"
+    },
+    {
+      "about": "Skills for managing Python projects with uv, linting and formatting with Ruff, and type checking with ty.",
+      "bundled": true,
+      "checksum": "2fe5e4427a26361c67d6ebc66614eb86a957bc0ea84a8eaabadd33be2b0d6e35",
+      "commit": "855418fb9ebfada49a8345a5c3ada9db2cdc2419",
+      "exclude": [
+        "plugins/code-improver/tests"
+      ],
+      "id": "astral",
+      "license": "Apache-2.0 and MIT",
+      "repo": "astral-sh/agent-plugins",
+      "select": [
+        "plugins/*/skills/*"
+      ],
+      "title": "Astral"
+    },
+    {
+      "about": "Skills from a large plugin collection covering Python and JavaScript development, code review, testing, infrastructure and security.",
+      "bundled": true,
+      "checksum": "1bf45f8cdd3ed6ec181d792de3738313197738d059ad22e90ac541d874122003",
+      "commit": "9c61ab243def98f72da12abd41cfcf5bcd91af9d",
+      "exclude": [
+        "plugins/code-improver/tests"
+      ],
+      "id": "agents",
+      "license": "MIT",
+      "repo": "wshobson/agents",
+      "select": [
+        "plugins/*/skills/*"
+      ],
+      "title": "Agents"
+    },
+    {
+      "about": "Security analysis, testing and development skills from Trail of Bits.",
+      "bundled": false,
+      "checksum": "",
+      "commit": "e4dd0bb5b15535f7c5a0834187dffba6ac37e4ff",
+      "exclude": [
+        "plugins/code-improver/tests"
+      ],
+      "id": "trailofbits",
+      "license": "CC-BY-SA-4.0",
+      "repo": "trailofbits/skills",
+      "select": [
+        "plugins/*/skills/*"
+      ],
+      "title": "Trail of Bits"
+    },
+    {
+      "about": "Skills from Vercel Labs for deploying to Vercel, React and React Native practices, and web design guidelines.",
+      "bundled": false,
+      "checksum": "",
+      "commit": "1a2c79d4e6c4a2283dc2c614b6538cbe1ed5ca62",
+      "exclude": [],
+      "id": "vercel",
+      "license": "No license file",
+      "repo": "vercel-labs/agent-skills",
+      "select": [
+        "skills/*"
+      ],
+      "title": "Vercel"
+    },
+    {
+      "about": "Offensive security skills that describe attack techniques for authorised penetration testing and red-team work.",
+      "bundled": false,
+      "checksum": "",
+      "commit": "a8de813edc9f66f60d44cfe42d47750e89d9930b",
+      "exclude": [],
+      "id": "claude-red",
+      "license": "MIT",
+      "repo": "SnailSploit/Claude-Red",
+      "select": [
+        "Skills/*/*"
+      ],
+      "title": "Claude-Red"
+    }
+  ],
+  "version": 1
+}

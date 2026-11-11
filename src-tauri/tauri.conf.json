@@ -38,6 +38,7 @@
     },
     "category": "DeveloperTool",
     "shortDescription": "Desktop AI chat and coding assistant on your own OpenRouter account",
-    "license": "MIT"
+    "license": "MIT",
+    "resources": { "resources/skills/": "skills/" }
   }
 }

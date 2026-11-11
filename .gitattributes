@@ -3,3 +3,6 @@
 *.png binary
 *.ico binary
 *.icns binary
+
+# Vendored skill packs are copied byte-for-byte; never rewrite line endings.
+src-tauri/resources/skills/** -text -eol

@@ -4,6 +4,7 @@ version = "0.1.1"
 description = "Desktop chat app"
 authors = ["Beluga contributors"]
 edition = "2024"
+default-run = "beluga-desktop"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -13,6 +14,16 @@ edition = "2024"
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "beluga_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+# Developer tool, kept out of the app bundle: it builds only with
+# `--features vendor-tool`.
+[[bin]]
+name = "vendor-skills"
+path = "src/bin/vendor_skills.rs"
+required-features = ["vendor-tool"]
+
+[features]
+vendor-tool = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
