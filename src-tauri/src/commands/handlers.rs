@@ -169,9 +169,23 @@ pub async fn compact_chat(
     compact::compact_chat(&state, &chat_id, &model_id, keep.as_deref()).await
 }
 
+/// The dialog blocks until the user answers, so it runs off the async workers.
+async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, UiError> + Send + 'static,
+) -> Result<T, UiError> {
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|_| UiError::other("That did not finish. Try again."))?
+}
+
 #[tauri::command]
-pub async fn export_chat(state: S<'_>, chat_id: String, path: String) -> Result<(), UiError> {
-    export::export_chat(&state, &chat_id, &path)
+pub async fn export_chat_with_dialog(
+    state: S<'_>,
+    chat_id: String,
+    suggested_name: String,
+) -> Result<Option<String>, UiError> {
+    let s = state.inner().clone();
+    blocking(move || export::export_chat_with_dialog(&s, &chat_id, &suggested_name)).await
 }
 
 #[tauri::command]
@@ -277,4 +291,15 @@ pub async fn attach_folder_file(
     path: String,
 ) -> Result<AttachmentInput, UiError> {
     folder::attach_folder_file(&state, &chat_id, &path)
+}
+
+#[tauri::command]
+pub async fn choose_chat_folder(state: S<'_>, chat_id: String) -> Result<Option<String>, UiError> {
+    let s = state.inner().clone();
+    blocking(move || folder::choose_chat_folder(&s, &chat_id)).await
+}
+
+#[tauri::command]
+pub async fn approved_folders(state: S<'_>) -> Result<Vec<String>, UiError> {
+    folder::approved_folders(&state)
 }

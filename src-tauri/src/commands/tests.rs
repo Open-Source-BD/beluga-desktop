@@ -61,9 +61,29 @@ impl KeyStore for NoKeychain {
     }
 }
 
+/// Answers the system dialogs without a GUI: `pick` and `save` are what the
+/// user "chooses" next (`None` is a cancel).
+#[derive(Default)]
+struct FakeDialogs {
+    pick: Mutex<Option<std::path::PathBuf>>,
+    save: Mutex<Option<std::path::PathBuf>>,
+    asked_names: Mutex<Vec<String>>,
+}
+
+impl crate::dialogs::Dialogs for FakeDialogs {
+    fn pick_folder(&self) -> Option<std::path::PathBuf> {
+        self.pick.lock().unwrap().clone()
+    }
+    fn save_markdown(&self, file_name: &str) -> Option<std::path::PathBuf> {
+        self.asked_names.lock().unwrap().push(file_name.to_string());
+        self.save.lock().unwrap().clone()
+    }
+}
+
 struct Harness {
     state: Arc<AppState>,
     events: Arc<Recorder>,
+    dialogs: Arc<FakeDialogs>,
     _dir: tempfile::TempDir,
 }
 
@@ -86,6 +106,7 @@ fn harness_full(
     let events = Arc::new(Recorder::default());
     let http =
         HttpClients::from_builder(|| reqwest::Client::builder().no_proxy(), timeouts).unwrap();
+    let dialogs = Arc::new(FakeDialogs::default());
     let state = Arc::new(AppState::new(
         http,
         origin.to_string(),
@@ -94,10 +115,12 @@ fn harness_full(
         dir.path().to_path_buf(),
         builtin_skills.unwrap_or_else(|| dir.path().join("no-bundled-skills")),
         events.clone(),
+        dialogs.clone(),
     ));
     Harness {
         state,
         events,
+        dialogs,
         _dir: dir,
     }
 }
@@ -955,6 +978,9 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
         &id,
         Some(tree.path().to_str().unwrap().to_string()),
     )));
+    *h.dialogs.pick.lock().unwrap() = Some(tree.path().to_path_buf());
+    record(to(&folder::choose_chat_folder(&h.state, &id)));
+    record(to(&folder::approved_folders(&h.state)));
     let listed = folder::folder_files(&h.state, &id, "a");
     assert_eq!(listed.as_ref().map(|l| l.total), Ok(1));
     record(to(&listed));
@@ -981,6 +1007,10 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
     let exported = export::export_chat(&h.state, &id, file.to_str().unwrap());
     assert!(exported.is_ok(), "{exported:?}");
     record(to(&exported));
+    *h.dialogs.save.lock().unwrap() = Some(h._dir.path().join("dialog.md"));
+    record(to(&export::export_chat_with_dialog(
+        &h.state, &id, "My chat",
+    )));
     record(Value::String(std::fs::read_to_string(&file).unwrap()));
     let first = chats::get_messages(&h.state, &id).unwrap()[0].id.clone();
     record(to(&chats::rows_after(&h.state, &id, &first)));
@@ -2732,12 +2762,8 @@ fn registering_only_if_free_refuses_a_busy_chat_and_registers_a_free_one() {
 fn folder_chat(h: &Harness) -> (String, tempfile::TempDir) {
     let id = chats::create_chat(&h.state, "m/a").unwrap().id;
     let dir = tempfile::tempdir().unwrap();
-    folder::set_chat_folder(
-        &h.state,
-        &id,
-        Some(dir.path().to_str().unwrap().to_string()),
-    )
-    .unwrap();
+    *h.dialogs.pick.lock().unwrap() = Some(dir.path().to_path_buf());
+    folder::choose_chat_folder(&h.state, &id).unwrap();
     (id, dir)
 }
 
@@ -2769,13 +2795,128 @@ fn set_chat_folder_refuses_a_missing_path_and_a_file() {
         Err(UiError::other("That chat no longer exists."))
     );
 
-    // A folder is stored by its real path, and `None` clears it.
-    let ok = folder::set_chat_folder(&h.state, &id, Some(dir.path().to_str().unwrap().into()));
-    assert_eq!(ok, Ok(()));
-    let real = std::fs::canonicalize(dir.path()).unwrap();
-    assert_eq!(h.state.store.folder(&id).unwrap().as_deref(), real.to_str());
+    // `None` clears.
     assert_eq!(folder::set_chat_folder(&h.state, &id, None), Ok(()));
+}
+
+#[test]
+fn set_chat_folder_refuses_a_real_directory_the_user_never_picked() {
+    let h = signed_out("http://unused");
+    let id = chats::create_chat(&h.state, "m/a").unwrap().id;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_str().unwrap().to_string();
+    assert_eq!(
+        folder::set_chat_folder(&h.state, &id, Some(path.clone())),
+        Err(UiError::other("That folder could not be opened."))
+    );
     assert_eq!(h.state.store.folder(&id).unwrap(), None);
+
+    // After a pick (for one chat) it can be reused for another.
+    *h.dialogs.pick.lock().unwrap() = Some(dir.path().to_path_buf());
+    folder::choose_chat_folder(&h.state, &id).unwrap();
+    let other = chats::create_chat(&h.state, "m/a").unwrap().id;
+    assert_eq!(
+        folder::set_chat_folder(&h.state, &other, Some(path)),
+        Ok(())
+    );
+    let real = std::fs::canonicalize(dir.path()).unwrap();
+    assert_eq!(
+        h.state.store.folder(&other).unwrap().as_deref(),
+        real.to_str()
+    );
+}
+
+#[test]
+fn choose_chat_folder_stores_the_canonical_path_and_a_cancel_changes_nothing() {
+    let h = signed_out("http://unused");
+    let id = chats::create_chat(&h.state, "m/a").unwrap().id;
+    // A cancelled pick.
+    assert_eq!(folder::choose_chat_folder(&h.state, &id), Ok(None));
+    assert_eq!(h.state.store.folder(&id).unwrap(), None);
+    assert_eq!(folder::approved_folders(&h.state), Ok(vec![]));
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("sub")).unwrap();
+    // Picked through a non-canonical spelling.
+    let spelled = dir.path().join("sub").join("..").join("sub");
+    *h.dialogs.pick.lock().unwrap() = Some(spelled);
+    let real = std::fs::canonicalize(dir.path().join("sub")).unwrap();
+    let real = real.to_str().unwrap().to_string();
+    assert_eq!(
+        folder::choose_chat_folder(&h.state, &id),
+        Ok(Some(real.clone()))
+    );
+    assert_eq!(h.state.store.folder(&id).unwrap(), Some(real.clone()));
+    assert_eq!(folder::approved_folders(&h.state), Ok(vec![real]));
+
+    // A cancel afterwards leaves the stored folder alone.
+    *h.dialogs.pick.lock().unwrap() = None;
+    assert!(matches!(
+        folder::choose_chat_folder(&h.state, &id),
+        Ok(None)
+    ));
+    assert!(h.state.store.folder(&id).unwrap().is_some());
+    assert_eq!(
+        folder::choose_chat_folder(&h.state, "nope"),
+        Err(UiError::other("That chat no longer exists."))
+    );
+}
+
+#[test]
+fn approved_folders_are_listed_most_recent_first() {
+    let h = signed_out("http://unused");
+    let id = chats::create_chat(&h.state, "m/a").unwrap().id;
+    let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    for d in [&a, &b, &a] {
+        *h.dialogs.pick.lock().unwrap() = Some(d.path().to_path_buf());
+        folder::choose_chat_folder(&h.state, &id).unwrap();
+    }
+    let list = folder::approved_folders(&h.state).unwrap();
+    let real = |d: &tempfile::TempDir| {
+        std::fs::canonicalize(d.path())
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(list, vec![real(&a), real(&b)]);
+}
+
+#[test]
+fn export_with_a_cancelled_dialog_writes_nothing() {
+    let h = signed_out("http://unused");
+    let id = chats::create_chat(&h.state, "m/a").unwrap().id;
+    assert_eq!(
+        export::export_chat_with_dialog(&h.state, &id, "Chat"),
+        Ok(None)
+    );
+    assert_eq!(std::fs::read_dir(h._dir.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn export_with_a_choice_writes_the_file_and_returns_its_path() {
+    let h = signed_out("http://unused");
+    let id = chats::create_chat(&h.state, "m/a").unwrap().id;
+    let target = h._dir.path().join("out.md");
+    *h.dialogs.save.lock().unwrap() = Some(target.clone());
+    let got = export::export_chat_with_dialog(&h.state, &id, "a/b:c*?\\ chat");
+    assert_eq!(got, Ok(Some(target.to_str().unwrap().to_string())));
+    assert!(std::fs::read_to_string(&target).unwrap().starts_with("# "));
+    // The suggested name was sanitised, with an .md extension.
+    let asked = h.dialogs.asked_names.lock().unwrap().clone();
+    assert_eq!(asked, vec!["a_b_c___ chat.md".to_string()]);
+    // A choice without an extension gets .md.
+    *h.dialogs.save.lock().unwrap() = Some(h._dir.path().join("plain"));
+    let got = export::export_chat_with_dialog(&h.state, &id, "").unwrap();
+    assert_eq!(
+        got,
+        Some(h._dir.path().join("plain.md").to_str().unwrap().to_string())
+    );
+    assert_eq!(h.dialogs.asked_names.lock().unwrap()[1], "chat.md");
+    assert_eq!(
+        export::export_chat_with_dialog(&h.state, "nope", "x"),
+        Err(UiError::other("That chat no longer exists."))
+    );
 }
 
 #[test]

@@ -5,7 +5,7 @@ use super::{Result, StoreError};
 use rusqlite::{Connection, TransactionBehavior};
 
 /// The schema version this build knows.
-const LATEST: i64 = 2;
+const LATEST: i64 = 3;
 
 /// Exactly the tables the 0.1.x releases created (version 1).
 const V1: &str = "
@@ -51,6 +51,14 @@ CREATE TABLE switches (
 );
 ";
 
+/// Version 2 to 3: folders the user picked in a system dialog.
+const V2_TO_V3: &str = "
+CREATE TABLE approved_folders (
+    path TEXT PRIMARY KEY NOT NULL,
+    added_at INTEGER NOT NULL
+);
+";
+
 fn newer_database() -> StoreError {
     StoreError::SqliteFailure(
         rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_SCHEMA),
@@ -73,6 +81,10 @@ pub(super) fn migrate(conn: &mut Connection) -> Result<()> {
     }
     if version == 1 {
         tx.execute_batch(V1_TO_V2)?;
+        version = 2;
+    }
+    if version == 2 {
+        tx.execute_batch(V2_TO_V3)?;
     }
     tx.pragma_update(None, "user_version", LATEST)?;
     tx.commit()

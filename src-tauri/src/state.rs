@@ -1,6 +1,7 @@
 //! Shared app state behind the Tauri commands. Deliberately has no `Debug`
 //! impl: nothing here may ever format the key.
 
+use crate::dialogs::Dialogs;
 use crate::engine::{DirectEngine, Engine};
 use crate::secrets::{FileStore, KeyStore, KeychainStore, SecretError, StorageKind};
 use crate::skills::library::Library;
@@ -183,6 +184,8 @@ pub struct AppState {
     /// Every installed skill: bundled, installed and the user's own.
     pub library: Library,
     pub events: Arc<dyn EventSink>,
+    /// Opens the system folder and save dialogs.
+    pub dialogs: Arc<dyn Dialogs>,
     pub turns: Mutex<HashMap<String, RunningTurn>>,
     pub pending_sign_in: Mutex<Option<PendingSignIn>>,
     /// A validated key the keychain could not take, awaiting `resolve_key_storage`.
@@ -193,6 +196,7 @@ pub struct AppState {
 }
 
 impl AppState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         http: HttpClients,
         origin: String,
@@ -201,6 +205,7 @@ impl AppState {
         data_dir: PathBuf,
         builtin_skills: PathBuf,
         events: Arc<dyn EventSink>,
+        dialogs: Arc<dyn Dialogs>,
     ) -> Self {
         let keys = Arc::new(SharedKeyStore::new(key_store));
         let engine = Arc::new(DirectEngine::new(
@@ -218,6 +223,7 @@ impl AppState {
             library: Library::load(&builtin_skills, &data_dir.join(SKILLS_DIR)),
             data_dir,
             events,
+            dialogs,
             turns: Mutex::new(HashMap::new()),
             pending_sign_in: Mutex::new(None),
             pending_key: Mutex::new(None),
@@ -232,6 +238,7 @@ impl AppState {
         data_dir: PathBuf,
         builtin_skills: PathBuf,
         events: Arc<dyn EventSink>,
+        dialogs: Arc<dyn Dialogs>,
     ) -> Result<Self, String> {
         std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
         let store = Store::open(&data_dir.join(DB_FILE)).map_err(|e| e.to_string())?;
@@ -245,6 +252,7 @@ impl AppState {
             data_dir,
             builtin_skills,
             events,
+            dialogs,
         ))
     }
 

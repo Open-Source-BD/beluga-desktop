@@ -226,8 +226,8 @@ export const compactChat = (chatId: string, modelId: string, keep: string | null
   invoke<TurnResult>("compact_chat", { chatId, modelId, keep });
 
 /** Writes the chat as Markdown to `path`, an absolute `.md` path from a save dialog. */
-export const exportChat = (chatId: string, path: string) =>
-  invoke<void>("export_chat", { chatId, path });
+export const exportChatWithDialog = (chatId: string, suggestedName: string) =>
+  invoke<string | null>("export_chat_with_dialog", { chatId, suggestedName });
 
 export const stop = (chatId: string) => invoke<void>("stop", { chatId });
 
@@ -347,7 +347,20 @@ export interface FileList {
   cut: boolean;
 }
 
-/** Sets the chat's folder (an absolute path to an existing folder), or clears it with `null`. */
+/**
+ * The core opens the system folder dialog. Resolves with the chosen folder
+ * (now the chat's folder), or `null` when the user cancels.
+ */
+export const chooseChatFolder = (chatId: string) =>
+  invoke<string | null>("choose_chat_folder", { chatId });
+
+/** Folders the user has chosen before, most recent first. */
+export const approvedFolders = () => invoke<string[]>("approved_folders");
+
+/**
+ * Sets the chat's folder to one the user chose before (see `approvedFolders`);
+ * rejects for any other path. `null` clears it.
+ */
 export const setChatFolder = (chatId: string, path: string | null) =>
   invoke<void>("set_chat_folder", { chatId, path });
 

@@ -23,23 +23,48 @@ fn outside(message: String) -> UiError {
     UiError::other(&message)
 }
 
-/// Sets the chat's folder to the real path of `path`, or clears it.
+fn real_folder(path: &str) -> Result<String, UiError> {
+    let p = Path::new(path);
+    if !p.is_absolute() || !p.is_dir() {
+        return Err(cannot_open());
+    }
+    let real = std::fs::canonicalize(p).map_err(|_| cannot_open())?;
+    Ok(real.to_str().ok_or_else(cannot_open)?.to_string())
+}
+
+/// Sets the chat's folder to a folder the user picked earlier in a system
+/// dialog (`choose_chat_folder`), or clears it. Any other path is refused:
+/// the web view cannot name a folder of its own.
 pub fn set_chat_folder(s: &AppState, chat_id: &str, path: Option<String>) -> Result<(), UiError> {
     require_chat(s, chat_id)?;
     let stored = match path {
         None => None,
         Some(p) => {
-            let p = Path::new(&p);
-            if !p.is_absolute() || !p.is_dir() {
+            let real = real_folder(&p)?;
+            if !s.store.is_folder_approved(&real).map_err(local)? {
                 return Err(cannot_open());
             }
-            let real = std::fs::canonicalize(p).map_err(|_| cannot_open())?;
-            Some(real.to_str().ok_or_else(cannot_open)?.to_string())
+            Some(real)
         }
     };
     s.store
         .set_folder(chat_id, stored.as_deref())
         .map_err(local)
+}
+
+pub fn choose_chat_folder(s: &AppState, chat_id: &str) -> Result<Option<String>, UiError> {
+    require_chat(s, chat_id)?;
+    let Some(picked) = s.dialogs.pick_folder() else {
+        return Ok(None);
+    };
+    let real = real_folder(picked.to_str().ok_or_else(cannot_open)?)?;
+    s.store.approve_folder(&real).map_err(local)?;
+    s.store.set_folder(chat_id, Some(&real)).map_err(local)?;
+    Ok(Some(real))
+}
+
+pub fn approved_folders(s: &AppState) -> Result<Vec<String>, UiError> {
+    s.store.approved_folders().map_err(local)
 }
 
 fn root_of(s: &AppState, chat_id: &str) -> Result<Option<PathBuf>, UiError> {

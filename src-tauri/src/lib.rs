@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod brand;
 pub mod commands;
+pub mod dialogs;
 pub mod engine;
 pub mod folder;
 pub mod openrouter;
@@ -24,6 +25,7 @@ pub fn run() {
                 data_dir,
                 builtin_skills_dir(app.handle()),
                 Arc::new(app.handle().clone()),
+                Arc::new(dialogs::TauriDialogs(app.handle().clone())),
             )?;
             app.manage(Arc::new(state));
             // The window takes its title from the one place the name lives.
@@ -55,7 +57,7 @@ pub fn run() {
             h::take_user_message,
             h::rows_after,
             h::compact_chat,
-            h::export_chat,
+            h::export_chat_with_dialog,
             h::stop,
             h::skills_status,
             h::list_packs,
@@ -68,6 +70,8 @@ pub fn run() {
             h::deactivate_skill,
             h::chat_fullness,
             h::set_chat_folder,
+            h::choose_chat_folder,
+            h::approved_folders,
             h::folder_files,
             h::attach_folder_file,
         ])

@@ -427,7 +427,7 @@ mod tests {
 
     #[test]
     fn read_bounded_refuses_a_reader_longer_than_the_limit() {
-        let long = vec![7u8; 11];
+        let long = [7u8; 11];
         assert_eq!(read_bounded(&long[..], 10), None);
         assert_eq!(read_bounded(&long[..10], 10), Some(vec![7u8; 10]));
         assert_eq!(read_bounded(&b""[..], 10), Some(vec![]));

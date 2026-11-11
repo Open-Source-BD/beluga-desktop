@@ -39,6 +39,38 @@ impl Store {
             .flatten())
     }
 
+    /// Remembers a folder the user picked in a dialog. Picking it again
+    /// makes it the most recent.
+    pub fn approve_folder(&self, path: &str) -> Result<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM approved_folders WHERE path = ?1", [path])?;
+        tx.execute(
+            "INSERT INTO approved_folders (path, added_at) VALUES (?1, ?2)",
+            params![path, super::now()],
+        )?;
+        tx.commit()
+    }
+
+    pub fn is_folder_approved(&self, path: &str) -> Result<bool> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT 1 FROM approved_folders WHERE path = ?1",
+                [path],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    }
+
+    /// Approved folders, most recently approved first.
+    pub fn approved_folders(&self) -> Result<Vec<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT path FROM approved_folders ORDER BY rowid DESC")?;
+        stmt.query_map([], |r| r.get(0))?.collect()
+    }
+
     pub fn set_folder(&self, chat_id: &str, folder: Option<&str>) -> Result<()> {
         self.conn().execute(
             "UPDATE chats SET folder = ?2 WHERE id = ?1",

@@ -194,7 +194,7 @@ fn a_v1_database_upgrades_in_place() {
     let path = v1_file(&dir);
     assert_eq!(version(&path), 1);
     let s = Store::open(&path).unwrap();
-    assert_eq!(version(&path), 2);
+    assert_eq!(version(&path), 3);
     let chats = s.list_chats().unwrap();
     assert_eq!(chats.len(), 2);
     let a = s.get_messages("chat-a").unwrap();
@@ -233,16 +233,16 @@ fn opening_twice_is_a_no_op() {
     let path = v1_file(&dir);
     drop(Store::open(&path).unwrap());
     let s = Store::open(&path).unwrap();
-    assert_eq!(version(&path), 2);
+    assert_eq!(version(&path), 3);
     assert_eq!(s.get_messages("chat-a").unwrap().len(), 2);
 }
 
 #[test]
-fn a_new_database_is_created_at_version_2() {
+fn a_new_database_is_created_at_version_3() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("new.db");
     drop(Store::open(&path).unwrap());
-    assert_eq!(version(&path), 2);
+    assert_eq!(version(&path), 3);
     let s = Store::in_memory().unwrap();
     let c = s.create_chat("m/a").unwrap();
     assert!(s.active_skills(&c.id).unwrap().is_empty());
@@ -254,14 +254,14 @@ fn a_newer_database_is_refused_and_left_untouched() {
     let path = dir.path().join("future.db");
     rusqlite::Connection::open(&path)
         .unwrap()
-        .execute_batch("CREATE TABLE future (x INTEGER); PRAGMA user_version = 3;")
+        .execute_batch("CREATE TABLE future (x INTEGER); PRAGMA user_version = 4;")
         .unwrap();
     let err = Store::open(&path).err().expect("must be refused");
     assert_eq!(
         err.to_string(),
         "This database was made by a newer version of the app."
     );
-    assert_eq!(version(&path), 3);
+    assert_eq!(version(&path), 4);
     let conn = rusqlite::Connection::open(&path).unwrap();
     let tables: i64 = conn
         .query_row(
@@ -445,4 +445,36 @@ fn delete_from_and_fix_summary_clears_a_summary_that_described_deleted_rows_in_t
     s.delete_from_and_fix_summary(&c.id, &m1.id).unwrap();
     assert!(s.get_messages(&c.id).unwrap().is_empty());
     assert_eq!(s.summary(&c.id).unwrap(), None);
+}
+
+#[test]
+fn a_v2_database_upgrades_to_v3_and_keeps_its_chats() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = v1_file(&dir);
+    drop(Store::open(&path).unwrap());
+    // Put it back to what a version 2 build left behind.
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch("DROP TABLE approved_folders; PRAGMA user_version = 2;")
+        .unwrap();
+    drop(conn);
+    let s = Store::open(&path).unwrap();
+    assert_eq!(version(&path), 3);
+    assert_eq!(s.list_chats().unwrap().len(), 2);
+    assert_eq!(s.approved_folders().unwrap(), Vec::<String>::new());
+}
+
+#[test]
+fn approved_folders_survive_reopening_the_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("a.db");
+    let s = Store::open(&path).unwrap();
+    s.approve_folder("/one").unwrap();
+    s.approve_folder("/two").unwrap();
+    s.approve_folder("/one").unwrap();
+    assert!(s.is_folder_approved("/two").unwrap());
+    assert!(!s.is_folder_approved("/three").unwrap());
+    drop(s);
+    let s = Store::open(&path).unwrap();
+    assert!(s.is_folder_approved("/one").unwrap());
+    assert_eq!(s.approved_folders().unwrap(), vec!["/one", "/two"]);
 }

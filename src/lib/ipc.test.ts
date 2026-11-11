@@ -75,6 +75,13 @@ describe("ipc", () => {
       { chatId: "c", modelId: "m/a", draftChars: 12 },
     ],
     [
+      "chooseChatFolder",
+      () => ipc.chooseChatFolder("c"),
+      "choose_chat_folder",
+      { chatId: "c" },
+    ],
+    ["approvedFolders", () => ipc.approvedFolders(), "approved_folders", undefined],
+    [
       "setChatFolder",
       () => ipc.setChatFolder("c", "/home/me/proj"),
       "set_chat_folder",
@@ -175,16 +182,16 @@ describe("ipc", () => {
     ]);
   });
 
-  it("compactChat passes keep (null when not given) and exportChat passes the path", async () => {
+  it("compactChat passes keep (null when not given) and exportChatWithDialog passes only a suggested name", async () => {
     const result: ipc.TurnResult = { status: "done", reason: null, error: null };
     invoke.mockResolvedValue(result);
     await expect(ipc.compactChat("c", "m/a", "the plan")).resolves.toEqual(result);
     await ipc.compactChat("c", "m/a");
-    await ipc.exportChat("c", "/tmp/chat.md");
+    await ipc.exportChatWithDialog("c", "My chat");
     expect(invoke.mock.calls).toEqual([
       ["compact_chat", { chatId: "c", modelId: "m/a", keep: "the plan" }],
       ["compact_chat", { chatId: "c", modelId: "m/a", keep: null }],
-      ["export_chat", { chatId: "c", path: "/tmp/chat.md" }],
+      ["export_chat_with_dialog", { chatId: "c", suggestedName: "My chat" }],
     ]);
   });
 

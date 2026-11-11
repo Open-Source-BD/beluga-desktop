@@ -76,3 +76,41 @@ pub fn export_chat(s: &AppState, chat_id: &str, path: &str) -> Result<(), UiErro
     let text = markdown(s, chat_id)?;
     std::fs::write(path, text).map_err(|_| UiError::other(CANNOT_SAVE))
 }
+
+/// A file name for the save dialog: path separators and characters Windows
+/// forbids become `_`, and `.md` is added.
+fn dialog_file_name(suggested: &str) -> String {
+    let cleaned: String = suggested
+        .chars()
+        .map(|c| {
+            if c.is_control() || "/\\:*?\"<>|".contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let cleaned = cleaned.trim().trim_matches('.');
+    let stem = if cleaned.is_empty() { "chat" } else { cleaned };
+    format!("{stem}.md")
+}
+
+/// The core opens the save dialog; on a choice the chat is written there and
+/// the path returned. `None` when the user cancels. The web view never names
+/// the path.
+pub fn export_chat_with_dialog(
+    s: &AppState,
+    chat_id: &str,
+    suggested_name: &str,
+) -> Result<Option<String>, UiError> {
+    require_chat(s, chat_id)?;
+    let Some(mut path) = s.dialogs.save_markdown(&dialog_file_name(suggested_name)) else {
+        return Ok(None);
+    };
+    if path.extension().is_none() {
+        path.set_extension("md");
+    }
+    let path = path.to_str().ok_or_else(|| UiError::other(CANNOT_SAVE))?;
+    export_chat(s, chat_id, path)?;
+    Ok(Some(path.to_string()))
+}
