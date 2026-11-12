@@ -36,7 +36,7 @@ const SKIPPED_DIRS: [&str; 5] = ["node_modules", "target", "dist", "build", ".gi
 /// The entries under `base` (not `base` itself), in a stable order, with
 /// paths relative to `base`. Stops once more than `max_files` files are met
 /// and reports that as the second value. Never follows links.
-fn walk(base: &Path, max_files: usize) -> (Vec<FileEntry>, bool) {
+pub(crate) fn walk(base: &Path, max_files: usize) -> (Vec<FileEntry>, bool) {
     let walker = ignore::WalkBuilder::new(base)
         .hidden(true)
         .git_ignore(true)
@@ -188,7 +188,7 @@ pub fn read_regular(real: &Path, limit: u64) -> Option<Vec<u8>> {
 }
 
 /// The largest file `read_file` returns: the biggest attachment allowed.
-const MAX_READ_BYTES: u64 = 5_000_000;
+pub const MAX_READ_BYTES: u64 = 5_000_000;
 
 pub fn read_file(root: &Path, rel: &str) -> Result<Vec<u8>, String> {
     let path = resolve(root, rel)?;

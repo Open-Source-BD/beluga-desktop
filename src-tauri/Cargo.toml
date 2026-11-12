@@ -54,6 +54,10 @@ flate2 = "1.1.11"
 tar = "0.4.46"
 zip = { version = "9.5.1", default-features = false, features = ["deflate"] }
 ignore = "0.4.34"
+globset = "0.4.21"
+grep-searcher = "0.1.17"
+grep-regex = "0.1.14"
+grep-matcher = "0.1.9"
 
 [dev-dependencies]
 wiremock = "0.6"

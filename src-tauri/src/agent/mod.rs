@@ -31,4 +31,8 @@ pub struct ToolOutcome {
 }
 
 pub mod paths;
+pub mod plan;
+pub mod read;
+pub mod schema;
+pub mod search;
 pub mod secrets;
