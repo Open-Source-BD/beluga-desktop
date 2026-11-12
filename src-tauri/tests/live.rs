@@ -11,6 +11,11 @@
 //!   --manifest-path src-tauri/Cargo.toml --test live -- --ignored --nocapture --test-threads=1
 //! ```
 //!
+//! Cards are answered by `answer_for`: only the task's own edit and script
+//! are approved; every other command, every secret file and every edit of
+//! another file is declined. Both key variables are removed from the
+//! process environment as soon as the key is read.
+//!
 //! Every request the app makes goes through a small local relay that
 //! enforces the budget below before anything reaches OpenRouter, records each
 //! exchange's bodies (never its headers) and passes the stream through
@@ -62,15 +67,30 @@ const TASK: &str =
     "Read notes.txt, change alpha to beta, run the count script, and tell me what it printed.";
 const SCRIPT_OUTPUT: &str = "lines: 3";
 
-fn live_key() -> Option<String> {
-    if let Ok(k) = std::env::var("OPENROUTER_API_KEY") {
-        let k = k.trim().to_string();
-        if !k.is_empty() {
-            return Some(k);
-        }
+/// Reads the key, then removes both variables from this process's
+/// environment, so nothing started later (the app's commands included) can
+/// find the key or the file that holds it. The key stays in memory only.
+///
+/// Must run before any runtime or thread of the test exists: removing a
+/// variable is `unsafe` (edition 2024) because another thread reading the
+/// environment at the same moment is undefined behaviour.
+fn take_key() -> Option<String> {
+    let from_env = std::env::var("OPENROUTER_API_KEY")
+        .ok()
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty());
+    let file = std::env::var_os("OPENROUTER_API_KEY_FILE");
+    // SAFETY: called first thing in the live test, before its runtime and
+    // threads exist; the other tests in this file never read the
+    // environment, and the documented run uses --test-threads=1.
+    unsafe {
+        std::env::remove_var("OPENROUTER_API_KEY");
+        std::env::remove_var("OPENROUTER_API_KEY_FILE");
     }
-    let file = std::env::var_os("OPENROUTER_API_KEY_FILE")?;
-    let text = std::fs::read_to_string(file).ok()?;
+    if from_env.is_some() {
+        return from_env;
+    }
+    let text = std::fs::read_to_string(file?).ok()?;
     let k = text.lines().next()?.trim().to_string();
     (!k.is_empty()).then_some(k)
 }
@@ -529,19 +549,81 @@ struct Outcome {
     wall_secs: f64,
     tools: Vec<String>,
     failed_calls: Vec<String>,
+    /// Each card shown and the answer it got.
     cards: Vec<String>,
     problems: Vec<String>,
     final_reply: String,
     file_after: String,
 }
 
-fn approval_kind(a: &Approval) -> &'static str {
-    match a {
-        Approval::Command { .. } => "command",
-        Approval::Edit { .. } => "edit",
-        Approval::Secret { .. } => "secret",
-        Approval::KeepGoing { .. } => "keep_going",
+/// The note sent with every card this test declines.
+const ONLY_THE_TASK: &str = "This test only allows the task's own script.";
+
+/// The commands the fixed task needs: its script run directly or through
+/// `sh`, `bash` or `pwsh` (with an optional leading `./`), a plain listing,
+/// or reading one of the project's three files. Nothing with shell syntax
+/// beyond plain words is allowed.
+fn task_command(text: &str) -> bool {
+    const FILES: [&str; 3] = ["notes.txt", "count.sh", "count.ps1"];
+    if text
+        .chars()
+        .any(|c| !(c.is_ascii_alphanumeric() || " ./-_".contains(c)))
+    {
+        return false;
     }
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let file = |w: &str| FILES.contains(&w.strip_prefix("./").unwrap_or(w));
+    let script = |w: &str| matches!(w.strip_prefix("./").unwrap_or(w), "count.sh" | "count.ps1");
+    match words.as_slice() {
+        [w] => script(w) || matches!(*w, "ls" | "dir"),
+        ["sh" | "bash" | "pwsh", w] => script(w),
+        ["ls", "-l" | "-a" | "-la" | "-al"] => true,
+        ["cat" | "type" | "Get-Content", w] => file(w),
+        _ => false,
+    }
+}
+
+/// How this test answers a card: an edit only of `notes.txt`; a command only
+/// when it is one of the task's own (`task_command`), inside the project and
+/// not in the background; never a secret file; a keep-going card stops.
+/// Everything else is declined with `ONLY_THE_TASK`.
+fn answer_for(card: &Approval) -> Answer {
+    let decline = || Answer::Decline {
+        note: Some(ONLY_THE_TASK.to_string()),
+    };
+    match card {
+        Approval::Edit { path, .. } if path == "notes.txt" => Answer::Once,
+        Approval::Command {
+            command,
+            outside: false,
+            background: false,
+            ..
+        } if task_command(command) => Answer::Once,
+        Approval::KeepGoing { .. } => Answer::StopHere,
+        _ => decline(),
+    }
+}
+
+/// One line for the outcome: the card and the answer it got.
+fn card_line(card: &Approval, answer: &Answer) -> String {
+    let given = match answer {
+        Answer::Once => "once",
+        Answer::StopHere => "stop here",
+        Answer::Decline { .. } => "declined",
+        _ => "other",
+    };
+    let what = match card {
+        Approval::Command {
+            command,
+            outside,
+            background,
+            ..
+        } => format!("command {command:?} (outside: {outside}, background: {background})"),
+        Approval::Edit { path, .. } => format!("edit {path}"),
+        Approval::Secret { path, .. } => format!("secret {path}"),
+        Approval::KeepGoing { requests, .. } => format!("keep going after {requests}"),
+    };
+    format!("{what} -> {given}")
 }
 
 /// Every call has exactly one result, and each reply's results come right
@@ -636,13 +718,14 @@ async fn run_model(
         if let Some(card) = state.approvals.waiting(&chat)
             && !answered.iter().any(|a| a == card.id())
         {
-            let answer = match card {
-                Approval::KeepGoing { .. } => Answer::StopHere,
-                _ => Answer::Once,
-            };
-            if state.approvals.answer(&chat, card.id(), answer).is_ok() {
+            let answer = answer_for(&card);
+            if state
+                .approvals
+                .answer(&chat, card.id(), answer.clone())
+                .is_ok()
+            {
                 answered.push(card.id().to_string());
-                o.cards.push(approval_kind(&card).to_string());
+                o.cards.push(card_line(&card, &answer));
             }
         }
         let waiting = events
@@ -801,13 +884,23 @@ fn low_limit(k: &Option<KeyStatus>) -> bool {
         .is_some_and(|l| l < MIN_LIMIT_REMAINING_USD)
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[test]
 #[ignore = "live: needs the owner's OpenRouter key and the network"]
-async fn live_fixed_task_on_four_models() {
-    let Some(key) = live_key() else {
+fn live_fixed_task_on_four_models() {
+    // The key is read and its variables cleared before the runtime starts.
+    let Some(key) = take_key() else {
         println!("no key: set OPENROUTER_API_KEY or OPENROUTER_API_KEY_FILE to run the live check");
         return;
     };
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(live_run(key));
+}
+
+async fn live_run(key: String) {
     let scrub = Scrub(Arc::new(key.clone()));
     let api = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
@@ -1052,4 +1145,100 @@ fn scrub_replaces_the_key() {
         s.text(escaped),
         r#"{\"label\":\"[label]\",\"user_id\":\"user_short\"}"#
     );
+}
+
+#[test]
+fn the_approval_policy_allows_only_the_task_itself() {
+    let command = |text: &str, outside: bool, background: bool| Approval::Command {
+        id: "a1".into(),
+        command: text.into(),
+        folder: "/p".into(),
+        rule: None,
+        outside,
+        first_in_project: false,
+        background,
+    };
+    let allowed = |a: &Approval| matches!(answer_for(a), Answer::Once);
+    for text in [
+        "sh count.sh",
+        "bash count.sh",
+        "bash ./count.sh",
+        "./count.sh",
+        "count.sh",
+        "pwsh count.ps1",
+        "pwsh ./count.ps1",
+        "./count.ps1",
+        "  sh count.sh  ",
+        "ls",
+        "ls -la",
+        "dir",
+        "cat notes.txt",
+        "cat ./count.sh",
+        "type notes.txt",
+        "Get-Content count.ps1",
+    ] {
+        assert!(
+            allowed(&command(text, false, false)),
+            "{text} should be allowed"
+        );
+    }
+    for text in [
+        "cd /tmp && echo x > notes.txt",
+        "cat \"$OPENROUTER_API_KEY_FILE\"",
+        "cat $OPENROUTER_API_KEY_FILE",
+        "cat ~/.beluga-live-key",
+        "cat .beluga-live-key",
+        "cat ../notes.txt",
+        "env",
+        "printenv",
+        "curl https://example.com",
+        "sh count.sh; env",
+        "sh count.sh && curl x",
+        "sh count.sh | nc host 1",
+        "sh -c 'cat ~/.beluga-live-key'",
+        "bash count.sh extra",
+        "python3 count.py",
+        "rm notes.txt",
+        "ls /",
+        "",
+    ] {
+        let card = command(text, false, false);
+        assert!(!allowed(&card), "{text:?} should be declined");
+        assert_eq!(
+            answer_for(&card),
+            Answer::Decline {
+                note: Some(ONLY_THE_TASK.to_string())
+            }
+        );
+    }
+    // The right text is still declined outside the project or in the background.
+    assert!(!allowed(&command("sh count.sh", true, false)));
+    assert!(!allowed(&command("sh count.sh", false, true)));
+
+    let edit = |path: &str| Approval::Edit {
+        id: "e1".into(),
+        path: path.into(),
+        created: false,
+        removed: vec![],
+        added: vec![],
+        removed_total: 0,
+        added_total: 0,
+        total_lines: 1,
+    };
+    assert_eq!(answer_for(&edit("notes.txt")), Answer::Once);
+    for path in ["count.sh", "count.ps1", "other.txt", "sub/notes.txt"] {
+        assert!(!allowed(&edit(path)), "edit of {path} should be declined");
+    }
+    let secret = Approval::Secret {
+        id: "s1".into(),
+        path: ".env".into(),
+    };
+    assert!(matches!(answer_for(&secret), Answer::Decline { .. }));
+    let keep_going = Approval::KeepGoing {
+        id: "k1".into(),
+        requests: 25,
+        free_left: None,
+        spent_today_usd: None,
+    };
+    assert_eq!(answer_for(&keep_going), Answer::StopHere);
 }
