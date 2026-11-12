@@ -31,6 +31,13 @@ describe("Help", () => {
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("lists the keyboard shortcuts", () => {
+    render(<Help onClose={vi.fn()} />);
+    for (const key of ["Enter", "Shift+Enter", "Cmd/Ctrl+Enter", "Up arrow", "Esc", "/", "@", "Cmd/Ctrl+N"]) {
+      expect(screen.getByText(key, { selector: "kbd" })).toBeInTheDocument();
+    }
+  });
 });
 
 describe("Usage", () => {

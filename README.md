@@ -18,7 +18,7 @@ No subscription. Start on free models, pay only for what you use.
 
 ---
 
-> **Early preview.** This is version 0.1, the chat foundation. It is tested by an automated suite on macOS, Windows and Linux, but it is young software: expect rough edges and please [report what you find](https://github.com/shamirul-007/beluga-desktop/issues). "Beluga" is a working name and may change.
+> **Early preview.** This is version 0.2: the chat foundation plus commands and skills. It is tested by an automated suite on macOS, Windows and Linux, but it is young software: expect rough edges and please [report what you find](https://github.com/shamirul-007/beluga-desktop/issues). "Beluga" is a working name and may change.
 
 ## Why Beluga
 
@@ -41,7 +41,12 @@ What works in this version:
 | **Streaming chat** | Replies appear as they are written. Stop a reply, retry an interrupted one, rename and delete chats. History is saved on your computer. |
 | **Live model picker** | The model list is fetched from OpenRouter, grouped into Free and Paid, with prices per million tokens. No model names are hard-coded. |
 | **Free-request gauge** | Fifty marks, one spent per request, with the reset time and your spend this month. It warns at ten left and explains your options at zero. |
-| **Attachments** | Attach text files and, for models that can read them, images. |
+| **Attachments** | Attach text files and, for models that can read them, images. Paste an image, drop files on the conversation, or paste a long text (4,000 characters or more) as a file chip. |
+| **`/` menu** | Type `/` in the message box for commands (`/new`, `/model`, `/skills`, `/usage`, `/compact`, `/export`, `/settings`, `/help`) and skills. Picking a skill switches it on for that chat. |
+| **`@` files** | Choose a project folder for a chat, then type `@` to attach a file from it. Files are read by the app and never from outside the chosen folder. |
+| **Skills screen** | Turn skills and whole packs on or off, read what a skill does, add your own from a folder, a zip or a GitHub address, and install optional extra packs. |
+| **Message actions** | Copy any message, copy a code block, retry a reply (optionally with another model), and edit and resend a message. Up arrow in an empty box edits your last message; a message sent while a reply is running waits in line; Esc stops a reply. |
+| **Bundled skill packs** | Fifteen skill packs for planning, test-first work, debugging, review and design are included; 21 skills are on by default. See [Bundled skill packs](#bundled-skill-packs). |
 | **Light, dark and system modes** | Follows your operating system by default. |
 
 ## Download
@@ -127,7 +132,7 @@ A one-time top-up of $10 therefore raises the daily free limit twentyfold, and t
 
 ## Privacy and security
 
-- **No telemetry, no analytics, no Beluga server.** The only host the app contacts is `openrouter.ai`.
+- **No telemetry, no analytics, no Beluga server.** The app contacts `openrouter.ai`. It contacts GitHub (`github.com`, `codeload.github.com`, `api.github.com`) only when you install an extra skill pack or add skills from a GitHub address, and then only to download what you asked for.
 - **Your key stays on your computer**, in the system keychain. It is handled only by the Rust core; the web-based interface cannot read it.
 - **Your chats stay on your computer**, in a local database in the app's data folder.
 - **Your messages go to OpenRouter** and the model provider you choose, under [OpenRouter's privacy terms](https://openrouter.ai/privacy).
@@ -137,17 +142,50 @@ Found a security problem? Please report it privately through [GitHub security ad
 
 ## Roadmap
 
-Version 0.1 is the first of five planned stages.
+Version 0.2 is the second of six planned stages.
 
 | Stage | What it adds | Status |
 |---|---|---|
 | 1 | Sign-in, key storage, chat, model picker, gauge, appearance modes | **Released as 0.1** |
-| 2 | Work on a project folder: read and edit files, run commands with your approval, spend limits | Planned |
-| 3 | Agent skills: planning, test-first development, debugging, code review and design guidance, pre-installed | Planned |
-| 4 | Skill store with verified packs, and tested "Recommended" models | Planned |
-| 5 | Signed installers and automatic updates | Planned |
+| 2 | Commands and skills: the `/` menu, `@` files, the Skills screen, bundled skill packs, message actions | **Released as 0.2** |
+| 3 | Work on a project folder: read and edit files, run commands with your approval, spend limits | Planned |
+| 4 | Agent skills that act on their own: planning, test-first development, debugging, code review and design guidance | Planned |
+| 5 | Skill store with verified packs, and tested "Recommended" models | Planned |
+| 6 | Signed installers and automatic updates | Planned |
 
 The full design is in [`docs/superpowers/specs`](docs/superpowers/specs/2026-11-11-beluga-desktop-design.md).
+
+## Bundled skill packs
+
+Beluga ships these skill packs, copied unchanged from their authors' repositories at a fixed commit, and credits each below. Skills are plain instruction files: Beluga never runs anything inside a pack. The packs and their licenses are listed in [`skills.lock.json`](skills.lock.json).
+
+| Pack | Repository | License |
+|---|---|---|
+| Superpowers | [obra/superpowers](https://github.com/obra/superpowers) | MIT |
+| Agent Skills | [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) | MIT |
+| Anthropic Skills | [anthropics/skills](https://github.com/anthropics/skills) | Apache-2.0 |
+| Emil Kowalski | [emilkowalski/skills](https://github.com/emilkowalski/skills) | MIT |
+| Engineer Skills | [Jeffallan/claude-skills](https://github.com/Jeffallan/claude-skills) | MIT |
+| gstack | [garrytan/gstack](https://github.com/garrytan/gstack) | MIT |
+| ECC | [affaan-m/ECC](https://github.com/affaan-m/ECC) | MIT |
+| Matt Pocock | [mattpocock/skills](https://github.com/mattpocock/skills) | MIT |
+| Impeccable | [pbakaus/impeccable](https://github.com/pbakaus/impeccable) | Apache-2.0 |
+| UI UX Pro Max | [nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) | MIT |
+| Expo | [expo/skills](https://github.com/expo/skills) | MIT |
+| React Native | [callstackincubator/agent-skills](https://github.com/callstackincubator/agent-skills) | MIT |
+| Apollo GraphQL | [apollographql/skills](https://github.com/apollographql/skills) | MIT |
+| Astral | [astral-sh/agent-plugins](https://github.com/astral-sh/agent-plugins) | Apache-2.0 and MIT |
+| Agents | [wshobson/agents](https://github.com/wshobson/agents) | MIT |
+
+Three more packs are optional. They are not in the installer; you can install them from the Skills screen, which shows their license and any warning first:
+
+| Pack | Repository | License |
+|---|---|---|
+| Trail of Bits | [trailofbits/skills](https://github.com/trailofbits/skills) | CC-BY-SA-4.0 |
+| Vercel | [vercel-labs/agent-skills](https://github.com/vercel-labs/agent-skills) | No license file in the repository |
+| Claude-Red | [SnailSploit/Claude-Red](https://github.com/SnailSploit/Claude-Red) | MIT |
+
+Each pack keeps its own license file inside the app. **Settings → About → Open-source licenses** shows them.
 
 ## Build from source
 
@@ -185,7 +223,7 @@ src-tauri/src/
   commands/     the typed commands the interface may call
 src/
   lib/ipc.ts    the only bridge between interface and core
-  features/     sign-in, shell, chat, models, gauge, settings
+  features/     sign-in, shell, chat, models, gauge, settings, commands, mentions, skills
 ```
 
 All network access, key handling and storage live in the Rust core. The interface can only call a fixed set of typed commands, which is what keeps the key out of the web layer.

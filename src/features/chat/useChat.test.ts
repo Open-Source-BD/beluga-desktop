@@ -189,4 +189,28 @@ describe("useChat", () => {
     expect(result.current.streamingText).toBe("secret");
     expect(result.current.status).toBe("streaming");
   });
+
+  it("regenerate answers the last message again with regenerate true, on the given or last model", async () => {
+    ipc.getMessages.mockResolvedValue([msg("u", "user", "q"), msg("a", "assistant", "old")]);
+    const { result } = renderHook(() => useChat("a"));
+    await waitFor(() => expect(result.current.messages).toHaveLength(2));
+    act(() => result.current.regenerate("m2"));
+    expect(ipc.retryTurn).toHaveBeenCalledWith("a", "m2", expect.any(Function), true);
+    expect(result.current.status).toBe("streaming");
+    ipc.getMessages.mockResolvedValue([msg("u", "user", "q"), msg("a2", "assistant", "new")]);
+    await act(async () => finish(DONE));
+    await waitFor(() => expect(result.current.status).toBe("idle"));
+    expect(result.current.messages[1].text).toBe("new");
+    act(() => result.current.regenerate());
+    expect(ipc.retryTurn).toHaveBeenLastCalledWith("a", "m2", expect.any(Function), true);
+  });
+
+  it("regenerate does nothing without a model, and not while a reply is running", async () => {
+    const { result } = renderHook(() => useChat("a"));
+    act(() => result.current.regenerate());
+    expect(ipc.retryTurn).not.toHaveBeenCalled();
+    act(() => void result.current.send("hi", [], "m1"));
+    act(() => result.current.regenerate("m2"));
+    expect(ipc.retryTurn).not.toHaveBeenCalled();
+  });
 });

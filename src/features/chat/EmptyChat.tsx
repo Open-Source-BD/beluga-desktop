@@ -1,7 +1,21 @@
 import type { ReactNode } from "react";
 
-/** The empty state: the greeting above the message box, which arrives as children. */
-export default function EmptyChat({ children }: { children: ReactNode }) {
+/** A suggested first message; picking it only fills the message box. */
+export interface Starter {
+  label: string;
+  hint: string;
+  onPick: () => void;
+}
+
+interface Props {
+  /** The message box, shown under the greeting. */
+  children: ReactNode;
+  /** Shown under the box; empty or absent shows nothing. */
+  starters?: Starter[];
+}
+
+/** The empty state: the greeting above the message box (children), then the starter actions. */
+export default function EmptyChat({ children, starters = [] }: Props) {
   return (
     <div className="empty">
       <div className="col">
@@ -11,6 +25,18 @@ export default function EmptyChat({ children }: { children: ReactNode }) {
         </p>
       </div>
       {children}
+      {starters.length > 0 && (
+        <ul className="col starts" aria-label="Ways to start">
+          {starters.map((s) => (
+            <li key={s.label}>
+              <button type="button" className="start" onClick={s.onPick}>
+                <span className="start-w">{s.label}</span>
+                <span className="start-s">{s.hint}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

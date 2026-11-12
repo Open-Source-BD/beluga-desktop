@@ -53,3 +53,10 @@
   outline: 2px solid var(--sonar);
   outline-offset: 1px;
 }
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 8px;
+}

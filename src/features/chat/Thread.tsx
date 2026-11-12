@@ -1,9 +1,10 @@
-import { useLayoutEffect, useRef } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import type { StoredMessage, UiError } from "../../lib/ipc";
-import { PencilIcon } from "../shell/icons";
 import ErrorNotice from "./ErrorNotice";
 import { shouldFollow } from "./follow";
+import JumpToLatest from "./JumpToLatest";
 import Markdown from "./Markdown";
+import MessageActions from "./MessageActions";
 import type { ChatStatus } from "./useChat";
 
 interface Props {
@@ -16,10 +17,18 @@ interface Props {
   notSent?: boolean;
   /** Puts a user message back in the box for editing; omitted, no pencil shows. */
   onEdit?: (message: StoredMessage) => void;
+  /** Answers the latest reply again (Retry in its row); omitted, the row has no Retry. */
+  onRetryReply?: () => void;
+  /** Opens the model picker to answer the latest reply again with another model. */
+  onRetryWithModel?: () => void;
+  /** The retry after a failure or an interruption. */
   onRetry: () => void;
   onSignInAgain: () => void;
   onPickModel: () => void;
 }
+
+/** A message's local date and time. */
+const when = (m: StoredMessage) => new Date(m.created_at * 1000).toLocaleString();
 
 export default function Thread({
   messages,
@@ -29,14 +38,19 @@ export default function Thread({
   error,
   notSent = false,
   onEdit,
+  onRetryReply,
+  onRetryWithModel,
   onRetry,
   onSignInAgain,
   onPickModel,
 }: Props) {
+  const timeId = useId();
+  const [away, setAway] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const following = useRef(true);
   const streaming = status === "streaming";
   const last = messages.filter((m) => m.kind === "message").pop();
+  const latestReply = last?.role === "assistant" ? last : undefined;
   const canEdit = onEdit !== undefined && !streaming && pendingUser === null;
   const showInterrupted =
     !streaming && (status === "interrupted" || last?.interrupted === true);
@@ -47,7 +61,15 @@ export default function Thread({
     if (el && following.current) el.scrollTop = el.scrollHeight;
   });
 
+  const jump = () => {
+    const el = scroller.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    following.current = true;
+    setAway(false);
+  };
+
   return (
+    <div className="thread-wrap">
     <div
       className="thread"
       ref={scroller}
@@ -58,6 +80,7 @@ export default function Thread({
           el.clientHeight,
           el.scrollHeight,
         );
+        setAway(!following.current);
       }}
     >
       <div className="col thread-col">
@@ -67,17 +90,10 @@ export default function Thread({
               {m.text}
             </p>
           ) : m.role === "user" ? (
-            <div key={m.id} className="me">
-              {canEdit && (
-                <button
-                  type="button"
-                  className="me-edit"
-                  aria-label="Edit message"
-                  onClick={() => onEdit(m)}
-                >
-                  <PencilIcon size={12} />
-                </button>
-              )}
+            <div key={m.id} className="me" title={when(m)} aria-describedby={`${timeId}-${m.id}`}>
+              <span id={`${timeId}-${m.id}`} className="sr-only">
+                {when(m)}
+              </span>
               {m.text}
               {m.attachments.length > 0 && (
                 <ul className="me-files" aria-label="Attachments">
@@ -88,10 +104,27 @@ export default function Thread({
                   ))}
                 </ul>
               )}
+              <MessageActions
+                role="user"
+                message={m}
+                isLatest={false}
+                onEdit={canEdit ? () => onEdit(m) : undefined}
+              />
             </div>
           ) : (
-            <div key={m.id} className="reply">
+            <div key={m.id} className="reply" title={when(m)} aria-describedby={`${timeId}-${m.id}`}>
+              <span id={`${timeId}-${m.id}`} className="sr-only">
+                {when(m)}
+              </span>
               <Markdown text={m.text} />
+              <MessageActions
+                role="assistant"
+                message={m}
+                isLatest={m === latestReply}
+                running={streaming || showInterrupted || pendingUser !== null}
+                onRetry={onRetryReply}
+                onRetryWithModel={onRetryWithModel}
+              />
             </div>
           ),
         )}
@@ -126,6 +159,8 @@ export default function Thread({
           />
         )}
       </div>
+    </div>
+    {away && <JumpToLatest onClick={jump} />}
     </div>
   );
 }

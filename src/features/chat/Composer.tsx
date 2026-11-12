@@ -1,9 +1,11 @@
 import {
+  useEffect,
   useImperativeHandle,
   useLayoutEffect,
   useRef,
   useState,
   type ChangeEvent,
+  type ClipboardEvent,
   type KeyboardEvent,
   type ReactNode,
   type Ref,
@@ -15,8 +17,13 @@ import {
   CANNOT_READ_IMAGES,
   MAX_ATTACHMENTS,
   MAX_ATTACHMENTS_MESSAGE,
+  MAX_TEXT_BYTES,
   readAttachment,
 } from "./attachments";
+import { clearDraft, loadDraft, saveDraft } from "./drafts";
+import { PASTE_AS_FILE_CHARS, pastedTextAttachment, pastedTextOf } from "./paste";
+
+const DRAFT_DELAY_MS = 300;
 
 /** Extra instructions that travel with a send, set by whoever called `submit`. */
 export interface SendIntent {
@@ -34,6 +41,10 @@ export interface ComposerControl {
   addAttachment(attachment: AttachmentInput): boolean;
   /** Shows `message` where attachment refusals appear. */
   refuse(message: string): void;
+  /** Reads and adds files as the Attach button does (dropped or pasted files), with the same limits and refusals. */
+  addFiles(files: File[]): Promise<void>;
+  /** Puts the caret in the box. */
+  focus(): void;
 }
 
 interface Props {
@@ -52,6 +63,15 @@ interface Props {
   /** Sees a key first; returning true means it was handled and the box ignores it. */
   onKeyIntercept?: (e: KeyboardEvent<HTMLTextAreaElement>) => boolean;
   controlRef?: Ref<ComposerControl>;
+  /**
+   * Keeps the unsent text per chat: the chat's id, or null for a new chat. Left
+   * out, nothing is saved or restored.
+   */
+  draftId?: string | null;
+  /** Enter adds a new line and Cmd/Ctrl+Enter sends. */
+  sendWithModifier?: boolean;
+  /** Up arrow in an empty box. */
+  onEmptyUp?: () => void;
   /** Rendered just above the box (a popover menu), anchored to it. */
   menu?: ReactNode;
   /** Extra attributes for the text field (combobox wiring for a menu). */
@@ -76,6 +96,9 @@ export default function Composer({
   onTextChange,
   onKeyIntercept,
   controlRef,
+  draftId,
+  sendWithModifier = false,
+  onEmptyUp,
   menu,
   fieldAria,
   onStop,
@@ -101,6 +124,21 @@ export default function Composer({
   const caretAt = useRef<number | null>(null);
   const lastCaret = useRef(0);
 
+  // Drafts: `draftKey` is the chat the text belongs to; saving waits for a pause in typing.
+  const drafting = draftId !== undefined;
+  const draftKey = useRef<string | null | undefined>(undefined);
+  const latest = useRef(text);
+  latest.current = text;
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const persist = (id: string | null, value: string) =>
+    value === "" ? clearDraft(id) : saveDraft(id, value);
+  const flushDraft = () => {
+    if (draftTimer.current === null) return;
+    clearTimeout(draftTimer.current);
+    draftTimer.current = null;
+    if (draftKey.current !== undefined) persist(draftKey.current, latest.current);
+  };
+
   const change = (next: string, caret: number) => {
     lastCaret.current = caret;
     setText(next);
@@ -110,6 +148,30 @@ export default function Composer({
     imageBlocked && !refusals.includes(CANNOT_READ_IMAGES)
       ? [...refusals, CANNOT_READ_IMAGES]
       : refusals;
+
+  // Arriving in a chat loads its draft (after saving what was typed in the one left).
+  useLayoutEffect(() => {
+    if (!drafting) return;
+    flushDraft();
+    draftKey.current = draftId;
+    const saved = loadDraft(draftId);
+    caretAt.current = saved.length;
+    change(saved, saved.length);
+    // `change` and `flushDraft` only touch refs and state setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftId, drafting]);
+
+  useEffect(() => {
+    if (!drafting || draftKey.current !== draftId) return;
+    if (draftTimer.current !== null) clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(() => {
+      draftTimer.current = null;
+      persist(draftId, text);
+    }, DRAFT_DELAY_MS);
+    // A timer still waiting when the box goes away is saved by the flush below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text]);
+  useEffect(() => flushDraft, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useLayoutEffect(() => {
     const el = field.current;
@@ -138,14 +200,15 @@ export default function Composer({
     } finally {
       setSending(false);
     }
+    if (draftTimer.current !== null) clearTimeout(draftTimer.current);
+    draftTimer.current = null;
+    if (draftKey.current !== undefined) clearDraft(draftKey.current);
     change("", 0);
     setFiles([]);
     setRefusals([]);
   };
 
-  const attach = async (e: ChangeEvent<HTMLInputElement>) => {
-    const chosen = Array.from(e.target.files ?? []);
-    e.target.value = "";
+  const addFiles = async (chosen: File[]) => {
     const accepted: AttachmentInput[] = [];
     const refused: string[] = [];
     const refuse = (m: string) => {
@@ -165,28 +228,71 @@ export default function Composer({
     setRefusals(refused);
   };
 
+  const attach = (e: ChangeEvent<HTMLInputElement>) => {
+    const chosen = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    return addFiles(chosen);
+  };
+
+  /** Adds a chip as `addAttachment` does; false when refused (the refusal is shown). */
+  const addChip = (a: AttachmentInput): boolean => {
+    const refused =
+      files.length >= MAX_ATTACHMENTS
+        ? MAX_ATTACHMENTS_MESSAGE
+        : a.mime.startsWith("image/") && !acceptsImages
+          ? CANNOT_READ_IMAGES
+          : null;
+    if (refused) {
+      setRefusals([refused]);
+      return false;
+    }
+    setFiles((cur) => [...cur, a].slice(0, MAX_ATTACHMENTS));
+    setRefusals([]);
+    return true;
+  };
+
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const data = e.clipboardData;
+    const images = Array.from(data.files ?? []).filter((f) => f.type.startsWith("image/"));
+    if (images.length > 0) {
+      e.preventDefault();
+      void addFiles(images);
+      return;
+    }
+    const pasted = data.getData("text");
+    if (pasted.length < PASTE_AS_FILE_CHARS) return;
+    const chip = pastedTextAttachment(pasted, files.map((f) => f.name));
+    // Too big for a text attachment: let it land in the box rather than lose it.
+    if (new TextEncoder().encode(pasted).length > MAX_TEXT_BYTES) return;
+    e.preventDefault();
+    addChip(chip);
+  };
+
+  /** Removes a pasted-text chip and puts its text in the box at the caret. */
+  const putInMessage = (index: number) => {
+    const chip = files[index];
+    const body = chip && pastedTextOf(chip);
+    const el = field.current;
+    if (body === null || body === undefined || !el) return;
+    const from = el.selectionStart ?? text.length;
+    const to = el.selectionEnd ?? from;
+    const next = text.slice(0, from) + body + text.slice(to);
+    setFiles((cur) => cur.filter((_, j) => j !== index));
+    caretAt.current = from + body.length;
+    change(next, from + body.length);
+    el.focus();
+  };
+
   useImperativeHandle(controlRef, () => ({
     setText(next, caret = next.length) {
       caretAt.current = caret;
       change(next, caret);
     },
     submit,
-    addAttachment(a) {
-      const refused =
-        files.length >= MAX_ATTACHMENTS
-          ? MAX_ATTACHMENTS_MESSAGE
-          : a.mime.startsWith("image/") && !acceptsImages
-            ? CANNOT_READ_IMAGES
-            : null;
-      if (refused) {
-        setRefusals([refused]);
-        return false;
-      }
-      setFiles((cur) => [...cur, a].slice(0, MAX_ATTACHMENTS));
-      setRefusals([]);
-      return true;
-    },
+    addAttachment: addChip,
     refuse: (message) => setRefusals([message]),
+    addFiles,
+    focus: () => field.current?.focus(),
   }));
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -199,9 +305,27 @@ export default function Composer({
       onStop?.();
       return;
     }
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+    if (
+      e.key === "ArrowUp" &&
+      text === "" &&
+      onEmptyUp &&
+      !e.shiftKey &&
+      !e.altKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.nativeEvent.isComposing
+    ) {
       e.preventDefault();
-      void submit();
+      onEmptyUp();
+      return;
+    }
+    if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+      // Either Enter sends and Cmd/Ctrl+Enter does too, or only Cmd/Ctrl+Enter sends.
+      const send = sendWithModifier ? e.metaKey || e.ctrlKey : !e.shiftKey;
+      if (send) {
+        e.preventDefault();
+        void submit();
+      }
     }
   };
 
@@ -225,6 +349,11 @@ export default function Composer({
           {files.map((f, i) => (
             <li key={`${f.name}-${i}`} className="attach-chip">
               <span className="attach-name">{f.name}</span>
+              {pastedTextOf(f) !== null && (
+                <button type="button" className="attach-put" onClick={() => putInMessage(i)}>
+                  Put in the message
+                </button>
+              )}
               <button
                 type="button"
                 className="attach-remove"
@@ -260,6 +389,7 @@ export default function Composer({
           if (caret !== lastCaret.current) change(e.currentTarget.value, caret);
         }}
         onKeyDown={onKeyDown}
+        onPaste={onPaste}
         {...fieldAria}
       />
       <div className="composer-controls">

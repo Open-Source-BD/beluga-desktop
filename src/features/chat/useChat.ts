@@ -67,6 +67,11 @@ export interface UseChat extends ChatState {
    * `modelId` overrides the model of the previous send.
    */
   retry(modelId?: string | null): void;
+  /**
+   * Answers the last user message again, replacing the stored reply (a new
+   * request). `modelId` overrides the model of the previous send.
+   */
+  regenerate(modelId?: string | null): void;
 }
 
 /**
@@ -221,6 +226,17 @@ export function useChat(
     [chatId, send, start],
   );
 
+  const regenerate = useCallback<UseChat["regenerate"]>(
+    (modelId) => {
+      if (!chatId) return;
+      const model = modelId ?? lastModel.current[chatId];
+      if (!model) return;
+      const id = chatId;
+      start(id, model, null, (onEvent) => retryTurn(id, model, onEvent, true));
+    },
+    [chatId, start],
+  );
+
   const compact = useCallback<UseChat["compact"]>(
     (modelId, onOutcome, keep) => {
       if (!chatId) return;
@@ -239,5 +255,5 @@ export function useChat(
     [chatId, start],
   );
 
-  return { ...current, send, stop, reload: reloadSelected, retry, compact };
+  return { ...current, send, stop, reload: reloadSelected, retry, regenerate, compact };
 }

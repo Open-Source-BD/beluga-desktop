@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import Composer, { type ComposerControl, type SendIntent } from "../chat/Composer";
 import EmptyChat from "../chat/EmptyChat";
 import ConfirmEdit from "../chat/ConfirmEdit";
@@ -41,9 +41,29 @@ import {
   type StoredMessage,
 } from "../../lib/ipc";
 import Settings from "../settings/Settings";
+import { readSendWithModifier } from "../settings/sendKey";
 import Sidebar from "./Sidebar";
 import "./shell.css";
 import "../chat/chat.css";
+
+/** Suggested first messages for an empty chat; each only fills the box with its skill. */
+const STARTERS = [
+  {
+    label: "Plan a feature before writing it",
+    hint: "asks you questions, then writes a step-by-step plan",
+    skill: "superpowers:brainstorming",
+  },
+  {
+    label: "Find and fix a bug",
+    hint: "reproduces it first, then fixes the cause",
+    skill: "superpowers:systematic-debugging",
+  },
+  {
+    label: "Review my recent changes",
+    hint: "checks for mistakes and security problems",
+    skill: "agent-skills:code-review-and-quality",
+  },
+];
 
 /** A message waiting for the running reply to finish. */
 interface Queue {
@@ -72,6 +92,10 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     useModels();
   const [showSettings, setShowSettings] = useState(false);
   const [showSkills, setShowSkills] = useState(false);
+  const [sendWithModifier, setSendWithModifier] = useState(readSendWithModifier);
+  const [dropping, setDropping] = useState(false);
+  /** "Retry with another model…" opened the picker: the next choice also answers again. */
+  const regenerateOnPick = useRef(false);
   const [pendingFile, setPendingFile] = useState<AttachmentInput | null>(null);
 
   const [queued, setQueued] = useState<Record<string, Queue>>({});
@@ -238,6 +262,69 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   };
 
   const pickModel = () => setPickerOpen(true);
+  const retryWithAnotherModel = () => {
+    regenerateOnPick.current = true;
+    setPickerOpen(true);
+  };
+  const chooseModelFor = (id: string) => {
+    chooseFromPicker(id);
+    if (regenerateOnPick.current) {
+      regenerateOnPick.current = false;
+      chat.regenerate(id);
+    }
+  };
+  const changePickerOpen = (open: boolean) => {
+    if (!open) regenerateOnPick.current = false;
+    setPickerOpen(open);
+  };
+
+  // Up arrow in an empty box: edit the latest user message.
+  const editLatest = () => {
+    if (chat.status === "streaming" || chat.pendingUser !== null) return;
+    const latest = chat.messages.filter((m) => m.kind === "message" && m.role === "user").pop();
+    if (latest) void editMessage(latest);
+  };
+
+  // Cmd/Ctrl+N starts a new chat.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        select(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  const dragHasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
+  const drag = {
+    onDragOver: (e: DragEvent) => {
+      if (!dragHasFiles(e)) return;
+      e.preventDefault();
+      setDropping(true);
+    },
+    onDragLeave: (e: DragEvent) => {
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false);
+    },
+    onDrop: (e: DragEvent) => {
+      if (!dragHasFiles(e)) return;
+      e.preventDefault();
+      setDropping(false);
+      void control.current?.addFiles(Array.from(e.dataTransfer.files));
+    },
+  };
+
+  const startWith = (skillId: string) => () => {
+    control.current?.setText(`/${skillId} `);
+    control.current?.focus();
+  };
+  // A suggestion needs its skill to be usable now (on, in a pack that is on, not broken).
+  const starters = STARTERS.filter((s) => skillList.rows.some((r) => r.id === s.skill)).map((s) => ({
+    label: s.label,
+    hint: s.hint,
+    onPick: startWith(s.skill),
+  }));
 
   const control = useRef<ComposerControl>(null);
   const actions = useCommandActions({
@@ -325,6 +412,9 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     )}
     <Composer
       controlRef={control}
+      draftId={selectedId}
+      sendWithModifier={sendWithModifier}
+      onEmptyUp={editLatest}
       menu={menus.menu}
       fieldAria={menus.fieldAria}
       onKeyIntercept={menus.onKeyIntercept}
@@ -345,10 +435,10 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
             models={models}
             loadFailed={modelsFailed}
             value={modelId}
-            onChange={chooseFromPicker}
+            onChange={chooseModelFor}
             onRetry={() => loadModels(true)}
             open={pickerOpen}
-            onOpenChange={setPickerOpen}
+            onOpenChange={changePickerOpen}
           />
         ),
       }}
@@ -409,9 +499,10 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
         <Settings
           onBack={() => setShowSettings(false)}
           onSignedOut={() => onSignInAgain?.()}
+          onSendKeyChange={setSendWithModifier}
         />
       ) : (
-        <section className="main">
+        <section className={dropping ? "main dropping" : "main"} {...drag}>
           <header className="head">
             <span className="ttl">{selected?.title ?? "New chat"}</span>
             {selectedId && fullness !== null && <Fullness percent={fullness} />}
@@ -424,7 +515,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
             </div>
           </header>
           {selectedId === null ? (
-            <EmptyChat>
+            <EmptyChat starters={starters}>
               {startError && (
                 <div className="col">
                   <ErrorNotice
@@ -447,6 +538,8 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
                 error={chat.error}
                 notSent={chat.unsent !== null}
                 onEdit={(m) => void editMessage(m)}
+                onRetryReply={() => chat.regenerate(modelId)}
+                onRetryWithModel={retryWithAnotherModel}
                 onRetry={() => chat.retry(modelId)}
                 onSignInAgain={() => onSignInAgain?.()}
                 onPickModel={pickModel}

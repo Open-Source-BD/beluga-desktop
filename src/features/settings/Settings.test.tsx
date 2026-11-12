@@ -88,4 +88,26 @@ describe("Settings", () => {
     await userEvent.click(screen.getByRole("button", { name: "Back to Settings" }));
     expect(screen.getByRole("button", { name: "Open-source licenses" })).toBeInTheDocument();
   });
+
+  it("has a 'Send with Cmd/Ctrl+Enter' switch stored in localStorage", async () => {
+    localStorage.clear();
+    const onSendKeyChange = vi.fn();
+    render(<Settings onBack={vi.fn()} onSignedOut={vi.fn()} onSendKeyChange={onSendKeyChange} />);
+    const sw = screen.getByRole("switch", { name: "Send with Cmd/Ctrl+Enter" });
+    expect(sw).toHaveAttribute("aria-checked", "false");
+    await userEvent.click(sw);
+    expect(sw).toHaveAttribute("aria-checked", "true");
+    expect(localStorage.getItem("sendWithModifier")).toBe("true");
+    expect(onSendKeyChange).toHaveBeenCalledWith(true);
+    await userEvent.click(sw);
+    expect(localStorage.getItem("sendWithModifier")).toBe("false");
+    expect(onSendKeyChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("starts the switch from the stored setting", () => {
+    localStorage.setItem("sendWithModifier", "true");
+    render(<Settings onBack={vi.fn()} onSignedOut={vi.fn()} />);
+    expect(screen.getByRole("switch", { name: "Send with Cmd/Ctrl+Enter" })).toHaveAttribute("aria-checked", "true");
+    localStorage.clear();
+  });
 });
