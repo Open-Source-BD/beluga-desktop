@@ -8,6 +8,7 @@ import Queued from "../chat/Queued";
 import { useFullness } from "../chat/useFullness";
 import { toUiError } from "../chat/errors";
 import { useChatCreation } from "../chat/useChatCreation";
+import { dragHasFiles } from "../../app/dropGuard";
 import { discardDraft } from "../chat/drafts";
 import ModelPicker from "../models/ModelPicker";
 import { chooseModel } from "../models/defaultModel";
@@ -302,7 +303,6 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const dragHasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
   // A dialog open over the conversation takes no drops.
   const modalOpen = (e: DragEvent) => e.currentTarget.querySelector('[role="dialog"]') !== null;
   const drag = {

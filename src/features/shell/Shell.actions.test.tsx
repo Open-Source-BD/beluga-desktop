@@ -394,4 +394,40 @@ describe("Shell drops outside the conversation", () => {
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByLabelText("Attachments")).toBeNull();
   });
+
+  const drop = (el: Element, type: "dragover" | "drop", kind: "files" | "text") => {
+    const dataTransfer =
+      kind === "files"
+        ? { types: ["Files"], files: [new File(["a"], "a.txt", { type: "text/plain" })] }
+        : { types: ["text/plain"], files: [] };
+    const e = type === "drop" ? createEvent.drop(el, { dataTransfer }) : createEvent.dragOver(el, { dataTransfer });
+    fireEvent(el, e);
+    return e.defaultPrevented;
+  };
+
+  it("leaves a text drag on the message box to the browser, so text can be moved and dropped in", async () => {
+    render(<Guarded />);
+    await openChat();
+    const field = await box();
+    expect(drop(field, "dragover", "text")).toBe(false);
+    expect(drop(field, "drop", "text")).toBe(false);
+    expect(screen.queryByLabelText("Attachments")).toBeNull();
+  });
+
+  it("prevents a file drag on the message box and still attaches the file", async () => {
+    render(<Guarded />);
+    await openChat();
+    const field = await box();
+    expect(drop(field, "dragover", "files")).toBe(true);
+    expect(drop(field, "drop", "files")).toBe(true);
+    expect(await screen.findByText("a.txt")).toBeInTheDocument();
+  });
+
+  it("prevents a text drag on the sidebar", async () => {
+    render(<Guarded />);
+    await openChat();
+    const side = document.querySelector(".side") as Element;
+    expect(drop(side, "dragover", "text")).toBe(true);
+    expect(drop(side, "drop", "text")).toBe(true);
+  });
 });
