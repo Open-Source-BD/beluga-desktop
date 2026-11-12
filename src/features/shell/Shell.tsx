@@ -456,10 +456,12 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   const editMessage = async (message: StoredMessage) => {
     if (!selectedId || running || card) return;
     const latest = chat.messages.filter((m) => m.kind === "message" && m.role === "user").pop();
-    if (latest?.id === message.id) return startEdit(message);
+    const at = chat.messages.findIndex((m) => m.id === message.id);
+    // Tool rows after the message are the only record of what a task changed: removing
+    // them always asks, the latest message included.
+    const toolsAfter = chat.messages.slice(at + 1).some((m) => m.kind === "tool");
+    if (latest?.id === message.id && !toolsAfter) return startEdit(message);
     try {
-      const at = chat.messages.findIndex((m) => m.id === message.id);
-      const toolsAfter = task.project && chat.messages.slice(at + 1).some((m) => m.kind === "tool");
       setConfirmEdit({ message, count: await rowsAfter(selectedId, message.id), toolsAfter });
     } catch (e) {
       actions.showAlert(toUiError(e).message);

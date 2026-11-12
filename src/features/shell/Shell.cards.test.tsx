@@ -434,6 +434,59 @@ describe("project chat copy", () => {
   });
 });
 
+describe("editing the latest message of a task", () => {
+  const TASK_ROWS = [
+    row({ id: "u0", role: "user", text: "hello" }),
+    row({ id: "a0", text: "Hi." }),
+    row({ id: "u1", role: "user", text: "fix it" }),
+    row({ id: "a1", tool_calls: [{ id: "c1", name: "run_command", arguments: "{}" }] }),
+    row({ id: "t1", role: "tool", kind: "tool", tool_call_id: "c1", tool_meta: { name: "run_command", status: "ok", summary: "Ran x", detail: null } }),
+    row({ id: "a2", text: "Fixed." }),
+  ];
+  const STAYS = "Files and commands already changed on your computer stay as they are.";
+  beforeEach(() => {
+    ipc.peekUserMessage.mockResolvedValue({ text: "fix it", attachments: [] });
+  });
+
+  it("the pencil asks first, with the task's rows counted and the sentence about what stays changed", async () => {
+    ipc.getMessages.mockResolvedValue(TASK_ROWS);
+    ipc.rowsAfter.mockResolvedValue(3);
+    render(<Shell />);
+    await open("Chat A");
+    const latest = (await screen.findByText("fix it")).closest(".me")!;
+    await userEvent.click(within(latest as HTMLElement).getByRole("button", { name: /Edit/ }));
+    expect(await screen.findByText("Editing this message removes the 3 messages after it.")).toBeInTheDocument();
+    expect(screen.getByText(STAYS)).toBeInTheDocument();
+    expect(ipc.rowsAfter).toHaveBeenCalledWith("ca", "u1");
+    expect(ipc.peekUserMessage).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Edit and remove" }));
+    await waitFor(() => expect(ipc.peekUserMessage).toHaveBeenCalledWith("ca", "u1"));
+    await waitFor(async () => expect(await box()).toHaveValue("fix it"));
+  });
+
+  it("the Up arrow in the empty box asks first as well", async () => {
+    ipc.getMessages.mockResolvedValue(TASK_ROWS);
+    ipc.rowsAfter.mockResolvedValue(3);
+    render(<Shell />);
+    await open("Chat A");
+    await screen.findByText("fix it");
+    await userEvent.type(await box(), "{ArrowUp}");
+    expect(await screen.findByText(STAYS)).toBeInTheDocument();
+    expect(ipc.peekUserMessage).not.toHaveBeenCalled();
+  });
+
+  it("the latest message of a plain turn is edited without asking", async () => {
+    ipc.getMessages.mockResolvedValue(TASK_ROWS.slice(0, 2));
+    render(<Shell />);
+    await open("Chat A");
+    const latest = (await screen.findByText("hello")).closest(".me")!;
+    await userEvent.click(within(latest as HTMLElement).getByRole("button", { name: /Edit/ }));
+    await waitFor(() => expect(ipc.peekUserMessage).toHaveBeenCalledWith("ca", "u0"));
+    expect(ipc.rowsAfter).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
 describe("Retry on a reply", () => {
   it("is absent on a reply whose task has tool rows and present on a plain reply", async () => {
     ipc.getMessages.mockResolvedValue([
