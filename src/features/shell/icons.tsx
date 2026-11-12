@@ -109,3 +109,12 @@ export const GearIcon = ({ size = 14 }: IconProps) => (
     <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" />
   </Stroke>
 );
+
+export const SkillsIcon = ({ size = 14 }: IconProps) => (
+  <Stroke size={size}>
+    <rect x="3" y="3" width="8" height="8" rx="2" />
+    <rect x="13" y="3" width="8" height="8" rx="2" />
+    <rect x="3" y="13" width="8" height="8" rx="2" />
+    <path d="M17 14v6M14 17h6" />
+  </Stroke>
+);

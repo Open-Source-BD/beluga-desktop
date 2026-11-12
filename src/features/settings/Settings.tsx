@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getAppearance, setAppearance, type Appearance } from "../../app/appearance";
 import { authStatus, signOut, type StorageKind } from "../../lib/ipc";
 import { toUiError } from "../chat/errors";
+import Licenses from "./Licenses";
 import "./settings.css";
 
 interface Props {
@@ -28,6 +29,7 @@ export default function Settings({ onBack, onSignedOut }: Props) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [licenses, setLicenses] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -58,6 +60,8 @@ export default function Settings({ onBack, onSignedOut }: Props) {
       setBusy(false);
     }
   };
+
+  if (licenses) return <Licenses onBack={() => setLicenses(false)} />;
 
   return (
     <section className="main settings-view">
@@ -109,6 +113,12 @@ export default function Settings({ onBack, onSignedOut }: Props) {
                 Sign out
               </button>
             )}
+          </div>
+          <div className="setting">
+            <h2>About</h2>
+            <button type="button" className="btn" onClick={() => setLicenses(true)}>
+              Open-source licenses
+            </button>
           </div>
         </div>
       </div>

@@ -6,7 +6,7 @@ use super::auth::{AuthStatus, AuthUrl, StorageChoice};
 use super::chat_state::{ChatState, Fullness};
 use super::chats::{ChatUsage, TakenMessage};
 use super::install::{AddPreview, AddSource};
-use super::skills::SkillsStatus;
+use super::skills::{LicenseFile, SkillsStatus};
 use super::turn::{AttachmentInput, TurnResult};
 use super::{
     auth, blocking, chat_state, chats, compact, export, folder, install, models, skills, turn,
@@ -216,6 +216,11 @@ pub async fn skill_file(
     file: String,
 ) -> Result<AttachmentInput, UiError> {
     skills::skill_file(&state, &id, &file)
+}
+
+#[tauri::command]
+pub async fn pack_licenses(state: S<'_>, id: String) -> Result<Vec<LicenseFile>, UiError> {
+    skills::pack_licenses(&state, &id)
 }
 
 #[tauri::command]

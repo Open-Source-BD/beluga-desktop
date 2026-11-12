@@ -85,4 +85,17 @@ describe("Sidebar", () => {
     await userEvent.click(screen.getByRole("button", { name: "Open a folder" }));
     expect(p.onOpenFolder).toHaveBeenCalledTimes(2);
   });
+
+  it("shows a Skills row with how many are on, and opens the Skills screen", async () => {
+    const onOpenSkills = vi.fn();
+    render(<Sidebar {...props()} skillsOn={38} onOpenSkills={onOpenSkills} />);
+    expect(screen.getByText("38 on")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^Skills/ }));
+    expect(onOpenSkills).toHaveBeenCalled();
+  });
+
+  it("has no Skills row without a handler", () => {
+    render(<Sidebar {...props()} />);
+    expect(screen.queryByRole("button", { name: /^Skills/ })).not.toBeInTheDocument();
+  });
 });

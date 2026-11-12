@@ -22,12 +22,14 @@ import { useFolder } from "../mentions/useFolder";
 import { useMentionMenu } from "../mentions/useMentionMenu";
 import ActiveSkills from "../skills/ActiveSkills";
 import { useChatState } from "../skills/useChatState";
+import SkillsScreen from "../skills/SkillsScreen";
 import { useSkills } from "../skills/useSkills";
 import {
   activateSkill,
   deleteChat,
   listChats,
   renameChat,
+  skillFile,
   type AttachmentInput,
   type ChatSummary,
 } from "../../lib/ipc";
@@ -48,6 +50,8 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   const { models, modelsFailed, modelId, setModelId, pickerOpen, setPickerOpen, loadModels, chooseFromPicker } =
     useModels();
   const [showSettings, setShowSettings] = useState(false);
+  const [showSkills, setShowSkills] = useState(false);
+  const [pendingFile, setPendingFile] = useState<AttachmentInput | null>(null);
 
   const refreshChats = useCallback(() => {
     listChats().then(setChats, () => {});
@@ -114,6 +118,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
 
   const select = (id: string | null) => {
     setShowSettings(false);
+    setShowSkills(false);
     if (models) {
       const own = chats.find((c) => c.id === id)?.model_id;
       setModelId(chooseModel(models, [own, readLastModel()]));
@@ -137,8 +142,15 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     handlers: {
       newChat: () => select(null),
       openModel: pickModel,
-      openSkills: () => onOpenSkills?.(),
-      openSettings: () => setShowSettings(true),
+      openSkills: () => {
+        setShowSettings(false);
+        setShowSkills(true);
+        onOpenSkills?.();
+      },
+      openSettings: () => {
+        setShowSkills(false);
+        setShowSettings(true);
+      },
     },
   });
   const folder = useFolder({
@@ -155,6 +167,27 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     control,
   });
   const menus = useComposerMenus(slash, mention);
+
+  // A file picked on the Skills screen lands in the message box once it is back.
+  useEffect(() => {
+    if (!pendingFile || showSkills) return;
+    control.current?.addAttachment(pendingFile);
+    setPendingFile(null);
+  }, [pendingFile, showSkills, selectedId]);
+
+  const useSkillHere = async (skillId: string) => {
+    if (!modelId) throw new Error("Pick a model first.");
+    const id = await ensureChat();
+    await activateSkill(id, skillId, modelId);
+    await refreshActive(id, modelId);
+    setShowSkills(false);
+  };
+  const attachSkillFile = async (skillId: string, file: string) => {
+    const attachment = await skillFile(skillId, file);
+    await ensureChat();
+    setPendingFile(attachment);
+    setShowSkills(false);
+  };
 
   const usingFreeModel = models?.find((m) => m.id === modelId)?.is_free ?? false;
   const blocked = usingFreeModel && allowance.status?.free_daily?.remaining === 0;
@@ -208,7 +241,16 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
             refreshChats();
           }, () => {})
         }
-        onOpenSettings={() => setShowSettings(true)}
+        onOpenSettings={() => {
+          setShowSkills(false);
+          setShowSettings(true);
+        }}
+        onOpenSkills={() => {
+          setShowSettings(false);
+          setShowSkills(true);
+        }}
+        skillsOn={skillList.rows.length}
+        skillsActive={showSkills}
         folder={activeSkills.folder}
         onOpenFolder={() => void folder.open()}
         onCloseFolder={() => void folder.close()}
@@ -225,7 +267,14 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
           ) : null
         }
       />
-      {showSettings ? (
+      {showSkills ? (
+        <SkillsScreen
+          onBack={() => setShowSkills(false)}
+          onChanged={skillList.refresh}
+          onUse={useSkillHere}
+          onAttach={attachSkillFile}
+        />
+      ) : showSettings ? (
         <Settings
           onBack={() => setShowSettings(false)}
           onSignedOut={() => onSignInAgain?.()}

@@ -191,3 +191,9 @@
   justify-content: flex-end;
   gap: 8px;
 }
+
+.row .n {
+  margin-left: auto;
+  color: var(--mid);
+  font-size: 12px;
+}

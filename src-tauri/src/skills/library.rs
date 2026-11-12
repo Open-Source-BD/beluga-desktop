@@ -251,6 +251,55 @@ impl Library {
         std::fs::read(&path).map_err(|_| UiError::other(&format!("{base} could not be read.")))
     }
 
+    /// The pack's license files as text, each cut at `MAX_FILE_BYTES`. `None`
+    /// for an unknown pack. For the Anthropic pack, whose license text lives in
+    /// every skill folder, one `LICENSE.txt` (the first found) is added.
+    pub fn pack_licenses(&self, id: &str) -> Option<Vec<(String, String)>> {
+        let loaded = self.loaded.read().unwrap_or_else(|e| e.into_inner());
+        let pack = loaded.iter().find(|p| p.id == id)?;
+        let mut names: Vec<(String, PathBuf)> = Vec::new();
+        if let Ok(m) = read_manifest(&pack.root) {
+            for f in m.license_files.iter().filter(|f| valid_rel_path(f, false)) {
+                let mut path = pack.root.clone();
+                path.extend(f.split(['/', '\\']));
+                names.push((f.clone(), path));
+            }
+        }
+        if id == "anthropic" {
+            let first = pack.skills.iter().find(|e| {
+                e.broken.is_none()
+                    && valid_rel_path(&e.dir, true)
+                    && e.files.iter().any(|f| f == "LICENSE.txt")
+            });
+            if let Some(e) = first {
+                let mut path = pack.root.clone();
+                if e.dir != "." {
+                    path.extend(e.dir.split(['/', '\\']));
+                }
+                path.push("LICENSE.txt");
+                names.insert(0, ("LICENSE.txt".to_string(), path));
+            }
+        }
+        Some(
+            names
+                .into_iter()
+                .filter_map(|(name, path)| {
+                    let file = std::fs::File::open(path).ok()?;
+                    let mut bytes = Vec::new();
+                    std::io::Read::read_to_end(
+                        &mut std::io::Read::take(file, MAX_FILE_BYTES),
+                        &mut bytes,
+                    )
+                    .ok()?;
+                    if bytes.contains(&0) {
+                        return None;
+                    }
+                    Some((name, String::from_utf8_lossy(&bytes).into_owned()))
+                })
+                .collect(),
+        )
+    }
+
     /// `<pack root>/<dir>/<file>` for a known skill, if `allowed` accepts its entry.
     fn entry_path(
         &self,

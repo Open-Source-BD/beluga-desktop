@@ -293,6 +293,15 @@ export const setPackOn = (id: string, on: boolean) =>
 export const skillFile = (id: string, file: string) =>
   invoke<AttachmentInput>("skill_file", { id, file });
 
+/** One license file of a pack. */
+export interface LicenseFile {
+  name: string;
+  text: string;
+}
+
+/** The pack's license files as text, for the Open-source licenses view. */
+export const packLicenses = (id: string) => invoke<LicenseFile[]>("pack_licenses", { id });
+
 /** A pack that is not bundled and can be installed from GitHub. */
 export interface ExtraPack {
   id: string;
@@ -429,6 +438,12 @@ export const attachFolderFile = (chatId: string, path: string) =>
 /** Opens an OpenRouter page in the browser (allowed only for https://openrouter.ai/*). */
 export const openAuthUrl = (url: string) =>
   invoke<void>("plugin:opener|open_url", { url });
+
+/** Opens a GitHub page in the browser; refuses any other address. */
+export const openExternal = async (url: string): Promise<void> => {
+  if (!url.startsWith("https://github.com/")) throw new Error("That address cannot be opened.");
+  await invoke<void>("plugin:opener|open_url", { url });
+};
 
 export const onAuthFinished = (
   handler: (result: AuthFinished) => void,

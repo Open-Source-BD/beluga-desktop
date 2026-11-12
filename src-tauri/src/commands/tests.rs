@@ -1447,6 +1447,39 @@ fn skill_file_returns_a_text_attachment() {
 }
 
 #[test]
+fn pack_licenses_returns_the_packs_license_files() {
+    let h = real_skills_harness();
+    let l = super::skills::pack_licenses(&h.state, "superpowers").unwrap();
+    assert_eq!(l.len(), 1);
+    assert_eq!(l[0].name, "LICENSE");
+    assert!(l[0].text.contains("MIT"));
+    let v = serde_json::to_value(&l[0]).unwrap();
+    let mut k: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
+    k.sort();
+    assert_eq!(k, ["name", "text"]);
+}
+
+#[test]
+fn pack_licenses_of_the_anthropic_pack_adds_one_license_txt_and_the_notices() {
+    let h = real_skills_harness();
+    let l = super::skills::pack_licenses(&h.state, "anthropic").unwrap();
+    let names: Vec<_> = l.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names.iter().filter(|n| **n == "LICENSE.txt").count(), 1);
+    assert!(names.contains(&"THIRD_PARTY_NOTICES.md"));
+    assert!(
+        l.iter()
+            .all(|f| !f.text.is_empty() && f.text.len() <= 200_000)
+    );
+}
+
+#[test]
+fn pack_licenses_of_an_unknown_pack_is_a_ui_error() {
+    let h = real_skills_harness();
+    let e = super::skills::pack_licenses(&h.state, "nope").unwrap_err();
+    assert_eq!(e.message, "This pack is not available. Check it in Skills.");
+}
+
+#[test]
 fn skills_status_counts_the_real_tree() {
     let h = real_skills_harness();
     let st = super::skills::skills_status(&h.state).unwrap();

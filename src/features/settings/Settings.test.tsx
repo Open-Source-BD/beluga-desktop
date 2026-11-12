@@ -3,7 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Settings from "./Settings";
 
-const ipc = vi.hoisted(() => ({ authStatus: vi.fn(), signOut: vi.fn() }));
+const ipc = vi.hoisted(() => ({
+  authStatus: vi.fn(),
+  signOut: vi.fn(),
+  listPacks: vi.fn(),
+  packLicenses: vi.fn(),
+}));
 vi.mock("../../lib/ipc", () => ipc);
 
 const setAppearance = vi.hoisted(() => vi.fn());
@@ -72,5 +77,15 @@ describe("Settings", () => {
     await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not remove the key.");
     expect(onSignedOut).not.toHaveBeenCalled();
+  });
+
+  it("opens the Open-source licenses view and comes back", async () => {
+    ipc.listPacks.mockResolvedValue([{ id: "p", title: "p", license: "MIT", origin: "built_in", skills: [] }]);
+    ipc.packLicenses.mockResolvedValue([{ name: "LICENSE", text: "MIT text" }]);
+    render(<Settings onBack={vi.fn()} onSignedOut={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Open-source licenses" }));
+    expect(await screen.findByText("MIT text")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Back to Settings" }));
+    expect(screen.getByRole("button", { name: "Open-source licenses" })).toBeInTheDocument();
   });
 });

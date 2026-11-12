@@ -7,6 +7,7 @@ import {
   GearIcon,
   PencilIcon,
   PlusIcon,
+  SkillsIcon,
   TrashIcon,
   WhaleGlyph,
 } from "./icons";
@@ -23,6 +24,11 @@ interface Props {
   folder?: string | null;
   onOpenFolder?: () => void;
   onCloseFolder?: () => void;
+  /** Opens the Skills screen; the row is hidden without it. */
+  onOpenSkills?: () => void;
+  /** Skills that are on, shown on the Skills row. */
+  skillsOn?: number;
+  skillsActive?: boolean;
   footer?: ReactNode;
 }
 
@@ -37,6 +43,9 @@ export default function Sidebar({
   folder = null,
   onOpenFolder,
   onCloseFolder,
+  onOpenSkills,
+  skillsOn,
+  skillsActive = false,
   footer,
 }: Props) {
   const [editing, setEditing] = useState<string | null>(null);
@@ -115,6 +124,18 @@ export default function Sidebar({
             </li>
           ))}
         </ul>
+        {onOpenSkills && (
+          <button
+            type="button"
+            className={skillsActive ? "row settings on" : "row settings"}
+            aria-current={skillsActive ? "page" : undefined}
+            onClick={onOpenSkills}
+          >
+            <SkillsIcon />
+            Skills
+            {skillsOn !== undefined && <span className="n">{`${skillsOn} on`}</span>}
+          </button>
+        )}
         <button type="button" className="row settings" onClick={onOpenSettings}>
           <GearIcon />
           Settings

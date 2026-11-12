@@ -61,6 +61,24 @@ pub fn get_skill(s: &AppState, id: &str) -> Result<SkillDetail, UiError> {
     })
 }
 
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct LicenseFile {
+    pub name: String,
+    pub text: String,
+}
+
+/// The license files of a built-in or installed pack, as text.
+pub fn pack_licenses(s: &AppState, id: &str) -> Result<Vec<LicenseFile>, UiError> {
+    let files = s
+        .library
+        .pack_licenses(id)
+        .ok_or_else(|| UiError::other("This pack is not available. Check it in Skills."))?;
+    Ok(files
+        .into_iter()
+        .map(|(name, text)| LicenseFile { name, text })
+        .collect())
+}
+
 pub fn set_skill_on(s: &AppState, id: &str, on: bool) -> Result<(), UiError> {
     if s.library.skill(&s.store, id).is_none() {
         return Err(UiError::other(NOT_AVAILABLE));

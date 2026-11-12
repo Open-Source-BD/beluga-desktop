@@ -65,6 +65,7 @@ pub fn run() {
             h::set_skill_on,
             h::set_pack_on,
             h::skill_file,
+            h::pack_licenses,
             h::chat_state,
             h::activate_skill,
             h::deactivate_skill,

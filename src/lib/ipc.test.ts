@@ -54,6 +54,13 @@ describe("ipc", () => {
     ["setSkillOn", () => ipc.setSkillOn("p:s", true), "set_skill_on", { id: "p:s", on: true }],
     ["setPackOn", () => ipc.setPackOn("p", false), "set_pack_on", { id: "p", on: false }],
     ["skillFile", () => ipc.skillFile("p:s", "a.md"), "skill_file", { id: "p:s", file: "a.md" }],
+    ["packLicenses", () => ipc.packLicenses("p"), "pack_licenses", { id: "p" }],
+    [
+      "openExternal",
+      () => ipc.openExternal("https://github.com/o/r"),
+      "plugin:opener|open_url",
+      { url: "https://github.com/o/r" },
+    ],
     ["stop", () => ipc.stop("c"), "stop", { chatId: "c" }],
     ["chatState", () => ipc.chatState("c", "m/a"), "chat_state", { chatId: "c", modelId: "m/a" }],
     [
@@ -150,6 +157,13 @@ describe("ipc", () => {
     } else {
       expect(invoke).toHaveBeenCalledWith(cmd, args);
     }
+  });
+
+  it("openExternal refuses a URL that is not on github.com", async () => {
+    for (const url of ["https://evil.com/", "http://github.com/o/r", "https://github.com.evil.com/x", "javascript:1"]) {
+      await expect(ipc.openExternal(url)).rejects.toThrow();
+    }
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   it("sendMessage passes a channel that delivers engine events", async () => {
