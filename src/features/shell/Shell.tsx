@@ -108,6 +108,8 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   /** "Retry with another model…" opened the picker: the next choice also answers again. */
   const regenerateOnPick = useRef(false);
   const [pendingFile, setPendingFile] = useState<AttachmentInput | null>(null);
+  /** Chips a command found in the box, for the box shown after it switches screens. */
+  const [carried, setCarried] = useState<AttachmentInput[] | null>(null);
 
   const [queued, setQueued] = useState<Record<string, Queue>>({});
   const queuedRef = useRef(queued);
@@ -162,13 +164,14 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     text: string,
     attachments: AttachmentInput[],
     intent?: SendIntent,
-  ) => {
+  ): Promise<BoxContents | void> => {
     const original = intent ? null : text;
     if (!intent) {
       const r = resolveSlash(text, skillList.rows);
       if (r.kind === "command") {
         commands.find((c) => c.name === r.name)?.run(actions.ctx, r.rest);
-        return;
+        // A command does not use the attachments: they stay in the box.
+        return { text: "", attachments };
       }
       if (r.kind === "skill") {
         intent = { skill: r.id };
@@ -408,6 +411,15 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   }));
 
   const control = useRef<ComposerControl>(null);
+  /** A command that leaves the message box keeps its chips for the next one. */
+  const carryChips = () => {
+    const chips = control.current?.contents().attachments ?? [];
+    if (chips.length > 0) setCarried(chips);
+  };
+  useEffect(() => {
+    // The box now on screen took them when it was created, or still holds them.
+    if (carried && control.current) setCarried(null);
+  }, [carried, showSkills, showSettings, selectedId]);
   const actions = useCommandActions({
     chatId: selectedId,
     title: selected?.title,
@@ -418,14 +430,19 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     usage: allowance.usage,
     monthSpend: allowance.monthSpend,
     handlers: {
-      newChat: () => select(null),
+      newChat: () => {
+        if (selectedId !== null) carryChips();
+        select(null);
+      },
       openModel: pickModel,
       openSkills: () => {
+        carryChips();
         setShowSettings(false);
         setShowSkills(true);
         onOpenSkills?.();
       },
       openSettings: () => {
+        carryChips();
         setShowSkills(false);
         setShowSettings(true);
       },
@@ -501,6 +518,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     )}
     <Composer
       controlRef={control}
+      initialAttachments={carried ?? undefined}
       draftId={selectedId}
       sendWithModifier={sendWithModifier}
       onEmptyUp={editLatest}

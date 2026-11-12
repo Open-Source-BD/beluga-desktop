@@ -216,6 +216,30 @@ describe("Shell slash menu", () => {
     expect(screen.queryByRole("dialog", { name: "Help" })).toBeNull();
   });
 
+  it("a typed command leaves the attachment chips in the box", async () => {
+    render(<Shell />);
+    const field = await box();
+    await userEvent.upload(screen.getByLabelText("Attach files"), new File(["hi"], "a.txt", { type: "text/plain" }));
+    await screen.findByText("a.txt");
+    await userEvent.type(field, "/help{Enter}");
+    expect(await screen.findByRole("dialog", { name: "Help" })).toBeInTheDocument();
+    expect(await box()).toHaveValue("");
+    expect(screen.getByText("a.txt")).toBeInTheDocument();
+    expect(ipc.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("a command typed with text (not picked from the menu) leaves the chips in the box", async () => {
+    render(<Shell />);
+    const field = await box();
+    await userEvent.upload(screen.getByLabelText("Attach files"), new File(["hi"], "a.txt", { type: "text/plain" }));
+    await screen.findByText("a.txt");
+    await userEvent.type(field, "/compact keep the API notes{Enter}");
+    await waitFor(async () => expect(await box()).toHaveValue(""));
+    expect(screen.getByText("a.txt")).toBeInTheDocument();
+    expect(ipc.sendMessage).not.toHaveBeenCalled();
+    expect(ipc.compactChat).not.toHaveBeenCalled();
+  });
+
   it("an earlier alert is cleared by the next successful send", async () => {
     render(<Shell />);
     await userEvent.type(await box(), "/compact{Enter}");

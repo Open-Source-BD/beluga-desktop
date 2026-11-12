@@ -74,6 +74,8 @@ interface Props {
   /** Sees a key first; returning true means it was handled and the box ignores it. */
   onKeyIntercept?: (e: KeyboardEvent<HTMLTextAreaElement>) => boolean;
   controlRef?: Ref<ComposerControl>;
+  /** Chips the box starts with when it is created. */
+  initialAttachments?: AttachmentInput[];
   /**
    * Keeps the unsent text per chat: the chat's id, or null for a new chat. Left
    * out, nothing is saved or restored.
@@ -109,6 +111,7 @@ export default function Composer({
   onTextChange,
   onKeyIntercept,
   controlRef,
+  initialAttachments,
   draftId,
   sendWithModifier = false,
   onEmptyUp,
@@ -124,7 +127,7 @@ export default function Composer({
   slots,
 }: Props) {
   const [text, setText] = useState("");
-  const [files, setFiles] = useState<AttachmentInput[]>([]);
+  const [files, setFiles] = useState<AttachmentInput[]>(() => initialAttachments ?? []);
   const filesRef = useRef(files);
   filesRef.current = files;
   const [refusals, setRefusals] = useState<string[]>([]);

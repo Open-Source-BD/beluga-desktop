@@ -92,6 +92,17 @@ describe("Shell skills screen", () => {
     expect(await screen.findByRole("heading", { name: "Skills" })).toBeInTheDocument();
   });
 
+  it("/skills typed with chips in the box keeps them for the return to the chat", async () => {
+    ipc.extraPacks.mockResolvedValue([]);
+    render(<Shell />);
+    await box();
+    await userEvent.upload(screen.getByLabelText("Attach files"), new File(["hi"], "a.txt", { type: "text/plain" }));
+    await screen.findByText("a.txt");
+    await userEvent.type(await box(), "/skills{Enter}");
+    await userEvent.click(await screen.findByRole("button", { name: "Back to chat" }));
+    expect(await screen.findByText("a.txt")).toBeInTheDocument();
+  });
+
   it("Use in this chat creates a chat, activates the skill and returns to the chat", async () => {
     render(<Shell />);
     await userEvent.click(await screen.findByRole("button", { name: /^Skills/ }));
