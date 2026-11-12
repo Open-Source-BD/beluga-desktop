@@ -53,8 +53,8 @@ pub fn rename_chat(s: &AppState, id: &str, title: &str) -> Result<(), UiError> {
 }
 
 /// Stops a reply still running in the chat, declines its waiting approval
-/// card, forgets what its model read, stops its background commands, then
-/// removes it.
+/// card, forgets what its model read, stops its background commands, waits
+/// for a stopped task to finish storing, then removes it.
 pub async fn delete_chat(s: &AppState, id: &str) -> Result<(), UiError> {
     if let Some(turn) = s.turns().remove(id) {
         turn.cancel.cancel();
@@ -62,7 +62,12 @@ pub async fn delete_chat(s: &AppState, id: &str) -> Result<(), UiError> {
     s.approvals.drop_chat(id);
     s.read_logs.forget(id);
     s.background.stop_chat(id).await;
-    s.store.delete_chat(id).map_err(local)
+    let held = s.task_locks.hold(id).await;
+    let deleted = s.store.delete_chat(id).map_err(local);
+    let _ = s.store.clear_calls_started(id);
+    drop(held);
+    s.task_locks.forget(id);
+    deleted
 }
 
 pub fn chat_usage(s: &AppState, chat_id: &str) -> Result<ChatUsage, UiError> {
@@ -125,6 +130,10 @@ pub fn take_user_message(
     if s.turns().contains_key(chat_id) {
         return Err(UiError::other(TURN_RUNNING));
     }
+    // Held while deleting, so no task stores rows meanwhile.
+    let Some(_held) = s.task_locks.try_hold(chat_id) else {
+        return Err(UiError::other(TURN_RUNNING));
+    };
     let (message, removed) = user_message(s, chat_id, message_id)?;
     s.store
         .delete_from_and_fix_summary(chat_id, message_id)

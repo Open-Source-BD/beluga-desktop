@@ -18,6 +18,8 @@ pub enum Step {
     /// cancelled (or dropped); then returns that text with no error, as a
     /// cancelled request does.
     UntilCancelled(String),
+    /// Returned at once as a request that never left the app (`sent` false).
+    Unsent(StepOutcome),
 }
 
 pub struct ScriptedEngine {
@@ -63,13 +65,16 @@ impl Engine for ScriptedEngine {
             .unwrap()
             .pop_front()
             .expect("no scripted step left");
+        // Every scripted step but `Unsent` was sent.
+        let sent = |out: StepOutcome| StepOutcome { sent: true, ..out };
         match step {
-            Step::Reply(out) => out,
+            Step::Reply(out) => sent(out),
+            Step::Unsent(out) => StepOutcome { sent: false, ..out },
             Step::Stream(pieces, out) => {
                 for text in pieces {
                     emit(EngineEvent::TextDelta { text });
                 }
-                out
+                sent(out)
             }
             Step::UntilCancelled(text) => {
                 if !text.is_empty() {
@@ -78,6 +83,7 @@ impl Engine for ScriptedEngine {
                 cancel.cancelled().await;
                 StepOutcome {
                     text,
+                    sent: true,
                     ..StepOutcome::default()
                 }
             }
@@ -123,7 +129,8 @@ mod tests {
         let b = engine
             .run_step(request("m/b"), &emit, CancellationToken::new())
             .await;
-        assert_eq!((a, b), (first, second));
+        let sent = |o: StepOutcome| StepOutcome { sent: true, ..o };
+        assert_eq!((a, b), (sent(first), sent(second)));
         let models: Vec<String> = engine.requests().into_iter().map(|r| r.model_id).collect();
         assert_eq!(models, ["m/a", "m/b"]);
         assert!(emitted.lock().unwrap().is_empty());

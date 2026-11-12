@@ -56,6 +56,12 @@ const UNFINISHED: &str = "That did not finish, so nothing was done.";
 const RULE_NOT_SAVED: &str =
     "The rule could not be saved, so this command will be asked about again next time.";
 const EDITS_NOT_SAVED: &str = "Edits could not be allowed for the rest of this chat (the choice could not be saved), so the next change will ask again.";
+/// The result of a call whose card was ended because the chat's folder was
+/// closed or changed, and of calls the loop skips for that reason.
+pub const FOLDER_CHANGED: &str = "Not run: the project folder was closed or changed.";
+const MOVED: &str = "This chat's project folder was closed or changed, so this was not done.";
+const CHAT_GONE: &str = "This chat no longer exists, so this was not done.";
+const NOT_MARKED: &str = "Could not record that this was starting, so it was not done.";
 /// Settings key prefix: a command was once allowed in this folder.
 const COMMANDS_SEEN: &str = "commands_seen:";
 
@@ -232,33 +238,58 @@ impl NotCurrent {
     }
 }
 
-/// `Ok` while the turn runs, the chat exists and its folder is still this
-/// project's. Checked after every card and before anything is run or written.
-/// The stop is checked again last, after every await in here.
-async fn still_current(ctx: &Ctx<'_>) -> Result<(), NotCurrent> {
-    const MOVED: &str = "This chat's project folder was closed or changed, so this was not done.";
-    if ctx.cancel.is_cancelled() {
-        return Err(NotCurrent::Stopped);
-    }
+/// `Ok` while the chat exists and its folder is still this project's;
+/// otherwise the reason (`CHAT_GONE` or `MOVED`).
+async fn place_current(ctx: &Ctx<'_>) -> Result<(), &'static str> {
     if !matches!(ctx.store.get_chat(ctx.chat_id), Ok(Some(_))) {
-        return Err(NotCurrent::Gone(
-            "This chat no longer exists, so this was not done.",
-        ));
+        return Err(CHAT_GONE);
     }
     let Ok(Some(folder)) = ctx.store.folder(ctx.chat_id) else {
-        return Err(NotCurrent::Gone(MOVED));
+        return Err(MOVED);
     };
     let root = ctx.project.root.clone();
     let same = blocking(move || std::fs::canonicalize(&folder).is_ok_and(|r| r == root))
         .await
         .unwrap_or(false);
-    if !same {
-        return Err(NotCurrent::Gone(MOVED));
+    if same { Ok(()) } else { Err(MOVED) }
+}
+
+/// `Ok` while the turn runs, the chat exists and its folder is still this
+/// project's. Checked before every tool, after every card and before
+/// anything is run or written. The stop is checked again last, after every
+/// await in here.
+async fn still_current(ctx: &Ctx<'_>) -> Result<(), NotCurrent> {
+    if ctx.cancel.is_cancelled() {
+        return Err(NotCurrent::Stopped);
     }
+    place_current(ctx).await.map_err(NotCurrent::Gone)?;
     if ctx.cancel.is_cancelled() {
         return Err(NotCurrent::Stopped);
     }
     Ok(())
+}
+
+/// A card ended without an answer: by a folder change (closing or changing
+/// the folder also stops the turn, so the folder is checked first), or by
+/// Stop. Nothing was done either way.
+async fn ended(ctx: &Ctx<'_>, what: &str) -> Dispatched {
+    match place_current(ctx).await {
+        Err(MOVED) => plain(ToolOutcome {
+            status: ToolStatus::NotRun,
+            text: FOLDER_CHANGED.to_string(),
+            summary: format!("Not run: {what}"),
+            detail: None,
+        }),
+        _ => stopped(what),
+    }
+}
+
+/// Records, just before a call acts, that it started: a result lost after
+/// this point is reported as "may have run". Fails closed.
+fn mark_started(ctx: &Ctx<'_>, call_id: &str, summary: &str) -> Result<(), Dispatched> {
+    ctx.store
+        .mark_call_started(ctx.chat_id, call_id)
+        .map_err(|_| plain(fail(NOT_MARKED.to_string(), summary.to_string())))
 }
 
 async fn ask(ctx: &Ctx<'_>, card: Approval) -> Result<Answer, Unanswered> {
@@ -301,6 +332,14 @@ async fn route(ctx: &Ctx<'_>, call: &ToolCall, pair: &mut Pair<'_>) -> Dispatche
             ));
         }
     };
+    // Nothing is read, listed or written for a chat whose folder was closed
+    // or changed, or for a stopped turn.
+    if let Err(e) = still_current(ctx).await {
+        return e.outcome(
+            &summary_text(name),
+            format!("Did not run {}", summary_text(name)),
+        );
+    }
     match name {
         "read_file" => read_file(ctx, args, pair).await,
         "list_dir" | "find_files" | "search" => look(ctx, name, args, pair).await,
@@ -428,7 +467,7 @@ async fn read_file(ctx: &Ctx<'_>, args: Value, pair: &mut Pair<'_>) -> Dispatche
             out.map(plain).unwrap_or_else(|| unfinished(&pending))
         }
         Ok(other) => refused_by_user(other, &what),
-        Err(Unanswered::Stopped) => stopped(&what),
+        Err(Unanswered::Stopped) => ended(ctx, &what).await,
     }
 }
 
@@ -499,11 +538,14 @@ async fn change_file(ctx: &Ctx<'_>, edit: bool, args: Value, pair: &mut Pair<'_>
                 }
             }
             Ok(other) => return refused_by_user(other, &what),
-            Err(Unanswered::Stopped) => return stopped(&what),
+            Err(Unanswered::Stopped) => return ended(ctx, &what).await,
         }
     }
     if let Err(e) = still_current(ctx).await {
         return e.outcome(&what, summary.to_string());
+    }
+    if let Err(d) = mark_started(ctx, pair.call_id, summary) {
+        return d;
     }
     let log = ctx.read_log.clone();
     // Exactly the change whose lines were on the card.
@@ -620,12 +662,15 @@ async fn command(ctx: &Ctx<'_>, args: Value, pair: &mut Pair<'_>) -> Dispatched 
                 }
             }
             Ok(other) => return refused_by_user(other, &format!("run {shown}")),
-            Err(Unanswered::Stopped) => return stopped(&format!("run {shown}")),
+            Err(Unanswered::Stopped) => return ended(ctx, &format!("run {shown}")).await,
         }
         let _ = ctx.store.set_setting(&seen_key, "1");
     }
     if let Err(e) = still_current(ctx).await {
         return e.outcome(&format!("run {shown}"), not_run);
+    }
+    if let Err(d) = mark_started(ctx, pair.call_id, &not_run) {
+        return d;
     }
     let mut d = if background {
         start_background(ctx, &command, &shown).await
@@ -766,6 +811,9 @@ async fn stop_command(ctx: &Ctx<'_>, args: Value, pair: &mut Pair<'_>) -> Dispat
     };
     let summary = format!("Stopped {}", summary_text(id));
     pair.start(format!("Stopping {}", summary_text(id)));
+    if let Err(d) = mark_started(ctx, pair.call_id, &summary) {
+        return d;
+    }
     match ctx.background.stop(ctx.chat_id, id).await {
         Ok(()) => plain(ok(format!("Stopped {id}."), summary)),
         Err(e) => plain(fail(e, summary)),
@@ -781,6 +829,9 @@ fn update_plan(ctx: &Ctx<'_>, args: Value, pair: &mut Pair<'_>) -> Dispatched {
     let (out, items) = plan::update_plan(&args);
     if out.status != ToolStatus::Ok {
         return plain(out);
+    }
+    if let Err(d) = mark_started(ctx, pair.call_id, &out.summary) {
+        return d;
     }
     let saved = serde_json::to_string(&items)
         .ok()

@@ -73,10 +73,18 @@ pub async fn compact_chat(
         return Err(UiError::other(TURN_RUNNING));
     }
     let mut messages = s.store.sendable_messages(chat_id).map_err(local)?;
-    // Never between a call and its result: a last reply whose calls are not
-    // all answered stays after the boundary, with the results still to come.
+    // The boundary falls right before a user row: never between a call and
+    // its result, never inside a task. When the last reply still has calls
+    // without results, its task (from the user row that started it) stays
+    // after the boundary; with no such user row there is nothing to shorten.
     let boundary = match open_reply(&messages) {
-        Some(at) => {
+        Some(open) => {
+            let Some(at) = messages[..open]
+                .iter()
+                .rposition(|m| m.kind == "message" && m.role == "user")
+            else {
+                return Err(UiError::other(TOO_SHORT));
+            };
             let seq = messages[at].seq;
             messages.truncate(at);
             seq
@@ -120,6 +128,9 @@ pub async fn compact_chat(
     let Some(registration) = register_turn(s, chat_id, Register::IfFree) else {
         return Err(UiError::other(TURN_RUNNING));
     };
+    // No task stores rows while the summary is made; a send that replaces
+    // this turn waits for it.
+    let _held = s.task_locks.hold(chat_id).await;
     let ran = run_registered(s, chat_id, registration, request, &|_| {}).await;
 
     // A turn that started in the chat meanwhile cancelled this one; should the

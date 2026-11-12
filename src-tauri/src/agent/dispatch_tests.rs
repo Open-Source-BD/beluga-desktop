@@ -931,6 +931,64 @@ async fn a_background_start_is_refused_when_the_folder_changed_while_asking() {
     assert!(!fx.path("made.txt").exists());
 }
 
+#[tokio::test]
+async fn every_tool_checks_the_folder_before_doing_anything() {
+    let fx = Fx::new();
+    fx.write("a.txt", "secret-ish\n");
+    let other = tempfile::tempdir().unwrap();
+    fx.store
+        .set_folder(&fx.chat, Some(&real_str(other.path())))
+        .unwrap();
+    for (name, args) in [
+        ("read_file", json!({"path": "a.txt"})),
+        ("list_dir", json!({})),
+        ("find_files", json!({"pattern": "*.txt"})),
+        ("search", json!({"pattern": "secret"})),
+        (
+            "update_plan",
+            json!({"items": [{"text": "x", "state": "pending"}]}),
+        ),
+        ("command_output", json!({"id": "bg1"})),
+        ("stop_command", json!({"id": "bg1"})),
+    ] {
+        let d = fx.call(name, args).await;
+        assert_eq!(d.outcome.status, ToolStatus::Error, "{name}");
+        assert!(
+            d.outcome.text.contains("closed or changed"),
+            "{name}: {}",
+            d.outcome.text
+        );
+        assert!(!d.outcome.text.contains("secret-ish"), "{name}");
+    }
+    assert_eq!(fx.store.plan(&fx.chat).unwrap(), "[]");
+}
+
+#[tokio::test]
+async fn a_card_ended_by_a_folder_change_says_so() {
+    let fx = Fx::new();
+    let other = tempfile::tempdir().unwrap();
+    let before = fx.cards().len();
+    let call = fx.tool_call(
+        "write_file",
+        &json!({"path": "b.txt", "content": "x"}).to_string(),
+    );
+    let ctx = fx.ctx();
+    let (d, _) = tokio::join!(run_call(&ctx, &call), async {
+        fx.next_card(before).await;
+        // What closing or changing the folder does.
+        fx.store
+            .set_folder(&fx.chat, Some(&real_str(other.path())))
+            .unwrap();
+        fx.approvals.drop_chat(&fx.chat);
+    });
+    assert_eq!(d.outcome.status, ToolStatus::NotRun, "{}", d.outcome.text);
+    assert_eq!(
+        d.outcome.text,
+        "Not run: the project folder was closed or changed."
+    );
+    assert!(!fx.path("b.txt").exists());
+}
+
 // ---------------------------------------------------------------------------
 // Secrets
 // ---------------------------------------------------------------------------

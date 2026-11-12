@@ -677,6 +677,14 @@ async fn after_an_interrupted_task_the_next_send_first_stores_not_run_results() 
         ]
     );
     assert_eq!(not_run_texts(&f), [INTERRUPTED, INTERRUPTED]);
+    // Before the crash: the user row and the assistant row. After: two
+    // repaired results, the user row and the reply.
+    let stored = f
+        .events()
+        .iter()
+        .filter(|e| **e == EngineEvent::MessageStored)
+        .count();
+    assert_eq!(stored, 2 + 4);
     let last = f.requests().pop().unwrap();
     assert_well_formed(&last);
     assert_eq!(text_of(last.messages.last().unwrap()), "continue");
@@ -732,8 +740,8 @@ async fn a_message_answer_stores_the_decline_then_the_user_row_and_marks_later_c
         .iter()
         .filter(|e| **e == EngineEvent::MessageStored)
         .count();
-    // assistant, two results, the user row, the final reply
-    assert_eq!(stored, 5);
+    // the first user row, assistant, two results, the user row, the final reply
+    assert_eq!(stored, 6);
 }
 
 #[tokio::test]
@@ -931,7 +939,7 @@ async fn history_with_tool_rows_is_sent_as_plain_chat_on_the_one_request_path() 
 }
 
 #[tokio::test]
-async fn the_folder_removed_mid_task_gives_a_plain_error_ends_the_task_and_messages_still_load() {
+async fn the_folder_removed_mid_task_skips_the_rest_ends_the_task_and_messages_still_load() {
     let f = fx(vec![calls(
         "",
         vec![
@@ -955,10 +963,11 @@ async fn the_folder_removed_mid_task_gives_a_plain_error_ends_the_task_and_messa
             "user",
             "assistant[read_file,list_dir]",
             "tool:ok",
-            "tool:error",
+            "tool:not_run",
             "note"
         ]
     );
+    assert_eq!(f.rows()[3].text, FOLDER_CHANGED);
     assert_eq!(f.rows()[4].text, FOLDER_GONE);
 }
 
@@ -1028,10 +1037,12 @@ async fn compaction_never_ends_between_a_call_and_its_missing_results() {
     compact::compact_chat(&f.state, &f.chat, TOOLS_MODEL, None)
         .await
         .unwrap();
-    // The assistant row with the open call is after the boundary, not summarised.
+    // The boundary is before the user row that started the open task: the
+    // conversation after the summary starts with that user row.
     let sendable = s.sendable_messages(&f.chat).unwrap();
-    assert_eq!(sendable.len(), 1);
-    assert_eq!(sendable[0].tool_calls.len(), 1);
+    assert_eq!(sendable.len(), 2);
+    assert_eq!(sendable[0].text, "five");
+    assert_eq!(sendable[1].tool_calls.len(), 1);
     f.send("continue").await;
     let last = f.requests().pop().unwrap();
     assert_well_formed(&last);
@@ -1153,7 +1164,11 @@ async fn a_result_that_cannot_be_stored_fails_the_task_and_the_next_send_repairs
         .unwrap();
     f.engine.push(vec![say("ok")]);
     f.send("continue").await;
-    assert_eq!(not_run_texts(&f), [INTERRUPTED]);
+    assert!(not_run_texts(&f).is_empty());
+    let lost = &f.rows()[3];
+    assert_eq!(lost.tool_call_id.as_deref(), Some("c1"));
+    assert_eq!(lost.tool_meta.as_ref().unwrap().status, "error");
+    assert_eq!(lost.text, LOST);
     assert_well_formed(f.requests().last().unwrap());
 }
 
@@ -1449,6 +1464,14 @@ async fn a_new_send_replaces_a_running_task_and_keeps_the_conversation_valid() {
 #[test]
 fn the_interrupted_text_is_exact() {
     assert_eq!(INTERRUPTED, "Not run: the task was interrupted.");
+    assert_eq!(
+        FOLDER_CHANGED,
+        "Not run: the project folder was closed or changed."
+    );
+    assert_eq!(
+        LOST,
+        "The result of this call was lost; it may have run. Check before repeating."
+    );
     assert_eq!(STOPPED, "Not run: the task was stopped.");
     assert_eq!(USER_SENT, "Not run: the user sent a new message.");
     assert_eq!(NOTHING, "The model returned nothing.");
@@ -1481,5 +1504,336 @@ fn history_adds_a_not_run_result_for_a_call_that_has_none() {
         session_id: String::new(),
     };
     assert_well_formed(&req);
-    assert_eq!(text_of(&wire[1]), INTERRUPTED);
+    assert_eq!(text_of(&wire[1]), LOST);
+}
+
+// ---------------------------------------------------------------------------
+// Fix round 1
+// ---------------------------------------------------------------------------
+
+/// The reply most fix tests start from: a card first, then a read and a list.
+fn card_then_reads() -> Step {
+    calls(
+        "",
+        vec![
+            call(
+                "c1",
+                "write_file",
+                json!({"path": "b.txt", "content": "new"}),
+            ),
+            call("c2", "read_file", json!({"path": "a.txt"})),
+            call("c3", "list_dir", json!({})),
+        ],
+    )
+}
+
+fn card_waits(e: &EngineEvent) -> bool {
+    matches!(e, EngineEvent::ApprovalNeeded { .. })
+}
+
+/// Every call of every assistant row is answered by exactly one result,
+/// stored right after it (before any other non-tool row).
+fn assert_rows_paired(f: &Fx) {
+    let rows = f.rows();
+    let mut i = 0;
+    while i < rows.len() {
+        let m = &rows[i];
+        i += 1;
+        if m.kind == "tool" {
+            panic!("an orphan result: {:?}", f.shape());
+        }
+        let mut want: Vec<&str> = m.tool_calls.iter().map(|c| c.id.as_str()).collect();
+        while i < rows.len() && (rows[i].kind == "tool" || rows[i].kind == "note") {
+            if rows[i].kind == "tool" {
+                let id = rows[i].tool_call_id.as_deref().unwrap();
+                let at = want
+                    .iter()
+                    .position(|w| *w == id)
+                    .unwrap_or_else(|| panic!("result {id} out of place: {:?}", f.shape()));
+                want.remove(at);
+            }
+            i += 1;
+        }
+        assert!(want.is_empty(), "unanswered {want:?}: {:?}", f.shape());
+    }
+    assert!(f.state.store.unanswered_calls(&f.chat).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_plain_send_during_a_project_task_waits_for_it_and_keeps_every_call_paired() {
+    let f = fx(vec![card_then_reads(), say("plain reply")]);
+    let plain = async {
+        f.wait_for(card_waits).await;
+        f.send_on("hi", PLAIN_MODEL).await
+    };
+    let (first, second) = tokio::join!(f.send("write"), plain);
+    assert_eq!(first.status, TurnStatus::Interrupted);
+    assert_eq!(second.status, TurnStatus::Done);
+    assert_eq!(
+        f.shape(),
+        [
+            "user",
+            "assistant[write_file,read_file,list_dir]",
+            "tool:not_run",
+            "tool:not_run",
+            "tool:not_run",
+            "user",
+            "assistant"
+        ]
+    );
+    assert_rows_paired(&f);
+    assert!(!f.path("b.txt").exists());
+}
+
+#[tokio::test]
+async fn a_send_after_the_folder_is_gone_during_a_task_keeps_every_call_paired() {
+    let f = fx(vec![card_then_reads(), say("plain reply")]);
+    let later = async {
+        f.wait_for(card_waits).await;
+        std::fs::remove_dir_all(f.project.path()).unwrap();
+        f.send("hi").await
+    };
+    let (_, second) = tokio::join!(f.send("write"), later);
+    assert_eq!(second.status, TurnStatus::Done);
+    assert_eq!(f.shape().last().map(String::as_str), Some("assistant"));
+    assert_rows_paired(&f);
+}
+
+#[tokio::test]
+async fn compaction_and_take_back_during_a_project_task_change_nothing() {
+    let f = fx(vec![card_then_reads()]);
+    let during = async {
+        f.wait_for(card_waits).await;
+        let before = f.shape();
+        let compacted = compact::compact_chat(&f.state, &f.chat, TOOLS_MODEL, None).await;
+        assert!(compacted.is_err(), "{compacted:?}");
+        let user = f.rows()[0].id.clone();
+        let taken = chats::take_user_message(&f.state, &f.chat, &user);
+        assert!(taken.is_err(), "{taken:?}");
+        assert_eq!(f.shape(), before);
+        assert!(f.state.approvals.waiting(&f.chat).is_some());
+        turn::stop(&f.state, &f.chat);
+    };
+    let (r, ()) = tokio::join!(f.send("write"), during);
+    assert_eq!(r.status, TurnStatus::Interrupted);
+    assert_rows_paired(&f);
+    assert_eq!(f.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn a_retry_during_a_running_task_waits_for_it_and_continues() {
+    let f = fx(vec![card_then_reads(), say("continued")]);
+    let retry = async {
+        f.wait_for(card_waits).await;
+        let emit = f.emitter();
+        turn::retry_turn(&f.state, &f.chat, TOOLS_MODEL, false, &emit)
+            .await
+            .unwrap()
+    };
+    let (_, second) = tokio::join!(f.send("write"), retry);
+    assert_eq!(second.status, TurnStatus::Done);
+    assert_eq!(
+        f.shape(),
+        [
+            "user",
+            "assistant[write_file,read_file,list_dir]",
+            "tool:not_run",
+            "tool:not_run",
+            "tool:not_run",
+            "assistant"
+        ]
+    );
+    assert_rows_paired(&f);
+}
+
+/// Closing or changing the folder while a card waits: nothing more is read
+/// in the old folder, and every call left says why it did not run.
+async fn folder_changed_while_a_card_waits(to: Option<String>) {
+    let f = fx(vec![card_then_reads()]);
+    if let Some(other) = &to {
+        f.state.store.approve_folder(other).unwrap();
+    }
+    let change = async {
+        f.wait_for(card_waits).await;
+        folder::set_chat_folder(&f.state, &f.chat, to.clone())
+            .await
+            .unwrap();
+    };
+    let (r, ()) = tokio::join!(f.send("write"), change);
+    assert_eq!(r.status, TurnStatus::Interrupted);
+    assert_eq!(r.reason.as_deref(), Some("folder_missing"));
+    assert_eq!(
+        f.shape(),
+        [
+            "user",
+            "assistant[write_file,read_file,list_dir]",
+            "tool:not_run",
+            "tool:not_run",
+            "tool:not_run",
+            "note"
+        ]
+    );
+    assert_eq!(
+        not_run_texts(&f),
+        [FOLDER_CHANGED, FOLDER_CHANGED, FOLDER_CHANGED]
+    );
+    assert!(!f.rows().iter().any(|m| m.text.contains("hello")));
+    assert!(!f.path("b.txt").exists());
+    assert_eq!(f.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn closing_the_folder_while_a_card_waits_reads_nothing_more() {
+    folder_changed_while_a_card_waits(None).await;
+}
+
+#[tokio::test]
+async fn changing_the_folder_while_a_card_waits_reads_nothing_in_either_folder() {
+    let other = tempfile::tempdir().unwrap();
+    std::fs::write(other.path().join("a.txt"), "hello there\n").unwrap();
+    folder_changed_while_a_card_waits(Some(real(other.path()))).await;
+}
+
+#[tokio::test]
+async fn a_folder_changed_in_the_store_between_calls_skips_the_rest_without_reading() {
+    // No cancel and no dropped card: only the checks before acting see it.
+    let f = fx(vec![card_then_reads()]);
+    let other = tempfile::tempdir().unwrap();
+    std::fs::write(other.path().join("a.txt"), "hello there\n").unwrap();
+    let change = async {
+        f.wait_for(card_waits).await;
+        f.state
+            .store
+            .set_folder(&f.chat, Some(&real(other.path())))
+            .unwrap();
+        f.answer_cards(vec![Answer::Once]).await;
+    };
+    let (r, ()) = tokio::join!(f.send("go"), change);
+    assert_eq!(r.reason.as_deref(), Some("folder_missing"));
+    assert_eq!(
+        f.shape(),
+        [
+            "user",
+            "assistant[write_file,read_file,list_dir]",
+            "tool:error",
+            "tool:not_run",
+            "tool:not_run",
+            "note"
+        ]
+    );
+    assert_eq!(not_run_texts(&f), [FOLDER_CHANGED, FOLDER_CHANGED]);
+    assert!(!f.rows().iter().any(|m| m.text.contains("hello")));
+    assert!(!f.path("b.txt").exists());
+    assert!(!other.path().join("b.txt").exists());
+}
+
+#[tokio::test]
+async fn a_crash_after_a_command_started_records_its_result_as_lost() {
+    let f = fx(vec![calls(
+        "",
+        vec![call("c1", "run_command", json!({"command": sleeper()}))],
+    )]);
+    let started = async {
+        f.answer_cards(vec![Answer::Once]).await;
+        f.wait_for(|e| matches!(e, EngineEvent::ToolOutput { .. }))
+            .await;
+    };
+    tokio::select! {
+        _ = f.send("run") => panic!("the command should still run"),
+        () = started => {}
+    }
+    f.engine.push(vec![say("ok")]);
+    f.send("continue").await;
+    let result = &f.rows()[2];
+    assert_eq!(result.tool_call_id.as_deref(), Some("c1"));
+    assert_eq!(result.tool_meta.as_ref().unwrap().status, "error");
+    assert_eq!(result.text, LOST);
+    assert_well_formed(f.requests().last().unwrap());
+}
+
+#[tokio::test]
+async fn a_crash_before_a_call_started_records_it_as_not_run() {
+    // The card never got an answer, so nothing started.
+    let f = fx(vec![calls(
+        "",
+        vec![call("c1", "run_command", json!({"command": "echo hi"}))],
+    )]);
+    tokio::select! {
+        _ = f.send("run") => panic!("the card should wait"),
+        () = f.wait_for(card_waits) => {}
+    }
+    f.engine.push(vec![say("ok")]);
+    f.send("continue").await;
+    assert_eq!(not_run_texts(&f), [INTERRUPTED]);
+}
+
+#[tokio::test]
+async fn a_request_that_was_never_sent_is_not_counted() {
+    let f = fx(vec![
+        calls("", vec![call("c1", "list_dir", json!({}))]),
+        Step::Unsent(StepOutcome {
+            error: Some(StepError {
+                ui: UiError::from(ApiError::Unauthorized),
+                retry_after_secs: None,
+            }),
+            ..StepOutcome::default()
+        }),
+    ]);
+    f.send("go").await;
+    let usage: Vec<u32> = f
+        .events()
+        .into_iter()
+        .filter_map(|e| match e {
+            EngineEvent::Usage { requests, .. } => Some(requests),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(usage, [1]);
+    assert_eq!(f.state.store.chat_usage(&f.chat).unwrap().0, 1);
+}
+
+#[tokio::test]
+async fn deleting_chats_forgets_their_task_locks() {
+    let f = fx(vec![]);
+    for _ in 0..20 {
+        let id = f.state.store.create_chat(TOOLS_MODEL).unwrap().id;
+        f.state
+            .store
+            .set_folder(&id, Some(&real(f.project.path())))
+            .unwrap();
+        f.engine.push(vec![say("x")]);
+        let r = turn::send_message(&f.state, &id, "hi", vec![], TOOLS_MODEL, &|_| {})
+            .await
+            .unwrap();
+        assert_eq!(r.status, TurnStatus::Done);
+        chats::delete_chat(&f.state, &id).await.unwrap();
+    }
+    assert_eq!(f.state.task_locks.chats(), 0);
+}
+
+#[tokio::test]
+async fn compaction_refuses_when_no_user_row_starts_the_open_task() {
+    let f = fx(vec![say("SUMMARY")]);
+    let s = &f.state.store;
+    let first = s
+        .append_message(&f.chat, "assistant", "a", &[], false)
+        .unwrap();
+    for t in ["b", "c", "d", "e"] {
+        s.append_message(&f.chat, "assistant", t, &[], false)
+            .unwrap();
+    }
+    let open = crate::store::StoredToolCall {
+        id: "c9".into(),
+        name: "list_dir".into(),
+        arguments: "{}".into(),
+    };
+    s.append_assistant(&f.chat, "", &[open], false).unwrap();
+    s.set_summary(&f.chat, "S", first.seq).unwrap();
+    let r = compact::compact_chat(&f.state, &f.chat, TOOLS_MODEL, None).await;
+    assert!(r.is_err(), "{r:?}");
+    assert!(f.requests().is_empty());
+    assert_eq!(
+        s.summary(&f.chat).unwrap(),
+        Some(("S".to_string(), first.seq))
+    );
 }

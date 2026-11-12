@@ -175,7 +175,11 @@ impl Engine for DirectEngine {
         emit: &(dyn Fn(EngineEvent) + Send + Sync),
         cancel: CancellationToken,
     ) -> StepOutcome {
-        self.step(request, emit, &cancel).await.out
+        let ran = self.step(request, emit, &cancel).await;
+        StepOutcome {
+            sent: ran.sent,
+            ..ran.out
+        }
     }
 
     async fn run_turn(

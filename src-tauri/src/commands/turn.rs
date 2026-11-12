@@ -332,25 +332,50 @@ pub async fn send_message(
     if attachments.iter().any(is_image) && model_is_blind(s, model_id) {
         return Err(UiError::other(BLIND_MODEL));
     }
+    let first = Before::Send {
+        text,
+        attachments: &attachments,
+    };
     if task::project_for(s, chat_id, model_id).is_some() {
-        let first = Before::Send {
-            text,
-            attachments: &attachments,
-        };
         return run_project_turn(s, chat_id, model_id, first, on_event).await;
     }
+    let turn = take_over(s, chat_id).await;
     s.store
         .append_message(chat_id, "user", text, &attachments, false)
         .map_err(local)?;
-    run_stored_turn(s, chat_id, model_id, on_event).await
+    run_stored_turn(s, chat_id, model_id, &turn, on_event).await
+}
+
+/// The chat's turn, taken over from whatever ran in it before: registered
+/// (a running turn is cancelled), and holding the chat's task lock, so a
+/// cancelled project task has stored all of its rows before this turn
+/// stores any. In a chat where nothing runs it changes nothing.
+struct TakenOver<'a> {
+    registered: Registered<'a>,
+    cancel: CancellationToken,
+    _held: tokio::sync::OwnedMutexGuard<()>,
+}
+
+async fn take_over<'a>(s: &'a AppState, chat_id: &'a str) -> TakenOver<'a> {
+    let (id, cancel) =
+        register_turn(s, chat_id, Register::Replace).expect("replacing always registers");
+    let registered = Registered { s, chat_id, id };
+    let held = s.task_locks.hold(chat_id).await;
+    TakenOver {
+        registered,
+        cancel,
+        _held: held,
+    }
 }
 
 /// Run one turn over the stored history of the chat and store the reply and
-/// its usage. The caller has already stored the user message to answer.
+/// its usage. The caller has taken the chat over and already stored the
+/// user message to answer.
 async fn run_stored_turn(
     s: &AppState,
     chat_id: &str,
     model_id: &str,
+    turn: &TakenOver<'_>,
     on_event: &(dyn Fn(EngineEvent) + Send + Sync),
 ) -> Result<TurnResult, UiError> {
     s.store.set_chat_model(chat_id, model_id).map_err(local)?;
@@ -358,8 +383,7 @@ async fn run_stored_turn(
         model_id: model_id.to_string(),
         messages: wire_history(s, chat_id, model_id)?,
     };
-    let registration =
-        register_turn(s, chat_id, Register::Replace).expect("replacing always registers");
+    let registration = (turn.registered.id, turn.cancel.clone());
     let ran = run_registered(s, chat_id, registration, request, on_event).await;
     // The turn ran and the user message is stored, so a failure to store the
     // reply is reported as a failed turn, not as a send that never happened.
@@ -376,8 +400,8 @@ enum Before<'a> {
         text: &'a str,
         attachments: &'a [StoredAttachment],
     },
-    /// A retry: the reply to remove first, if any.
-    Retry { replace: Option<String> },
+    /// A retry, `regenerate` as given to `retry_turn`.
+    Retry { regenerate: bool },
 }
 
 /// Removes the chat's running turn when it is still this one, also when the
@@ -397,12 +421,31 @@ impl Drop for Registered<'_> {
     }
 }
 
-/// Runs a project task as the chat's turn. A task already running in the
-/// chat is cancelled and, before anything is stored, allowed to finish
-/// storing its own rows, so the new rows come after all of them. Then calls
-/// left without a result are recorded as not run, the user's message is
-/// stored (or the replaced reply removed), and the loop runs. `Err` means
-/// the turn never ran.
+const NOTHING_TO_RETRY: &str = "There is nothing to retry in this chat.";
+
+/// In a project chat, the reply a retry removes first, if any. A reply that
+/// made calls is never removed; a task that stopped after a call (its last
+/// row a call or a result) is continued. `Err` when there is nothing to
+/// retry.
+fn project_retry(s: &AppState, chat_id: &str, regenerate: bool) -> Result<Option<String>, UiError> {
+    let messages = s.store.sendable_messages(chat_id).map_err(local)?;
+    let replaced = messages.last().filter(|m| {
+        m.role == "assistant" && m.tool_calls.is_empty() && (m.interrupted || regenerate)
+    });
+    let answered = &messages[..messages.len() - usize::from(replaced.is_some())];
+    let continues =
+        |m: &StoredMessage| m.role == "user" || m.kind == "tool" || !m.tool_calls.is_empty();
+    if !answered.last().is_some_and(continues) {
+        return Err(UiError::other(NOTHING_TO_RETRY));
+    }
+    Ok(replaced.map(|m| m.id.clone()))
+}
+
+/// Runs a project task as the chat's turn. The chat is taken over first
+/// (`take_over`), so every row of a task that ran before is stored. Then
+/// calls left without a result are recorded, the user's message is stored
+/// (or, for a retry, the conversation is read and the replaced reply
+/// removed), and the loop runs. `Err` means the turn never ran.
 async fn run_project_turn(
     s: &AppState,
     chat_id: &str,
@@ -410,20 +453,19 @@ async fn run_project_turn(
     before: Before<'_>,
     on_event: &(dyn Fn(EngineEvent) + Send + Sync),
 ) -> Result<TurnResult, UiError> {
-    let (id, cancel) =
-        register_turn(s, chat_id, Register::Replace).expect("replacing always registers");
-    let _registered = Registered { s, chat_id, id };
-    let _held = s.task_locks.hold(chat_id).await;
+    let turn = take_over(s, chat_id).await;
     s.store.set_chat_model(chat_id, model_id).map_err(local)?;
-    task::repair(&s.store, chat_id).map_err(local)?;
+    let repaired = task::repair(&s.store, chat_id).map_err(local)?;
+    (0..repaired).for_each(|_| on_event(EngineEvent::MessageStored));
     match before {
         Before::Send { text, attachments } => {
             s.store
                 .append_message(chat_id, "user", text, attachments, false)
                 .map_err(local)?;
+            on_event(EngineEvent::MessageStored);
         }
-        Before::Retry { replace } => {
-            if let Some(replaced) = replace {
+        Before::Retry { regenerate } => {
+            if let Some(replaced) = project_retry(s, chat_id, regenerate)? {
                 s.store.delete_message(chat_id, &replaced).map_err(local)?;
             }
         }
@@ -435,7 +477,7 @@ async fn run_project_turn(
         }
         on_event(e);
     };
-    let result = task::run_task(s, chat_id, model_id, &emit, cancel).await;
+    let result = task::run_task(s, chat_id, model_id, &emit, turn.cancel.clone()).await;
     if unauthorized.load(Ordering::SeqCst) {
         revoke(s);
     }
@@ -568,37 +610,25 @@ pub async fn retry_turn(
     if s.store.get_chat(chat_id).map_err(local)?.is_none() {
         return Err(UiError::other("This chat no longer exists."));
     }
-    let messages = s.store.sendable_messages(chat_id).map_err(local)?;
     if task::project_for(s, chat_id, model_id).is_some() {
-        // A reply that made calls is never removed; a task that stopped
-        // after a call (its last row a call or a result) is continued.
-        let replaced = messages.last().filter(|m| {
-            m.role == "assistant" && m.tool_calls.is_empty() && (m.interrupted || regenerate)
-        });
-        let answered = &messages[..messages.len() - usize::from(replaced.is_some())];
-        let continues =
-            |m: &StoredMessage| m.role == "user" || m.kind == "tool" || !m.tool_calls.is_empty();
-        if !answered.last().is_some_and(continues) {
-            return Err(UiError::other("There is nothing to retry in this chat."));
-        }
-        let before = Before::Retry {
-            replace: replaced.map(|m| m.id.clone()),
-        };
+        let before = Before::Retry { regenerate };
         return run_project_turn(s, chat_id, model_id, before, on_event).await;
     }
+    let turn = take_over(s, chat_id).await;
+    let messages = s.store.sendable_messages(chat_id).map_err(local)?;
     let replaced = messages
         .last()
         .filter(|m| m.role == "assistant" && (m.interrupted || regenerate));
     let answered = &messages[..messages.len() - usize::from(replaced.is_some())];
     if answered.last().is_none_or(|m| m.role != "user") {
-        return Err(UiError::other("There is nothing to retry in this chat."));
+        return Err(UiError::other(NOTHING_TO_RETRY));
     }
     if let Some(replaced) = replaced {
         s.store
             .delete_message(chat_id, &replaced.id)
             .map_err(local)?;
     }
-    run_stored_turn(s, chat_id, model_id, on_event).await
+    run_stored_turn(s, chat_id, model_id, &turn, on_event).await
 }
 
 /// Stops the reply running in this chat, if any.

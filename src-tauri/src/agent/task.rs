@@ -49,7 +49,13 @@ pub const OVERFLOW_ASK: &str = "Your last reply contained too many or too large 
 /// A note: the project folder went away or was changed during the task.
 pub const FOLDER_GONE: &str = "The project folder is no longer available, so the task stopped.";
 /// A note: a tool ran but its result could not be stored.
-pub const RESULT_NOT_SAVED: &str = "A tool's result could not be saved, so the task stopped. The next message records it as not run.";
+pub const RESULT_NOT_SAVED: &str =
+    "A tool's result could not be saved, so the task stopped. The next message records it as lost.";
+/// The result of a call skipped because the chat's folder was closed or changed.
+pub use super::dispatch::FOLDER_CHANGED;
+/// The result of a call that may have started but whose result was never
+/// stored (a crash, a quit, a failed write): it may have run.
+pub const LOST: &str = "The result of this call was lost; it may have run. Check before repeating.";
 
 /// Overflowed replies in a row that pause the task.
 const MAX_OVERFLOWS: u32 = 2;
@@ -114,6 +120,32 @@ impl TaskLocks {
             .clone();
         lock.lock_owned().await
     }
+
+    /// The chat's lock when no task holds it, without waiting.
+    pub fn try_hold(&self, chat_id: &str) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+        let lock = self
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(chat_id.to_string())
+            .or_default()
+            .clone();
+        lock.try_lock_owned().ok()
+    }
+
+    /// Forgets the chat's lock (the chat was deleted). A task still holding
+    /// it keeps its own handle.
+    pub fn forget(&self, chat_id: &str) {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(chat_id);
+    }
+
+    #[cfg(test)]
+    pub fn chats(&self) -> usize {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
 }
 
 /// The system's name as the model is told it.
@@ -153,6 +185,15 @@ fn status_text(status: ToolStatus) -> &'static str {
     }
 }
 
+fn lost_meta(name: &str) -> ToolMeta {
+    ToolMeta {
+        name: name.to_string(),
+        status: status_text(ToolStatus::Error).to_string(),
+        summary: format!("Lost the result of {}", summary_text(name)),
+        detail: None,
+    }
+}
+
 fn not_run_meta(name: &str) -> ToolMeta {
     ToolMeta {
         name: name.to_string(),
@@ -162,11 +203,13 @@ fn not_run_meta(name: &str) -> ToolMeta {
     }
 }
 
-/// Records "Not run: the task was interrupted." for each call of the chat's
-/// last reply that has no result (a task that crashed, was quit or failed to
-/// store a result). Only the last reply's calls can still be answered under
-/// the pairing rule; an older one is covered by `history`. Returns how many
-/// were recorded.
+/// Records a result for each call of the chat's last reply that has none (a
+/// task that crashed, was quit or failed to store a result): a call marked
+/// as started may have acted, so its result is recorded as lost (an error,
+/// "it may have run"); one never marked did nothing and is recorded as
+/// "Not run: the task was interrupted.". Only the last reply's calls can
+/// still be answered under the pairing rule; an older one is covered by
+/// `history`. Returns how many were recorded.
 pub fn repair(store: &Store, chat_id: &str) -> crate::store::Result<usize> {
     let rows = store.sendable_messages(chat_id)?;
     let Some(last) = rows.iter().rev().find(|m| m.kind != "tool") else {
@@ -178,7 +221,12 @@ pub fn repair(store: &Store, chat_id: &str) -> crate::store::Result<usize> {
         .filter(|c| last.tool_calls.contains(c))
         .collect();
     for c in &open {
-        store.append_tool_result(chat_id, &c.id, &not_run_meta(&c.name), INTERRUPTED)?;
+        if store.call_started(chat_id, &c.id)? {
+            store.append_tool_result(chat_id, &c.id, &lost_meta(&c.name), LOST)?;
+        } else {
+            store.append_tool_result(chat_id, &c.id, &not_run_meta(&c.name), INTERRUPTED)?;
+        }
+        let _ = store.clear_call_started(chat_id, &c.id);
     }
     Ok(open.len())
 }
@@ -204,12 +252,12 @@ fn user_message(text: &str) -> WireMessage {
 /// The sendable rows as a project request sends them: assistant rows with
 /// their calls, results as `tool` messages. Each call is followed by exactly
 /// one result before any other message: a result for a call that is not
-/// open is left out, and a call with no stored result gets
-/// "Not run: the task was interrupted." (never stored by this function).
+/// open is left out, and a call with no stored result gets the lost-result
+/// text, since it may have started (never stored by this function).
 pub fn history(rows: &[StoredMessage], with_images: bool) -> Vec<WireMessage> {
     fn close(out: &mut Vec<WireMessage>, open: &mut Vec<String>) {
         for id in open.drain(..) {
-            out.push(tool_message(&id, INTERRUPTED));
+            out.push(tool_message(&id, LOST));
         }
     }
     let mut out = Vec::new();
@@ -355,12 +403,13 @@ pub async fn run_task(
 
 impl Task<'_> {
     async fn run(&mut self) -> End {
-        if let Err(e) = repair(&self.s.store, self.chat_id) {
-            return End::Failed(local(e));
+        match repair(&self.s.store, self.chat_id) {
+            Ok(n) => (0..n).for_each(|_| (self.emit)(EngineEvent::MessageStored)),
+            Err(e) => return End::Failed(local(e)),
         }
         loop {
             if self.cancel.is_cancelled() {
-                return stopped();
+                return self.cancelled().await;
             }
             let mut messages = match self.messages() {
                 Ok(m) => m,
@@ -386,12 +435,13 @@ impl Task<'_> {
                 .engine
                 .run_step(request, self.emit, self.cancel.clone())
                 .await;
-            self.tell_overflow = false;
-            self.count_request(step.cost_usd);
+            if step.sent {
+                self.count_request(step.cost_usd);
+            }
 
             if self.cancel.is_cancelled() {
                 return match self.store_partial(&step.text) {
-                    Ok(()) => stopped(),
+                    Ok(()) => self.cancelled().await,
                     Err(e) => End::Failed(e),
                 };
             }
@@ -407,6 +457,11 @@ impl Task<'_> {
                 } else {
                     End::Failed(error.ui)
                 };
+            }
+            // Told once: the request that carried the reminder went out and
+            // came back.
+            if step.sent {
+                self.tell_overflow = false;
             }
             if step.overflowed {
                 if let Some(end) = self.overflowed(&step.text) {
@@ -446,12 +501,42 @@ impl Task<'_> {
                 return end;
             }
             if !self.folder_unchanged().await {
-                return match self.note(FOLDER_GONE) {
-                    Ok(()) => End::Interrupted("folder_missing".to_string()),
-                    Err(e) => End::Failed(e),
-                };
+                return self.folder_gone();
             }
         }
+    }
+
+    /// The end of a cancelled task: a folder change (which also cancels)
+    /// says so; otherwise the user stopped it.
+    async fn cancelled(&mut self) -> End {
+        if self.folder_unchanged().await {
+            stopped()
+        } else {
+            self.folder_gone()
+        }
+    }
+
+    fn folder_gone(&mut self) -> End {
+        match self.note(FOLDER_GONE) {
+            Ok(()) => End::Interrupted("folder_missing".to_string()),
+            Err(e) => End::Failed(e),
+        }
+    }
+
+    /// Why the remaining calls of a reply must not run, if they must not:
+    /// the folder was closed or changed, or the task was stopped. Checked
+    /// before each call, so nothing is read in a folder the chat has left.
+    async fn halted(&mut self, rest: &[ToolCall]) -> Option<End> {
+        if !self.folder_unchanged().await {
+            return Some(match self.skip(rest, FOLDER_CHANGED, End::Done) {
+                End::Failed(e) => End::Failed(e),
+                _ => self.folder_gone(),
+            });
+        }
+        if self.cancel.is_cancelled() {
+            return Some(self.skip(rest, STOPPED, stopped()));
+        }
+        None
     }
 
     /// Everything one request sends: the system message, the skills note and
@@ -555,8 +640,8 @@ impl Task<'_> {
     async fn run_calls(&mut self, calls: &[ToolCall]) -> Option<End> {
         let read_log = self.s.read_logs.for_chat(self.chat_id);
         for (i, call) in calls.iter().enumerate() {
-            if self.cancel.is_cancelled() {
-                return Some(self.skip(&calls[i..], STOPPED, stopped()));
+            if let Some(end) = self.halted(&calls[i..]).await {
+                return Some(end);
             }
             let ctx = Ctx {
                 chat_id: self.chat_id,
@@ -582,10 +667,13 @@ impl Task<'_> {
                     .store
                     .append_tool_result(self.chat_id, &call.id, &meta, &d.outcome.text)
             {
-                // The next send records this call (and any after it) as not run.
+                // The call ran: the next send records its result as lost
+                // (and any later call as not run).
+                let _ = self.s.store.mark_call_started(self.chat_id, &call.id);
                 let _ = self.note(RESULT_NOT_SAVED);
                 return Some(End::Failed(local(e)));
             }
+            let _ = self.s.store.clear_call_started(self.chat_id, &call.id);
             self.stored_row();
             let rest = &calls[i + 1..];
             if let Some(text) = d.user_message {
@@ -603,8 +691,8 @@ impl Task<'_> {
                 self.stored_row();
                 return None;
             }
-            if self.cancel.is_cancelled() {
-                return Some(self.skip(rest, STOPPED, stopped()));
+            if let Some(end) = self.halted(rest).await {
+                return Some(end);
             }
             if let Next::Pause(reason) = self.guards.after_call(call, &d.outcome) {
                 return Some(self.skip(rest, PAUSED, End::Paused(reason)));

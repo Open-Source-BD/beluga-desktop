@@ -66,6 +66,9 @@ pub async fn set_chat_folder(
 async fn release_old_folder(s: &AppState, chat_id: &str, new: Option<&str>) -> Result<(), UiError> {
     let current = s.store.folder(chat_id).map_err(local)?;
     if current.as_deref() != new {
+        // A task must not go on in a folder the chat has left: its turn is
+        // stopped, and its waiting card ends as not run.
+        super::turn::stop(s, chat_id);
         s.approvals.drop_chat(chat_id);
         s.read_logs.forget(chat_id);
         s.background.stop_chat(chat_id).await;

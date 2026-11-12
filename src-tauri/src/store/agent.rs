@@ -4,6 +4,12 @@
 use super::{Result, Store, StoredToolCall};
 use rusqlite::{OptionalExtension, params};
 
+/// Settings key of a started call: the chat id has no `:`, so prefixes of
+/// different chats never overlap.
+fn started_key(chat_id: &str, call_id: &str) -> String {
+    format!("call_started:{chat_id}:{call_id}")
+}
+
 impl Store {
     /// Calls in the sendable rows that have no result row yet, oldest first.
     /// A result answers a call only inside the call's own turn: after its
@@ -102,6 +108,36 @@ impl Store {
             "INSERT INTO settings (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![key, value],
+        )?;
+        Ok(())
+    }
+
+    /// Records that call `call_id` of the chat is about to act (change a
+    /// file, run or stop a command, save the plan), so a result that never
+    /// arrives is reported as lost, not as not run.
+    pub fn mark_call_started(&self, chat_id: &str, call_id: &str) -> Result<()> {
+        self.set_setting(&started_key(chat_id, call_id), "1")
+    }
+
+    pub fn call_started(&self, chat_id: &str, call_id: &str) -> Result<bool> {
+        Ok(self.setting(&started_key(chat_id, call_id))?.is_some())
+    }
+
+    /// Forgets the mark once the call's result is stored.
+    pub fn clear_call_started(&self, chat_id: &str, call_id: &str) -> Result<()> {
+        self.conn().execute(
+            "DELETE FROM settings WHERE key = ?1",
+            [started_key(chat_id, call_id)],
+        )?;
+        Ok(())
+    }
+
+    /// Forgets every mark of the chat (it is being deleted).
+    pub fn clear_calls_started(&self, chat_id: &str) -> Result<()> {
+        let prefix = started_key(chat_id, "");
+        self.conn().execute(
+            "DELETE FROM settings WHERE substr(key, 1, length(?1)) = ?1",
+            [prefix],
         )?;
         Ok(())
     }

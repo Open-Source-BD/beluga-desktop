@@ -186,6 +186,10 @@ pub struct StepOutcome {
     /// The reply held too many calls or too much argument text, so it
     /// returned no calls; the caller should say so to the model.
     pub overflowed: bool,
+    /// The request was dispatched to the server. False when it never left
+    /// the app (no key, or the key could not be read); only a sent request
+    /// counts toward usage.
+    pub sent: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
