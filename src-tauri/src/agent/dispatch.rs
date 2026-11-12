@@ -445,6 +445,7 @@ async fn read_file(ctx: &Ctx<'_>, args: Value, pair: &mut Pair<'_>) -> Dispatche
     let card = Approval::Secret {
         id: String::new(),
         path: clean(&asked.shown),
+        folder: folder_text(&ctx.project.root),
     };
     match ask(ctx, card).await {
         Err(Unanswered::Busy) => busy(first.summary),
@@ -526,6 +527,7 @@ async fn change_file(ctx: &Ctx<'_>, edit: bool, args: Value, pair: &mut Pair<'_>
         let card = Approval::Edit {
             id: String::new(),
             path: clean(&change.target.shown),
+            folder: folder_text(&ctx.project.root),
             created: change.created,
             removed: change.removed.clone(),
             added: change.added.clone(),

@@ -167,6 +167,8 @@ export type Approval =
       id: string;
       /** The real path relative to the project folder. */
       path: string;
+      /** The project folder, as the command card shows it. */
+      folder: string;
       created: boolean;
       removed: string[];
       added: string[];
@@ -175,7 +177,14 @@ export type Approval =
       added_total: number;
       total_lines: number;
     }
-  | { kind: "secret"; id: string; path: string }
+  | {
+      kind: "secret";
+      id: string;
+      /** The real path relative to the project folder. */
+      path: string;
+      /** The project folder, as the command card shows it. */
+      folder: string;
+    }
   | {
       kind: "keep_going";
       id: string;

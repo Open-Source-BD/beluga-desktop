@@ -203,6 +203,7 @@ mod tests {
         Approval::Secret {
             id: String::new(),
             path: ".env".into(),
+            folder: "/p".into(),
         }
     }
 
@@ -222,6 +223,7 @@ mod tests {
         Approval::Edit {
             id: String::new(),
             path: "a.txt".into(),
+            folder: "/p".into(),
             created: false,
             removed: vec![],
             added: vec![],
@@ -556,7 +558,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_value(edit()).unwrap(),
-            json!({"kind":"edit","id":"","path":"a.txt","created":false,"removed":[],"added":[],
+            json!({"kind":"edit","id":"","path":"a.txt","folder":"/p","created":false,"removed":[],"added":[],
                    "removed_total":0,"added_total":0,"total_lines":1})
         );
         assert_eq!(

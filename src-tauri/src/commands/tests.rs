@@ -3399,6 +3399,7 @@ async fn waiting_card(
         let card = crate::agent::Approval::Secret {
             id: String::new(),
             path: ".env".into(),
+            folder: "/p".into(),
         };
         let cancel = tokio_util::sync::CancellationToken::new();
         state.approvals.ask(&chat, card, &|_| {}, &cancel).await

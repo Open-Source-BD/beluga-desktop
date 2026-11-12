@@ -23,6 +23,7 @@
     "kind": "edit",
     "id": "a3",
     "path": "src/main.rs",
+    "folder": "/work/proj",
     "created": false,
     "removed": [
       "old line"
@@ -38,7 +39,8 @@
   {
     "kind": "secret",
     "id": "a4",
-    "path": ".env"
+    "path": ".env",
+    "folder": "/work/proj"
   },
   {
     "kind": "keep_going",

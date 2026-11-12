@@ -53,6 +53,8 @@ pub enum Approval {
         id: String,
         /// The real path relative to the project folder.
         path: String,
+        /// The project folder, as the command card shows it.
+        folder: String,
         created: bool,
         removed: Vec<String>,
         added: Vec<String>,
@@ -63,7 +65,10 @@ pub enum Approval {
     },
     Secret {
         id: String,
+        /// The real path relative to the project folder.
         path: String,
+        /// The project folder, as the command card shows it.
+        folder: String,
     },
     KeepGoing {
         id: String,

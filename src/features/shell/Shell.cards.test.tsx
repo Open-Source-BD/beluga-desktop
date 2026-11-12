@@ -125,7 +125,7 @@ describe("a card in the chat", () => {
   });
 
   it("'Allow all edits' answers all_edits and then the Edits allowed chip shows; clicking it revokes", async () => {
-    const EDIT: Approval = { kind: "edit", id: "ap2", path: "a.ts", created: false, removed: ["x"], added: ["y"], removed_total: 1, added_total: 1, total_lines: 3 };
+    const EDIT: Approval = { kind: "edit", id: "ap2", path: "a.ts", folder: "/p", created: false, removed: ["x"], added: ["y"], removed_total: 1, added_total: 1, total_lines: 3 };
     render(<Shell />);
     await open("Chat A");
     await send();

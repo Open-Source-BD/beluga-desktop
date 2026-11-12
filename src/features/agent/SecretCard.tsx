@@ -23,6 +23,12 @@ export default function SecretCard({ approval: a, busy, armed, onAnswer, safeRef
         </code>
         ? Its contents will be sent to the model.
       </p>
+      <p className="card-line">
+        <span className="card-key">Folder</span>{" "}
+        <code className="card-mono" style={{ whiteSpace: "pre-wrap" }}>
+          {a.folder}
+        </code>
+      </p>
       <Choices
         choices={[{ label: "Allow once", answer: { decision: "once" } }]}
         decline={{ label: "Don't allow", note: true }}

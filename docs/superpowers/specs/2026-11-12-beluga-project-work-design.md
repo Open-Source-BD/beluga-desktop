@@ -227,3 +227,5 @@ Decisions the designer made during the build that change what this document says
 **The model's instructions.** The project folder's name is reduced to letters, digits, space, `-`, `_` and `.` before it is put in the system message.
 
 **The app's own data folder.** The file tools refuse every path whose real path is in the app's data folder (its database, key file and installed skills), and `find_files` and `search` never enter it, even when the project folder contains it. A file named `key` or `.beluga-live-key` is a secret file wherever it is.
+
+**What a file card names.** The edit and secret-file cards show the file's path inside the project and, labelled "Folder" as on the command card, the project folder's real path (without a Windows `\\?\` prefix).

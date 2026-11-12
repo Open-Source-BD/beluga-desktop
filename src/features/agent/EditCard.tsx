@@ -32,6 +32,12 @@ export default function EditCard({ approval: a, busy, armed, onAnswer, safeRef }
           {a.path}
         </code>
       </p>
+      <p className="card-line">
+        <span className="card-key">Folder</span>{" "}
+        <code className="card-mono" style={{ whiteSpace: "pre-wrap" }}>
+          {a.folder}
+        </code>
+      </p>
       {a.created && <p className="card-line">{`New file, ${a.total_lines} lines.`}</p>}
       {a.removed.length > 0 && (
         <div

@@ -24,7 +24,7 @@ const cmd = (over: Partial<Extract<Approval, { kind: "command" }>> = {}): Approv
   rule: "npm install", outside: false, first_in_project: false, background: false, ...over,
 });
 const edit = (over: Partial<Extract<Approval, { kind: "edit" }>> = {}): Approval => ({
-  kind: "edit", id: "ap2", path: "src/a.ts", created: false, removed: ["old one", "  old two"], added: ["new one"],
+  kind: "edit", id: "ap2", path: "src/a.ts", folder: "/work/shop", created: false, removed: ["old one", "  old two"], added: ["new one"],
   removed_total: 2, added_total: 1, total_lines: 10, ...over,
 });
 const show = (approval: Approval, over: { busy?: boolean; error?: string | null } = {}) => {
@@ -121,6 +121,14 @@ describe("edit card", () => {
     expect(screen.queryByText(/not shown/)).toBeNull();
   });
 
+  it("shows the project folder, labelled as on the command card", () => {
+    show(edit({ folder: "/work/my  shop" }));
+    const folder = screen.getByText("/work/my  shop", { normalizer: (t) => t });
+    expect(folder.style.whiteSpace).toBe("pre-wrap");
+    expect(folder.closest("p")?.textContent).toBe("Folder /work/my  shop");
+    expect(within(folder.closest("p") as HTMLElement).getByText("Folder")).toHaveClass("card-key");
+  });
+
   it("says how many lines are not shown, on each side", () => {
     show(edit({ removed: ["a"], removed_total: 5, added: ["b"], added_total: 3 }));
     expect(screen.getByText("4 more lines removed are not shown.")).toBeInTheDocument();
@@ -148,7 +156,7 @@ describe("edit card", () => {
 
 describe("secret and keep-going cards", () => {
   it("the secret card asks in the exact words and answers", async () => {
-    const a = show({ kind: "secret", id: "s", path: ".env.local" });
+    const a = show({ kind: "secret", id: "s", path: ".env.local", folder: "/work/shop" });
     expect(screen.getByText(asText(`Let ${APP_NAME} read .env.local? Its contents will be sent to the model.`))).toBeInTheDocument();
     expect(screen.getByText(".env.local").style.whiteSpace).toBe("pre-wrap");
     await userEvent.click(screen.getByRole("button", { name: "Allow once" }));
@@ -156,6 +164,14 @@ describe("secret and keep-going cards", () => {
     await userEvent.click(screen.getByRole("button", { name: "Don't allow" }));
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(a.onAnswer).toHaveBeenLastCalledWith({ decision: "decline", note: null });
+  });
+
+  it("the secret card shows the project folder, labelled as on the command card", () => {
+    show({ kind: "secret", id: "s", path: ".env", folder: "/work/my  shop" });
+    const folder = screen.getByText("/work/my  shop", { normalizer: (t) => t });
+    expect(folder.style.whiteSpace).toBe("pre-wrap");
+    expect(folder.closest("p")?.textContent).toBe("Folder /work/my  shop");
+    expect(within(folder.closest("p") as HTMLElement).getByText("Folder")).toHaveClass("card-key");
   });
 
   it.each([

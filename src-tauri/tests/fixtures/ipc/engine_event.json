@@ -46,7 +46,8 @@
     "approval": {
       "kind": "secret",
       "id": "a",
-      "path": ".env"
+      "path": ".env",
+      "folder": "/work/proj"
     }
   },
   {

@@ -338,9 +338,10 @@ mod tests {
                     approval: crate::agent::Approval::Secret {
                         id: "a1".into(),
                         path: ".env".into(),
+                        folder: "/p".into(),
                     },
                 },
-                json!({"type":"approval_needed","approval":{"kind":"secret","id":"a1","path":".env"}}),
+                json!({"type":"approval_needed","approval":{"kind":"secret","id":"a1","path":".env","folder":"/p"}}),
             ),
             (
                 EngineEvent::ApprovalCleared { id: "a1".into() },

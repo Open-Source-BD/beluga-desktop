@@ -609,6 +609,7 @@ fn every_event() -> Vec<EngineEvent> {
             approval: Approval::Secret {
                 id: "a".into(),
                 path: ".env".into(),
+                folder: "/work/proj".into(),
             },
         },
         EngineEvent::ApprovalCleared { id: "a".into() },
@@ -814,6 +815,7 @@ mod fixtures {
             Approval::Edit {
                 id: "a3".into(),
                 path: "src/main.rs".into(),
+                folder: "/work/proj".into(),
                 created: false,
                 removed: vec!["old line".into()],
                 added: vec!["new line".into(), "another".into()],
@@ -824,6 +826,7 @@ mod fixtures {
             Approval::Secret {
                 id: "a4".into(),
                 path: ".env".into(),
+                folder: "/work/proj".into(),
             },
             Approval::KeepGoing {
                 id: "a5".into(),

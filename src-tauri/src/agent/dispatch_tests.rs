@@ -419,6 +419,7 @@ async fn the_edit_card_carries_the_real_path_created_flag_and_changed_lines() {
         Approval::Edit {
             id: card.id().to_string(),
             path: "src/app.ts".into(),
+            folder: fx.folder(),
             created: false,
             removed: vec!["let a = 1;".into()],
             added: vec!["let a = 10;".into(), "let z = 0;".into()],
@@ -1016,7 +1017,8 @@ async fn a_secret_read_asks_and_once_returns_the_contents() {
         card,
         Approval::Secret {
             id: card.id().to_string(),
-            path: ".env".into()
+            path: ".env".into(),
+            folder: fx.folder(),
         }
     );
     assert_eq!(d.outcome.status, ToolStatus::Ok, "{}", d.outcome.text);
@@ -1118,6 +1120,7 @@ async fn an_answer_for_chat_b_cannot_approve_chat_a() {
     let b_card = Approval::Secret {
         id: String::new(),
         path: ".env".into(),
+        folder: fx.folder(),
     };
     let before = fx.cards().len();
     let call = fx.tool_call("edit_file", &edit_args("a.txt", "one", "uno").to_string());

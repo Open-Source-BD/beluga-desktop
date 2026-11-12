@@ -1218,6 +1218,7 @@ fn the_approval_policy_allows_only_the_task_itself() {
     let edit = |path: &str| Approval::Edit {
         id: "e1".into(),
         path: path.into(),
+        folder: "/p".into(),
         created: false,
         removed: vec![],
         added: vec![],
@@ -1232,6 +1233,7 @@ fn the_approval_policy_allows_only_the_task_itself() {
     let secret = Approval::Secret {
         id: "s1".into(),
         path: ".env".into(),
+        folder: "/p".into(),
     };
     assert!(matches!(answer_for(&secret), Answer::Decline { .. }));
     let keep_going = Approval::KeepGoing {

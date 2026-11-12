@@ -490,6 +490,7 @@ const approval = tagged<ipc.Approval, "kind">("kind", {
     kind: str,
     id: str,
     path: str,
+    folder: str,
     created: bool,
     removed: list(str),
     added: list(str),
@@ -497,7 +498,7 @@ const approval = tagged<ipc.Approval, "kind">("kind", {
     added_total: int,
     total_lines: int,
   },
-  secret: { kind: str, id: str, path: str },
+  secret: { kind: str, id: str, path: str, folder: str },
   keep_going: {
     kind: str,
     id: str,
@@ -644,10 +645,11 @@ describe("the Rust JSON samples", () => {
   });
 
   it("the validators refuse a field that is missing, extra or of the wrong type", () => {
-    expect(approval.check({ kind: "secret", id: "a", path: ".env" })).toBe(true);
+    expect(approval.check({ kind: "secret", id: "a", path: ".env", folder: "/p" })).toBe(true);
+    expect(approval.check({ kind: "secret", id: "a", path: ".env" })).toBe(false);
     expect(approval.check({ kind: "secret", id: "a" })).toBe(false);
-    expect(approval.check({ kind: "secret", id: "a", path: ".env", extra: 1 })).toBe(false);
-    expect(approval.check({ kind: "secret", id: 1, path: ".env" })).toBe(false);
+    expect(approval.check({ kind: "secret", id: "a", path: ".env", folder: "/p", extra: 1 })).toBe(false);
+    expect(approval.check({ kind: "secret", id: 1, path: ".env", folder: "/p" })).toBe(false);
     expect(approval.check({ kind: "other", id: "a" })).toBe(false);
     expect(answer.check({ decision: "decline" })).toBe(false);
   });
