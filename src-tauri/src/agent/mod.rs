@@ -35,6 +35,8 @@ pub mod paths;
 pub mod plan;
 pub mod read;
 pub mod rules;
+pub mod run;
 pub mod schema;
 pub mod search;
 pub mod secrets;
+pub mod shell;
