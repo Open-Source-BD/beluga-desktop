@@ -231,3 +231,5 @@ Decisions the designer made during the build that change what this document says
 **What a file card names.** The edit and secret-file cards show the file's path inside the project and, labelled "Folder" as on the command card, the project folder's real path (without a Windows `\\?\` prefix).
 
 **A `.git` folder is not a project.** A folder that is, or is inside, a `.git` folder (any component of its real path, in any case) cannot be opened as a chat's folder: "A .git folder cannot be opened as a project." Otherwise the secret rule, which reads the path below the project folder, would not see it.
+
+**Exporting a project chat.** An exported chat with tool calls starts, under its title, with "Tool results are summarised; their contents are not included." Each reply lists its calls as indented lines, one per call, with the result's stored summary and state; no result text is written (it can hold whole files, an approved secret file among them). Notes are exported as before, and a chat without tool calls exports exactly as before.

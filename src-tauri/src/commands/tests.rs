@@ -2894,6 +2894,85 @@ fn export_writes_title_roles_notes_attachments_and_the_summary() {
 }
 
 #[test]
+fn export_of_a_project_chat_summarises_tool_results_and_never_writes_their_contents() {
+    use crate::store::{StoredToolCall, ToolMeta};
+    let h = signed_in("http://unused.invalid");
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    chats::rename_chat(&h.state, &chat.id, "Fix").unwrap();
+    let store = &h.state.store;
+    let call = |id: &str, name: &str| StoredToolCall {
+        id: id.into(),
+        name: name.into(),
+        arguments: "{}".into(),
+    };
+    let meta = |name: &str, status: &str, summary: &str| ToolMeta {
+        name: name.into(),
+        status: status.into(),
+        summary: summary.into(),
+        detail: Some("SECRET=hunter2 in the detail".into()),
+    };
+    store
+        .append_message(&chat.id, "user", "Check the env", &[], false)
+        .unwrap();
+    store
+        .append_assistant(
+            &chat.id,
+            "",
+            &[call("c1", "read_file"), call("c2", "run_command")],
+            false,
+        )
+        .unwrap();
+    store
+        .append_tool_result(
+            &chat.id,
+            "c1",
+            &meta("read_file", "ok", "Read .env"),
+            "1\tSECRET=hunter2",
+        )
+        .unwrap();
+    store
+        .append_tool_result(
+            &chat.id,
+            "c2",
+            &meta("run_command", "not_run", "Did not run cat\n.env"),
+            "Not run: the task was stopped. SECRET=hunter2",
+        )
+        .unwrap();
+    store
+        .append_assistant(&chat.id, "Looking again.", &[call("c3", "search")], false)
+        .unwrap();
+    store
+        .append_tool_result(
+            &chat.id,
+            "c3",
+            &meta("search", "declined", "Declined: read .env"),
+            "The user declined.",
+        )
+        .unwrap();
+    store
+        .append_note(&chat.id, "The task was stopped.")
+        .unwrap();
+    store
+        .append_assistant(&chat.id, "The key is set.", &[], false)
+        .unwrap();
+
+    let file = h._dir.path().join("project.md");
+    export::export_chat(&h.state, &chat.id, file.to_str().unwrap()).unwrap();
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert!(!content.contains("hunter2"), "{content}");
+    assert_eq!(
+        content,
+        "# Fix\n\n\
+Tool results are summarised; their contents are not included.\n\n\
+## You\n\nCheck the env\n\n\
+## m/a\n\n    Read .env (ok)\n    Did not run cat .env (not run)\n\n\
+## m/a\n\nLooking again.\n\n    Declined: read .env (declined)\n\n\
+> The task was stopped.\n\n\
+## m/a\n\nThe key is set.\n"
+    );
+}
+
+#[test]
 fn export_to_an_unwritable_or_relative_path_is_a_ui_error() {
     let h = signed_in("http://unused.invalid");
     let chat = chats::create_chat(&h.state, "m/a").unwrap();

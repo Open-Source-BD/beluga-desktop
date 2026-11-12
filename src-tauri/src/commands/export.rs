@@ -17,9 +17,38 @@ fn quoted(text: &str) -> String {
         .join("\n")
 }
 
-fn block(m: &StoredMessage, model_id: &str) -> String {
+/// The first line of an exported chat that has tool calls.
+const TOOLS_SUMMARISED: &str = "Tool results are summarised; their contents are not included.";
+
+/// One line per call of an assistant row, indented (shown as plain text):
+/// the stored summary of its result and the result's state. Never the result
+/// text, which can hold whole files (an approved secret file among them).
+fn calls_block(m: &StoredMessage, rows: &[StoredMessage]) -> String {
+    m.tool_calls
+        .iter()
+        .map(|c| {
+            let result = rows
+                .iter()
+                .find(|r| r.kind == "tool" && r.tool_call_id.as_deref() == Some(c.id.as_str()))
+                .and_then(|r| r.tool_meta.as_ref());
+            let line = match result {
+                Some(t) => format!("{} ({})", t.summary, t.status.replace('_', " ")),
+                None => format!("{} (no result)", c.name),
+            };
+            format!("    {}", line.replace(['\r', '\n'], " "))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// A row as Markdown, or `None` for a tool result: it is written, as a
+/// summary, under the reply that made the call.
+fn block(m: &StoredMessage, rows: &[StoredMessage], model_id: &str) -> Option<String> {
     if m.kind == "note" {
-        return quoted(&m.text);
+        return Some(quoted(&m.text));
+    }
+    if m.kind == "tool" {
+        return None;
     }
     let heading = if m.role == "user" { "You" } else { model_id };
     let mut out = format!("## {heading}\n\n{}", m.text);
@@ -27,13 +56,21 @@ fn block(m: &StoredMessage, model_id: &str) -> String {
         let names: Vec<&str> = m.attachments.iter().map(|a| a.name.as_str()).collect();
         out.push_str(&format!("\n\nAttachments: {}", names.join(", ")));
     }
-    out
+    if !m.tool_calls.is_empty() {
+        if !m.text.is_empty() || !m.attachments.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(&calls_block(m, rows));
+    }
+    Some(out)
 }
 
 /// The chat as Markdown with `\n` line endings: the title, then every row in
 /// order (notes and messages from before a compaction included), with the
 /// summary placed where the summarised messages end. Message text, code
-/// fences included, is written as it is.
+/// fences included, is written as it is. A chat with tool calls says under
+/// its title that their results are only summarised: each reply lists its
+/// calls with their summaries and states, and no result text is written.
 fn markdown(s: &AppState, chat_id: &str) -> Result<String, UiError> {
     let chat = s
         .store
@@ -48,12 +85,19 @@ fn markdown(s: &AppState, chat_id: &str) -> Result<String, UiError> {
     };
     let mut summary = s.store.summary(chat_id).map_err(local)?;
     let summary_block = |text: &str| format!("## Summary of earlier messages\n\n{text}");
+    let rows = s.store.get_messages(chat_id).map_err(local)?;
     let mut blocks = vec![format!("# {title}")];
-    for m in s.store.get_messages(chat_id).map_err(local)? {
+    if rows
+        .iter()
+        .any(|m| m.kind == "tool" || !m.tool_calls.is_empty())
+    {
+        blocks.push(TOOLS_SUMMARISED.to_string());
+    }
+    for m in &rows {
         if let Some((text, _)) = summary.take_if(|(_, from)| m.seq >= *from) {
             blocks.push(summary_block(&text));
         }
-        blocks.push(block(&m, &chat.model_id));
+        blocks.extend(block(m, &rows, &chat.model_id));
     }
     if let Some((text, _)) = summary {
         blocks.push(summary_block(&text));
