@@ -1,7 +1,7 @@
 //! Sending a message and stopping a reply.
 
 use super::auth::revoke;
-use super::chat_state::{SKILL_NOTE, skills_to_send};
+use super::chat_state::{SKILL_NOTE, skills_to_send, wire_chars};
 use super::chats::local;
 use crate::agent::{guards, task};
 use crate::engine::{EngineEvent, TurnOutcome, TurnRequest, UiError};
@@ -395,10 +395,11 @@ async fn run_stored_turn(
         messages: wire_history(s, chat_id, model_id)?,
     };
     let registration = (turn.registered.id, turn.cancel.clone());
+    let request_chars = request.messages.iter().map(wire_chars).sum();
     let ran = run_registered(s, chat_id, registration, request, on_event).await;
     // The turn ran and the user message is stored, so a failure to store the
     // reply is reported as a failed turn, not as a send that never happened.
-    if let Err(e) = persist(s, chat_id, &ran.outcome) {
+    if let Err(e) = persist(s, chat_id, model_id, request_chars, &ran.outcome) {
         return Ok(TurnResult::failed(e));
     }
     Ok(ran.result)
@@ -598,15 +599,34 @@ pub(super) async fn run_registered(
     }
 }
 
-fn persist(s: &AppState, chat_id: &str, out: &TurnOutcome) -> Result<(), UiError> {
+fn persist(
+    s: &AppState,
+    chat_id: &str,
+    model_id: &str,
+    request_chars: usize,
+    out: &TurnOutcome,
+) -> Result<(), UiError> {
     if !out.text.is_empty() {
         s.store
             .append_message(chat_id, "assistant", &out.text, &[], out.interrupted)
             .map_err(local)?;
     }
     if out.requests > 0 {
+        // The provider reported no cost: record an estimate for a paid model
+        // instead of $0, so the daily limit still counts the request. Used
+        // only when no cost is reported.
+        let cost = if out.cost_reported || out.text.is_empty() {
+            out.cost_usd
+        } else {
+            guards::estimate_cost(
+                guards::model_info(s, model_id).as_ref(),
+                out.prompt_tokens,
+                request_chars,
+                out.text.chars().count(),
+            )
+        };
         s.store
-            .record_usage(chat_id, out.requests, out.cost_usd)
+            .record_usage(chat_id, out.requests, cost)
             .map_err(local)?;
     }
     Ok(())

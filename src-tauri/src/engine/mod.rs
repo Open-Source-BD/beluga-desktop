@@ -209,6 +209,10 @@ pub struct TurnOutcome {
     /// HTTP requests actually sent to chat completions during this turn.
     pub requests: u32,
     pub cost_usd: f64,
+    /// The provider reported a cost (`cost_usd` is then that cost, not 0).
+    pub cost_reported: bool,
+    /// The prompt tokens the provider reported, if it did.
+    pub prompt_tokens: Option<u32>,
     pub interrupted: bool,
 }
 
@@ -253,6 +257,8 @@ pub(crate) fn finish_turn(
         text: step.text,
         requests,
         cost_usd: step.cost_usd.unwrap_or(0.0),
+        cost_reported: step.cost_usd.is_some(),
+        prompt_tokens: step.prompt_tokens,
         interrupted: false,
     };
     if let Some(cost_usd) = step.cost_usd {

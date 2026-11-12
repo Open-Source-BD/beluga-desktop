@@ -25,7 +25,7 @@ use super::paths::Project;
 use super::read::summary_text;
 use super::shell::{self, Shell};
 use super::{ToolCall, ToolStatus, prompt, schema};
-use crate::commands::chat_state::skills_to_send;
+use crate::commands::chat_state::{skills_to_send, wire_chars};
 use crate::commands::chats::local;
 use crate::commands::turn::{TurnResult, model_is_blind, preamble_with, system, wire};
 use crate::engine::{EngineEvent, StepRequest, UiError};
@@ -400,6 +400,7 @@ impl<'a> Task<'a> {
             {
                 return self.pause(reason);
             }
+            let message_chars: usize = messages.iter().map(wire_chars).sum();
             let request = StepRequest {
                 model_id: self.model_id.to_string(),
                 messages,
@@ -412,7 +413,19 @@ impl<'a> Task<'a> {
                 .run_step(request, self.emit, self.cancel.clone())
                 .await;
             if step.sent {
-                self.count_request(step.cost_usd);
+                let cost = step.cost_usd.unwrap_or_else(|| {
+                    // The provider reported no cost: record an estimate, not
+                    // $0, so the daily limit still counts the request.
+                    let reply_chars = step.text.chars().count()
+                        + step
+                            .tool_calls
+                            .iter()
+                            .map(|c| c.name.chars().count() + c.arguments.chars().count())
+                            .sum::<usize>();
+                    self.guards
+                        .estimate(message_chars, step.prompt_tokens, reply_chars)
+                });
+                self.count_request(cost);
             }
 
             if self.cancel.is_cancelled() {
@@ -425,7 +438,11 @@ impl<'a> Task<'a> {
                 // A rate limit is waited out and the same request sent
                 // again; a reply cut part way is not (its text is kept).
                 if step.text.is_empty() {
-                    match self.guards.retry_after(&self.env(), &error).await {
+                    match self
+                        .guards
+                        .retry_after(&self.env(), self.requests, &error)
+                        .await
+                    {
                         Retry::No => {}
                         Retry::Again => continue,
                         Retry::Pause(reason) => return self.pause(reason),
@@ -580,8 +597,7 @@ impl<'a> Task<'a> {
     /// Records one request's usage and emits the task's running totals. A
     /// usage row that cannot be written does not end the task: the reply
     /// still has to be stored.
-    fn count_request(&mut self, cost_usd: Option<f64>) {
-        let cost = cost_usd.unwrap_or(0.0);
+    fn count_request(&mut self, cost: f64) {
         self.requests += 1;
         self.cost_usd += cost;
         self.guards.counted();
@@ -640,7 +656,7 @@ impl<'a> Task<'a> {
             return Some(End::Failed(e));
         }
         if self.overflows_in_a_row >= MAX_OVERFLOWS {
-            return Some(End::Paused(guards::GOING_IN_CIRCLES));
+            return Some(self.pause(guards::GOING_IN_CIRCLES));
         }
         if let Next::Pause(reason) = circles {
             return Some(self.pause(reason));

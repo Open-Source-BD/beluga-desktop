@@ -115,11 +115,11 @@ pub fn today() -> String {
     format!("{:04}-{:02}-{:02}", d.year(), u8::from(d.month()), d.day())
 }
 
-/// What requests cost today, in all chats, as recorded. A store that cannot
-/// be read counts as nothing spent (the store failing stops the task soon
-/// after anyway).
-pub fn spent_today(store: &Store) -> f64 {
-    store.day_usage(&today()).map_or(0.0, |(_, cost)| cost)
+/// What requests cost today, in all chats, as recorded; `None` when the
+/// store cannot be read (callers that guard spending treat that as "limit
+/// reached", never as nothing spent).
+pub fn spent_today(store: &Store) -> Option<f64> {
+    store.day_usage(&today()).ok().map(|(_, cost)| cost)
 }
 
 /// The cached model list's entry for the model.
@@ -127,6 +127,26 @@ pub fn model_info(s: &AppState, model_id: &str) -> Option<ModelInfo> {
     ModelCache::load(&s.model_cache_file())?
         .into_iter()
         .find(|m| m.id == model_id)
+}
+
+/// An estimate of what a request cost, used only when the provider reports
+/// no cost for a request on a paid model (so it is never recorded as $0): the
+/// prompt tokens the provider reported (else the request's characters / 4) at
+/// the model's prompt price, plus the reply's characters / 4 tokens at its
+/// completion price. A free model, and a model missing from the model list
+/// (its prices are unknown), estimate nothing.
+pub fn estimate_cost(
+    model: Option<&ModelInfo>,
+    prompt_tokens: Option<u32>,
+    request_chars: usize,
+    reply_chars: usize,
+) -> f64 {
+    let Some(model) = model.filter(|m| !m.is_free) else {
+        return 0.0;
+    };
+    let prompt = prompt_tokens.map_or(request_chars as f64 / 4.0, f64::from);
+    let reply = reply_chars as f64 / 4.0;
+    (prompt * model.prompt_usd_per_mtok + reply * model.completion_usd_per_mtok) / 1_000_000.0
 }
 
 /// A model missing from the model list may cost money, so it counts as paid.
@@ -145,12 +165,15 @@ pub fn over_limit(store: &Store, model: Option<&ModelInfo>) -> Option<UiError> {
         return None;
     }
     let limit = spend_limit(store)?;
-    (spent_today(store) >= limit - MONEY_TOLERANCE).then(|| {
-        UiError::daily_limit(&format!(
-            "You have reached today's spending limit of {}. You can change it in Settings.",
-            dollars(limit)
-        ))
-    })
+    // A spend that cannot be read fails closed: the limit counts as reached.
+    spent_today(store)
+        .is_none_or(|spent| spent >= limit - MONEY_TOLERANCE)
+        .then(|| {
+            UiError::daily_limit(&format!(
+                "You have reached today's spending limit of {}. You can change it in Settings.",
+                dollars(limit)
+            ))
+        })
 }
 
 /// `over_limit` for a model named by id.
@@ -395,6 +418,27 @@ impl Guards {
         is_paid(self.model.as_ref())
     }
 
+    /// The cost to record for a request on this task's model that reported
+    /// none: `estimate_cost` over the request (`message_chars` plus the tool
+    /// definitions) and the reply. A reply with nothing in it (a request that
+    /// failed before any answer) is not estimated.
+    pub fn estimate(
+        &self,
+        message_chars: usize,
+        prompt_tokens: Option<u32>,
+        reply_chars: usize,
+    ) -> f64 {
+        if reply_chars == 0 {
+            return 0.0;
+        }
+        estimate_cost(
+            self.model.as_ref(),
+            prompt_tokens,
+            message_chars + self.fixed_chars,
+            reply_chars,
+        )
+    }
+
     /// One request was sent.
     pub fn counted(&mut self) {
         self.since_asked += 1;
@@ -423,7 +467,7 @@ impl Guards {
             id: String::new(),
             requests,
             free_left: if paid { None } else { self.free_left() },
-            spent_today_usd: paid.then(|| spent_today(&env.s.store)),
+            spent_today_usd: paid.then(|| spent_today(&env.s.store)).flatten(),
         };
         let answer = env
             .s
@@ -503,14 +547,24 @@ impl Guards {
 
     /// A request failed. A rate limit is waited out (what the server asked
     /// for, at most 60 seconds, 10 when it named nothing), up to three
-    /// times a task; the fourth pauses. A rate limit or an empty balance
-    /// also has the key status read again before the next request.
-    pub async fn retry_after(&mut self, env: &Env<'_>, error: &StepError) -> Retry {
+    /// times a task; the fourth pauses. On a free model the key status is
+    /// read first, and no free requests left pauses at once. A rate limit or
+    /// an empty balance also has the key status read again before the next
+    /// request.
+    pub async fn retry_after(&mut self, env: &Env<'_>, requests: u32, error: &StepError) -> Retry {
         if matches!(error.ui.kind.as_str(), "rate_limited" | "no_credit") {
             self.key_due = true;
         }
         if error.ui.kind != "rate_limited" {
             return Retry::No;
+        }
+        // On a free model the limit may be the day's free allowance running
+        // out, which no wait cures: read it before waiting.
+        if !self.paid() {
+            self.read_key(env, requests).await;
+            if self.free_left() == Some(0) {
+                return Retry::Pause(NO_FREE_REQUESTS);
+            }
         }
         if self.rate_waits >= MAX_RATE_WAITS {
             return Retry::Pause(RATE_LIMITED);

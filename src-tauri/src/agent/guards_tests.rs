@@ -382,3 +382,29 @@ fn assistant_user_and_system_messages_are_never_trimmed() {
     assert!(!trim(&mut messages, 1_000, 0, &mut trimmed));
     assert_eq!(messages, original);
 }
+
+#[test]
+fn a_spend_that_cannot_be_read_counts_as_the_limit_reached_for_paid_models() {
+    let store = Store::in_memory().unwrap();
+    store.exec_for_test("DROP TABLE daily_usage;").unwrap();
+    let e = over_limit(&store, Some(&model(false))).expect("fails closed");
+    assert_eq!(e.kind, "daily_limit");
+    assert!(over_limit(&store, None).is_some());
+    // A free model never, and no limit never.
+    assert_eq!(over_limit(&store, Some(&model(true))), None);
+    set_spend_limit(&store, None).unwrap();
+    assert_eq!(over_limit(&store, Some(&model(false))), None);
+}
+
+#[test]
+fn the_estimate_prices_prompt_and_reply_tokens_and_is_zero_when_unknown_or_free() {
+    let paid = model(false);
+    // 1,000 tokens at $1/Mtok and 3 tokens (12 chars) at $2/Mtok.
+    let e = estimate_cost(Some(&paid), Some(1000), 40_000, 12);
+    assert!((e - 0.001_006).abs() < 1e-12, "{e}");
+    // Without reported tokens the request characters / 4 stand in.
+    let e = estimate_cost(Some(&paid), None, 4000, 0);
+    assert!((e - 0.001).abs() < 1e-12, "{e}");
+    assert_eq!(estimate_cost(None, Some(1000), 4000, 12), 0.0);
+    assert_eq!(estimate_cost(Some(&model(true)), Some(1000), 4000, 12), 0.0);
+}

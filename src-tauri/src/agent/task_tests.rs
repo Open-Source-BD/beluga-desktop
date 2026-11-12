@@ -1181,7 +1181,11 @@ async fn two_overflowed_replies_in_a_row_pause_the_task_as_going_in_circles() {
     assert_eq!(r.status, TurnStatus::Paused);
     assert_eq!(r.reason.as_deref(), Some("going_in_circles"));
     assert_eq!(f.requests().len(), 2);
-    assert_eq!(f.shape(), ["user", "note", "note"]);
+    assert_eq!(f.shape(), ["user", "note", "note", "note"]);
+    assert_eq!(
+        notes(&f),
+        [OVERFLOW_NOTE, OVERFLOW_NOTE, guards::STRUGGLING]
+    );
     assert_eq!(
         f.events().last(),
         Some(&EngineEvent::Paused {
@@ -2539,4 +2543,142 @@ async fn a_plain_retry_with_nothing_to_retry_leaves_a_running_task_alone() {
     let (r, ()) = tokio::join!(f.send("write"), retry);
     assert_eq!(r.status, TurnStatus::Done, "{r:?}");
     assert!(f.path("b.txt").exists());
+}
+
+// ---------------------------------------------------------------------------
+// Money guards carried from the review of the request guards
+// ---------------------------------------------------------------------------
+
+/// A reply whose provider reported no cost.
+fn unpriced(text: &str, prompt_tokens: Option<u32>) -> Step {
+    Step::Reply(StepOutcome {
+        text: text.into(),
+        cost_usd: None,
+        prompt_tokens,
+        ..StepOutcome::default()
+    })
+}
+
+fn recorded_cost(f: &Fx) -> f64 {
+    f.state.store.chat_usage(&f.chat).unwrap().1
+}
+
+#[tokio::test]
+async fn a_paid_project_reply_with_no_reported_cost_records_an_estimate() {
+    // 1,000 prompt tokens at $1 a million, and 8 characters (2 tokens) at $2.
+    let f = fx(vec![unpriced("abcdefgh", Some(1000))]);
+    assert_eq!(f.send_on("go", PAID_TOOLS).await.status, TurnStatus::Done);
+    assert!((recorded_cost(&f) - 0.001_004).abs() < 1e-12);
+    let shown: Vec<f64> = f
+        .events()
+        .into_iter()
+        .filter_map(|e| match e {
+            EngineEvent::Usage { cost_usd, .. } => Some(cost_usd),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(shown.len(), 1);
+    assert!((shown[0] - 0.001_004).abs() < 1e-12);
+}
+
+#[tokio::test]
+async fn without_reported_prompt_tokens_the_estimate_uses_the_request_characters() {
+    let f = fx(vec![unpriced("abcdefgh", None)]);
+    f.send_on("go", PAID_TOOLS).await;
+    let request = &f.requests()[0];
+    let chars = request
+        .messages
+        .iter()
+        .map(chat_state::wire_chars)
+        .sum::<usize>()
+        + schema::tools().to_string().chars().count();
+    let expected = (chars as f64 / 4.0) * 1.0 / 1e6 + 2.0 * 2.0 / 1e6;
+    assert!(
+        (recorded_cost(&f) - expected).abs() < 1e-9,
+        "{} vs {expected}",
+        recorded_cost(&f)
+    );
+}
+
+#[tokio::test]
+async fn a_free_model_or_a_reported_cost_gets_no_estimate() {
+    let f = fx(vec![unpriced("abcdefgh", Some(1000))]);
+    f.send("go").await;
+    assert_eq!(recorded_cost(&f), 0.0);
+    let f = fx(vec![costing(0.5, say("abcdefgh"))]);
+    f.send_on("go", PAID_TOOLS).await;
+    assert!((recorded_cost(&f) - 0.5).abs() < 1e-12);
+}
+
+#[tokio::test]
+async fn a_paid_plain_reply_with_no_reported_cost_records_an_estimate() {
+    let f = fx(vec![unpriced("abcd", Some(2000))]);
+    assert_eq!(f.send_on("go", PAID_PLAIN).await.status, TurnStatus::Done);
+    // 2,000 tokens at $1 a million and 1 token at $2.
+    assert!((recorded_cost(&f) - 0.002_002).abs() < 1e-12);
+}
+
+#[tokio::test]
+async fn a_model_missing_from_the_model_list_records_no_estimate() {
+    let f = fx(vec![unpriced("abcd", Some(2000))]);
+    assert_eq!(f.send_on("go", "m/unknown").await.status, TurnStatus::Done);
+    assert_eq!(recorded_cost(&f), 0.0);
+    assert_eq!(f.state.store.chat_usage(&f.chat).unwrap().0, 1);
+}
+
+#[tokio::test]
+async fn a_paid_request_is_refused_when_todays_spend_cannot_be_read() {
+    let f = fx(vec![]);
+    f.state
+        .store
+        .exec_for_test("DROP TABLE daily_usage;")
+        .unwrap();
+    for model in [PAID_PLAIN, PAID_TOOLS] {
+        let e = f.try_send_on("hi", model).await.unwrap_err();
+        assert_eq!(e.kind, "daily_limit", "{model}");
+        assert_eq!(e.message, LIMIT_REACHED);
+    }
+    assert!(f.requests().is_empty());
+    // A free model is not held back by it, and neither is "no limit".
+    f.engine.push(vec![say("free")]);
+    assert_eq!(f.send("hi").await.status, TurnStatus::Done);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_free_rate_limit_with_no_free_requests_left_pauses_at_once_without_waiting() {
+    let f = fx(vec![list("c1"), rate_limited(Some(30))]);
+    // Plenty at the start, none when the rate limit arrives.
+    f.outside.statuses.lock().unwrap().push_back(free_left(10));
+    f.outside
+        .fallback
+        .lock()
+        .unwrap()
+        .replace(free_left(0).unwrap());
+    let r = f.send("go").await;
+    assert_eq!(r.status, TurnStatus::Paused, "{r:?}");
+    assert_eq!(r.reason.as_deref(), Some("no_free_requests"));
+    assert!(f.outside.waits.lock().unwrap().is_empty());
+    assert!(
+        !f.events()
+            .iter()
+            .any(|e| matches!(e, EngineEvent::Waiting { .. }))
+    );
+    assert_eq!(
+        notes(&f),
+        ["Paused: no free requests are left today. They reset at midnight UTC."]
+    );
+    assert_rows_paired(&f);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_free_rate_limit_with_requests_left_is_still_waited_out() {
+    let f = fx(vec![list("c1"), rate_limited(Some(2)), say("ok")]);
+    f.outside
+        .fallback
+        .lock()
+        .unwrap()
+        .replace(free_left(5).unwrap());
+    let r = f.send("go").await;
+    assert_eq!(r.status, TurnStatus::Done, "{r:?}");
+    assert_eq!(*f.outside.waits.lock().unwrap(), [2]);
 }
