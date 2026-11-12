@@ -37,7 +37,7 @@ fn write_file(id: &str) -> Step {
         vec![call(
             id,
             "write_file",
-            json!({"path": "b.txt", "content": "new"}),
+            json!({"path": "b.txt", "content": format!("new {id}")}),
         )],
     )
 }
@@ -60,7 +60,7 @@ async fn answer_approval_reaches_a_waiting_task_and_the_task_continues() {
     };
     let (r, ()) = tokio::join!(f.send("write"), answer);
     assert_eq!(r.status, TurnStatus::Done, "{r:?}");
-    assert_eq!(std::fs::read_to_string(f.path("b.txt")).unwrap(), "new");
+    assert_eq!(std::fs::read_to_string(f.path("b.txt")).unwrap(), "new c1");
     assert_eq!(
         f.shape(),
         ["user", "assistant[write_file]", "tool:ok", "assistant"]
@@ -115,7 +115,7 @@ fn waiting_approval_refuses_an_unknown_chat_and_is_none_when_nothing_waits() {
 }
 
 // ---------------------------------------------------------------------------
-// task_state, set_edits_allowed, background commands
+// task_state, revoke_edits, background commands
 // ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -175,19 +175,6 @@ async fn task_state_reflects_the_plan_edits_allowed_the_card_and_background_comm
     assert_eq!(st.background.len(), 1);
     assert!(st.background[0].running);
     assert_eq!(st.background[0].command, sleeper());
-
-    commands::set_edits_allowed(&f.state, &f.chat, true).unwrap();
-    assert!(
-        commands::task_state(&f.state, &f.chat)
-            .unwrap()
-            .edits_allowed
-    );
-    commands::set_edits_allowed(&f.state, &f.chat, false).unwrap();
-    assert!(
-        !commands::task_state(&f.state, &f.chat)
-            .unwrap()
-            .edits_allowed
-    );
 
     // The kept output, then a stop; the command stays listed, ended.
     let id = st.background[0].id.clone();
@@ -252,14 +239,14 @@ async fn background_commands_are_refused_for_unknown_chats_unknown_ids_and_other
 }
 
 #[test]
-fn task_state_and_set_edits_allowed_refuse_an_unknown_chat() {
+fn task_state_and_revoke_edits_refuse_an_unknown_chat() {
     let f = fx(vec![]);
     assert_eq!(
         commands::task_state(&f.state, "nope").unwrap_err().message,
         NO_CHAT
     );
     assert_eq!(
-        commands::set_edits_allowed(&f.state, "nope", true)
+        commands::revoke_edits(&f.state, "nope")
             .unwrap_err()
             .message,
         NO_CHAT
@@ -707,7 +694,7 @@ async fn no_new_command_result_or_event_carries_the_stored_key() {
     record(to(&commands::spend_limit(&f.state)));
     record(to(&commands::set_spend_limit(&f.state, Some(3.0))));
     record(to(&commands::set_spend_limit(&f.state, Some(0.01))));
-    record(to(&commands::set_edits_allowed(&f.state, &f.chat, true)));
+    record(to(&commands::revoke_edits(&f.state, &f.chat)));
     record(to(&commands::answer_approval(
         &f.state,
         &f.chat,
@@ -1072,6 +1059,86 @@ mod fixtures {
         for entry in std::fs::read_dir(dir()).unwrap() {
             let name = entry.unwrap().file_name().to_string_lossy().into_owned();
             assert!(known.contains(&name.as_str()), "{name} has no sample");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Fix round 1
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn all_edits_is_allowed_through_a_card_and_revoked_by_the_command_so_the_next_edit_asks() {
+    let f = fx(vec![
+        write_file("c1"),
+        say("one"),
+        write_file("c2"),
+        say("two"),
+        write_file("c3"),
+        say("three"),
+    ]);
+    // Nothing the web view can call turns it on.
+    assert!(
+        !commands::task_state(&f.state, &f.chat)
+            .unwrap()
+            .edits_allowed
+    );
+    let (r, ()) = tokio::join!(f.send("a"), f.answer_cards(vec![Answer::AllEdits]));
+    assert_eq!(r.status, TurnStatus::Done, "{r:?}");
+    assert!(
+        commands::task_state(&f.state, &f.chat)
+            .unwrap()
+            .edits_allowed
+    );
+    // With it on, the next edit asks nothing.
+    assert_eq!(f.send("b").await.status, TurnStatus::Done);
+    assert_eq!(f.cards(), 1);
+    commands::revoke_edits(&f.state, &f.chat).unwrap();
+    assert!(
+        !commands::task_state(&f.state, &f.chat)
+            .unwrap()
+            .edits_allowed
+    );
+    // Revoked, the next edit asks again.
+    let (r, ()) = tokio::join!(f.send("c"), f.answer_cards(vec![Answer::Once]));
+    assert_eq!(r.status, TurnStatus::Done, "{r:?}");
+    assert_eq!(f.cards(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn compaction_on_a_paid_model_records_an_estimate_when_no_cost_is_reported() {
+    for (model, reported, expect) in [
+        (PAID_PLAIN, None, true),
+        (PAID_PLAIN, Some(0.5), false),
+        (PLAIN_MODEL, None, false),
+    ] {
+        let f = fx(vec![Step::Reply(StepOutcome {
+            text: "SUMMARY!".into(),
+            cost_usd: reported,
+            prompt_tokens: Some(1000),
+            ..StepOutcome::default()
+        })]);
+        for (role, t) in [
+            ("user", "a"),
+            ("assistant", "b"),
+            ("user", "c"),
+            ("assistant", "d"),
+        ] {
+            f.state
+                .store
+                .append_message(&f.chat, role, t, &[], false)
+                .unwrap();
+        }
+        let r = compact::compact_chat(&f.state, &f.chat, model, None)
+            .await
+            .unwrap();
+        assert_eq!(r.status, TurnStatus::Done, "{r:?}");
+        let cost = f.state.store.chat_usage(&f.chat).unwrap().1;
+        match (reported, expect) {
+            // 1,000 tokens at $1/Mtok and 8 chars (2 tokens) at $2/Mtok.
+            (None, true) => assert!((cost - 0.001_004).abs() < 1e-12, "{cost}"),
+            (Some(c), _) => assert!((cost - c).abs() < 1e-12, "{cost}"),
+            (None, false) => assert_eq!(cost, 0.0),
         }
     }
 }

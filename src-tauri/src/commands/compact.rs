@@ -1,11 +1,11 @@
 //! Shortening a chat: one request summarises the conversation, and from then
 //! on the summary is sent in place of the summarised messages.
 
-use super::chat_state::{CHARS_PER_TOKEN, message_chars, require_chat, sized_model};
+use super::chat_state::{CHARS_PER_TOKEN, message_chars, require_chat, sized_model, wire_chars};
 use super::chats::local;
 use super::turn::{
-    Register, TurnResult, TurnStatus, plain_history, preamble, register_turn, run_registered,
-    system,
+    Register, TurnResult, TurnStatus, plain_history, preamble, recorded_cost, register_turn,
+    run_registered, system,
 };
 use crate::agent::guards;
 use crate::engine::{TurnOutcome, TurnRequest, UiError};
@@ -120,6 +120,7 @@ pub async fn compact_chat(
             .into_iter()
             .filter(|w| !w.parts.is_empty()),
     );
+    let request_chars: usize = wire_messages.iter().map(wire_chars).sum();
     let request = TurnRequest {
         model_id: model_id.to_string(),
         messages: wire_messages,
@@ -162,10 +163,13 @@ pub async fn compact_chat(
     });
     // The request was made, so a failure to store is reported as a failed
     // turn, not as a compaction that never ran.
-    let stored = record_usage(s, chat_id, &ran.outcome).and_then(|()| match &summary {
-        Some(summary) => store_summary(s, chat_id, summary, boundary),
-        None => Ok(()),
-    });
+    let stored =
+        record_usage(s, chat_id, model_id, request_chars, &ran.outcome).and_then(
+            |()| match &summary {
+                Some(summary) => store_summary(s, chat_id, summary, boundary),
+                None => Ok(()),
+            },
+        );
     Ok(match stored {
         Ok(()) => result,
         Err(e) => TurnResult::failed(e),
@@ -185,10 +189,18 @@ fn open_reply(messages: &[StoredMessage]) -> Option<usize> {
     calls.iter().any(|c| !answered(&c.id)).then_some(at)
 }
 
-fn record_usage(s: &AppState, chat_id: &str, out: &TurnOutcome) -> Result<(), UiError> {
+fn record_usage(
+    s: &AppState,
+    chat_id: &str,
+    model_id: &str,
+    request_chars: usize,
+    out: &TurnOutcome,
+) -> Result<(), UiError> {
     if out.requests > 0 {
+        // A paid summary that reports no cost is an estimate, not $0.
+        let cost = recorded_cost(s, model_id, request_chars, out);
         s.store
-            .record_usage(chat_id, out.requests, out.cost_usd)
+            .record_usage(chat_id, out.requests, cost)
             .map_err(local)?;
     }
     Ok(())

@@ -1024,7 +1024,7 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
     // The commands for project work.
     record(to(&agent::task_state(&h.state, &id)));
     record(to(&agent::waiting_approval(&h.state, &id)));
-    record(to(&agent::set_edits_allowed(&h.state, &id, true)));
+    record(to(&agent::revoke_edits(&h.state, &id)));
     record(to(&agent::answer_approval(
         &h.state,
         &id,

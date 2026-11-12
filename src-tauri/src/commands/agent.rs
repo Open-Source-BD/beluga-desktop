@@ -93,10 +93,12 @@ pub fn task_state(s: &AppState, chat_id: &str) -> Result<TaskState, UiError> {
     })
 }
 
-/// Turns "all edits in this chat" on or off.
-pub fn set_edits_allowed(s: &AppState, chat_id: &str, on: bool) -> Result<(), UiError> {
+/// Switches "all edits in this chat" off, so the next edit asks again. There
+/// is no command that switches it on: only the user's "all edits" answer to
+/// an edit card does that.
+pub fn revoke_edits(s: &AppState, chat_id: &str) -> Result<(), UiError> {
     require_chat(s, chat_id)?;
-    s.store.set_edits_allowed(chat_id, on).map_err(local)
+    s.store.set_edits_allowed(chat_id, false).map_err(local)
 }
 
 /// All the output kept for the user of one of the chat's background

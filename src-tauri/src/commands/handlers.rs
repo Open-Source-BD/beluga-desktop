@@ -380,8 +380,8 @@ pub async fn task_state(state: S<'_>, chat_id: String) -> Result<TaskState, UiEr
 }
 
 #[tauri::command]
-pub async fn set_edits_allowed(state: S<'_>, chat_id: String, on: bool) -> Result<(), UiError> {
-    agent::set_edits_allowed(&state, &chat_id, on)
+pub async fn revoke_edits(state: S<'_>, chat_id: String) -> Result<(), UiError> {
+    agent::revoke_edits(&state, &chat_id)
 }
 
 #[tauri::command]

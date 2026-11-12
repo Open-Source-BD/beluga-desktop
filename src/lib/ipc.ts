@@ -612,9 +612,11 @@ export const waitingApproval = (chatId: string) =>
 
 export const taskState = (chatId: string) => invoke<TaskState>("task_state", { chatId });
 
-/** Turns "all edits in this chat" on or off. */
-export const setEditsAllowed = (chatId: string, on: boolean) =>
-  invoke<void>("set_edits_allowed", { chatId, on });
+/**
+ * Switches "all edits in this chat" off, so the next edit asks again. Nothing
+ * here switches it on: only the `all_edits` answer to an edit card does.
+ */
+export const revokeEdits = (chatId: string) => invoke<void>("revoke_edits", { chatId });
 
 /** All the output kept for the user of a background command (up to 200,000 characters). */
 export const backgroundOutput = (chatId: string, id: string) =>

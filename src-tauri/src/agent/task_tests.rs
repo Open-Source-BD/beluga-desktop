@@ -1673,34 +1673,64 @@ async fn compaction_and_take_back_during_a_project_task_change_nothing() {
 }
 
 #[tokio::test]
-async fn a_retry_during_a_running_task_waits_for_it_and_is_refused_once_it_stored_tool_rows() {
+async fn a_retry_during_a_running_task_is_refused_and_leaves_the_task_running() {
     let f = fx(vec![card_then_reads(), say("continued")]);
     let retry = async {
         f.wait_for(card_waits).await;
         let emit = f.emitter();
-        turn::retry_turn(&f.state, &f.chat, TOOLS_MODEL, false, &emit).await
+        let e = turn::retry_turn(&f.state, &f.chat, TOOLS_MODEL, false, &emit)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            e.message,
+            "Wait for the reply to finish, or stop it, before retrying."
+        );
+        // Not cancelled: the card still waits, and answering it finishes the task.
+        assert!(f.state.approvals.waiting(&f.chat).is_some());
+        assert!(f.state.turns().contains_key(&f.chat));
+        f.answer_cards(vec![Answer::Once]).await;
     };
-    let (_, second) = tokio::join!(f.send("write"), retry);
-    // The running task stored its not-run results while it was taken over,
-    // so the retry would replay tool work: it is refused.
-    assert_eq!(
-        second.unwrap_err().message,
-        "A task that changed things cannot be retried. Send a message to continue."
-    );
-    assert_eq!(
-        f.shape(),
-        [
-            "user",
-            "assistant[write_file,read_file,list_dir]",
-            "tool:not_run",
-            "tool:not_run",
-            "tool:not_run"
-        ]
-    );
+    let (r, ()) = tokio::join!(f.send("write"), retry);
+    assert_eq!(r.status, TurnStatus::Done, "{r:?}");
+    assert!(f.path("b.txt").exists());
     assert_rows_paired(&f);
-    // A message continues it.
-    assert_eq!(f.send("continue").await.status, TurnStatus::Done);
-    assert_rows_paired(&f);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_retry_refused_for_tool_rows_does_not_stop_a_task_running_meanwhile() {
+    // A read that already stored a tool row, then an edit that waits at a card.
+    let f = fx(vec![
+        calls(
+            "",
+            vec![
+                call("c1", "list_dir", json!({})),
+                call(
+                    "c2",
+                    "write_file",
+                    json!({"path": "b.txt", "content": "new"}),
+                ),
+            ],
+        ),
+        say("done"),
+    ]);
+    let during = async {
+        f.wait_for(card_waits).await;
+        let emit = f.emitter();
+        for regenerate in [false, true] {
+            let e = turn::retry_turn(&f.state, &f.chat, TOOLS_MODEL, regenerate, &emit)
+                .await
+                .unwrap_err();
+            assert_eq!(
+                e.message,
+                "A task that changed things cannot be retried. Send a message to continue."
+            );
+        }
+        assert!(f.state.approvals.waiting(&f.chat).is_some());
+        f.answer_cards(vec![Answer::Once]).await;
+    };
+    let (r, ()) = tokio::join!(f.send("go"), during);
+    assert_eq!(r.status, TurnStatus::Done, "{r:?}");
+    assert!(f.path("b.txt").exists());
 }
 
 /// Closing or changing the folder while a card waits: nothing more is read

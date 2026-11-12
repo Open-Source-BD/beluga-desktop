@@ -156,10 +156,10 @@ describe("ipc", () => {
     ["waitingApproval", () => ipc.waitingApproval("c"), "waiting_approval", { chatId: "c" }],
     ["taskState", () => ipc.taskState("c"), "task_state", { chatId: "c" }],
     [
-      "setEditsAllowed",
-      () => ipc.setEditsAllowed("c", true),
-      "set_edits_allowed",
-      { chatId: "c", on: true },
+      "revokeEdits",
+      () => ipc.revokeEdits("c"),
+      "revoke_edits",
+      { chatId: "c" },
     ],
     [
       "backgroundOutput",
@@ -209,6 +209,11 @@ describe("ipc", () => {
     } else {
       expect(invoke).toHaveBeenCalledWith(cmd, args);
     }
+  });
+
+  it("the web view has no function that switches all edits on", () => {
+    expect("setEditsAllowed" in ipc).toBe(false);
+    expect(Object.keys(ipc).filter((k) => /edits/i.test(k))).toEqual(["revokeEdits"]);
   });
 
   it("openExternal refuses a URL that is not on github.com", async () => {

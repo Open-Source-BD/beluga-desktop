@@ -437,6 +437,16 @@ const NOTHING_TO_RETRY: &str = "There is nothing to retry in this chat.";
 const NOT_RETRIABLE: &str =
     "A task that changed things cannot be retried. Send a message to continue.";
 
+const RETRY_WHILE_RUNNING: &str = "Wait for the reply to finish, or stop it, before retrying.";
+
+/// A retry never takes over a turn that is running in the chat.
+fn refuse_while_running(s: &AppState, chat_id: &str) -> Result<(), UiError> {
+    if s.turns().contains_key(chat_id) {
+        return Err(UiError::other(RETRY_WHILE_RUNNING));
+    }
+    Ok(())
+}
+
 /// A retry would replay the latest task, and a task that stored tool rows
 /// (its reads, edits and commands) must not be replayed: it is continued with
 /// a message. The latest task is everything after the last user message.
@@ -486,7 +496,6 @@ async fn run_project_turn(
     on_event: &(dyn Fn(EngineEvent) + Send + Sync),
 ) -> Result<TurnResult, UiError> {
     if let Before::Retry { regenerate } = &before {
-        // Nothing to retry leaves a running turn alone.
         project_retry(s, chat_id, *regenerate)?;
     }
     let turn = take_over(s, chat_id).await;
@@ -619,6 +628,27 @@ pub(super) async fn run_registered(
     }
 }
 
+/// What to record for a one-request turn: the reported cost; when the
+/// provider reported none, an estimate for a paid model instead of $0, so the
+/// daily limit still counts the request. Used only when no cost is reported.
+pub(super) fn recorded_cost(
+    s: &AppState,
+    model_id: &str,
+    request_chars: usize,
+    out: &TurnOutcome,
+) -> f64 {
+    if out.cost_reported || out.text.is_empty() {
+        out.cost_usd
+    } else {
+        guards::estimate_cost(
+            guards::model_info(s, model_id).as_ref(),
+            out.prompt_tokens,
+            request_chars,
+            out.text.chars().count(),
+        )
+    }
+}
+
 fn persist(
     s: &AppState,
     chat_id: &str,
@@ -632,19 +662,7 @@ fn persist(
             .map_err(local)?;
     }
     if out.requests > 0 {
-        // The provider reported no cost: record an estimate for a paid model
-        // instead of $0, so the daily limit still counts the request. Used
-        // only when no cost is reported.
-        let cost = if out.cost_reported || out.text.is_empty() {
-            out.cost_usd
-        } else {
-            guards::estimate_cost(
-                guards::model_info(s, model_id).as_ref(),
-                out.prompt_tokens,
-                request_chars,
-                out.text.chars().count(),
-            )
-        };
+        let cost = recorded_cost(s, model_id, request_chars, out);
         s.store
             .record_usage(chat_id, out.requests, cost)
             .map_err(local)?;
@@ -666,13 +684,21 @@ pub async fn retry_turn(
     if s.store.get_chat(chat_id).map_err(local)?.is_none() {
         return Err(UiError::other("This chat no longer exists."));
     }
-    if task::project_for(s, chat_id, model_id).is_some() {
+    let project = task::project_for(s, chat_id, model_id).is_some();
+    // A retry that will be refused leaves a running turn alone: it is decided
+    // from the stored rows before anything is taken over.
+    if project {
+        project_retry(s, chat_id, regenerate)?;
+    } else {
+        plain_retry(s, chat_id, regenerate)?;
+    }
+    refuse_while_running(s, chat_id)?;
+    if project {
         let before = Before::Retry { regenerate };
         return run_project_turn(s, chat_id, model_id, before, on_event).await;
     }
-    // Nothing to retry leaves a running turn alone; after taking over, the
-    // conversation is read again (the turn that ran may have added to it).
-    plain_retry(s, chat_id, regenerate)?;
+    // After taking over, the conversation is read again (a turn that ran may
+    // have added to it).
     let turn = take_over(s, chat_id).await;
     let replaced = plain_retry(s, chat_id, regenerate)?;
     refuse_over_limit(s, model_id)?;
