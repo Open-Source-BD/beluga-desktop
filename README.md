@@ -18,7 +18,7 @@ No subscription. Start on free models, pay only for what you use.
 
 ---
 
-> **Early preview.** This is version 0.3: the chat foundation, commands and skills, and now **project work**, where the app reads and edits files and runs commands in a folder you open. Project work is new in 0.3. It is tested by an automated suite on macOS, Windows and Linux against a simulated model, and it has not yet been confirmed against every model. It is young software: expect rough edges and please [report what you find](https://github.com/shamirul-007/beluga-desktop/issues). Before you use project work, read [What it can and cannot protect you from](#what-it-can-and-cannot-protect-you-from). "Beluga" is a working name and may change.
+> **Early preview.** This is version 0.3: the chat foundation, commands and skills, and now **project work**, where the app reads and edits files and runs commands in a folder you open. Project work is new in 0.3. It is tested by an automated suite on macOS, Windows and Linux against a simulated model, and a [live check](docs/superpowers/research/2026-11-12-live-check-results.md) ran a small task on four real models on macOS, three of which completed it; it has not been tried with every model, or with real models on Windows and Linux. It is young software: expect rough edges and please [report what you find](https://github.com/shamirul-007/beluga-desktop/issues). Before you use project work, read [What it can and cannot protect you from](#what-it-can-and-cannot-protect-you-from). "Beluga" is a working name and may change.
 
 ## Why Beluga
 

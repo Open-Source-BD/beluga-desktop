@@ -740,6 +740,99 @@ mod tests {
         assert_eq!(calls[0].arguments, "{\"path\":\".\"}");
     }
 
+    // ---- streams recorded from real models in the live check (Task 16),
+    // ids replaced by placeholders ----
+
+    const LIVE_ERNIE: &str =
+        include_str!("../../tests/fixtures/live/ernie-5.5-flash-preview-free.txt");
+    const LIVE_NEMOTRON: &str = include_str!("../../tests/fixtures/live/nemotron-3-ultra-free.txt");
+    const LIVE_LING: &str = include_str!("../../tests/fixtures/live/ling-3.0-tiny.txt");
+    const LIVE_LLAMA: &str = include_str!("../../tests/fixtures/live/llama-3.1-8b-instruct.txt");
+
+    fn tc(id: &str, name: &str, arguments: &str) -> ToolCall {
+        ToolCall {
+            id: id.into(),
+            name: name.into(),
+            arguments: arguments.into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn live_baidu_text_then_two_calls() {
+        let (text, calls, finish) = run_tools(LIVE_ERNIE).await;
+        assert_eq!(
+            text,
+            "I'll start by reading notes.txt and finding the count script."
+        );
+        assert_eq!(
+            calls,
+            vec![
+                tc("call_live_1", "read_file", "{\"path\": \"notes.txt\"}"),
+                tc("call_live_2", "find_files", "{\"pattern\": \"*count*\"}"),
+            ]
+        );
+        assert_eq!(finish.as_deref(), Some("tool_calls"));
+    }
+
+    #[tokio::test]
+    async fn live_nvidia_processing_comments_and_one_call() {
+        let (text, calls, finish) = run_tools(LIVE_NEMOTRON).await;
+        assert_eq!(text, "");
+        assert_eq!(
+            calls,
+            vec![tc("call_live_1", "list_dir", "{\"path\":\".\"}")]
+        );
+        assert_eq!(finish.as_deref(), Some("tool_calls"));
+    }
+
+    #[tokio::test]
+    async fn live_ant_reasoning_chunks_and_two_calls() {
+        let (text, calls, finish) = run_tools(LIVE_LING).await;
+        assert_eq!(text, "\n");
+        assert_eq!(
+            calls,
+            vec![
+                tc("call_live_1", "read_file", "{\"path\": \"notes.txt\"}"),
+                tc(
+                    "call_live_2",
+                    "find_files",
+                    "{\"pattern\": \"count*\", \"path\": \".\"}"
+                ),
+            ]
+        );
+        assert_eq!(finish.as_deref(), Some("tool_calls"));
+    }
+
+    #[tokio::test]
+    async fn live_groq_five_calls_in_one_reply() {
+        let (text, calls, finish) = run_tools(LIVE_LLAMA).await;
+        assert_eq!(text, "");
+        let read = "{\"limit\":400,\"offset\":1,\"path\":\"notes.txt\"}";
+        assert_eq!(
+            calls,
+            vec![
+                tc("call_live_1", "read_file", read),
+                tc(
+                    "call_live_2",
+                    "read_file",
+                    "{\"limit\":400,\"offset\":401,\"path\":\"notes.txt\"}"
+                ),
+                tc(
+                    "call_live_3",
+                    "edit_file",
+                    "{\"new_text\":\"beta\",\"old_text\":\"alpha\",\"path\":\"notes.txt\",\"replace_all\":false}"
+                ),
+                tc("call_live_4", "read_file", read),
+                tc(
+                    "call_live_5",
+                    "run_command",
+                    "{\"background\":false,\"command\":\"bash scripts/count.sh\",\"timeout_seconds\":120}"
+                ),
+            ]
+        );
+        assert_eq!(finish.as_deref(), Some("tool_calls"));
+    }
+
     #[tokio::test]
     async fn arguments_that_are_not_a_string_or_object_are_kept_as_raw_json() {
         for (raw, want) in [("[1]", "[1]"), ("5", "5"), ("true", "true")] {
