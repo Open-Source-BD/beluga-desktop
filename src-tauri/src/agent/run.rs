@@ -471,10 +471,15 @@ fn not_run(started: Instant, message: String, stopped: bool) -> Ran {
 /// - The leader is reaped only through tokio's own `Child` (never through
 ///   process-wrap's group `wait`, which reaps behind tokio's back), so tokio
 ///   knows when it has ended and its kill-on-drop does nothing afterwards.
-/// - Normal exit, timeout, cancel: `stop_tree` kills the group once and
-///   disarms this guard, so nothing is signalled again on drop.
-/// - Dropped or panicking mid-run: the guard is still armed and kills the
-///   group; the leader is not reaped yet, so its pid is still its own.
+///   Its exit is first only observed (`leader_ended`, `WNOWAIT`), so it stays
+///   a zombie and its pid and group id stay its own until the group has been
+///   signalled; only then is it reaped.
+/// - Normal exit, timeout, cancel: `stop_tree` sends the final SIGKILL to the
+///   group and only then disarms this guard (after a SIGTERM grace the guard
+///   stays armed throughout), so nothing is signalled again on drop.
+/// - Dropped or panicking mid-run, at any point before that SIGKILL: the
+///   guard is still armed and kills the group; the leader has not been
+///   reaped, so the group id is still valid.
 #[cfg(unix)]
 struct GroupGuard(Option<i32>);
 
@@ -496,30 +501,79 @@ fn kill_group(group: i32, signal: i32) {
     }
 }
 
-/// Ends everything the command started. Unix: with `graceful`, SIGTERM to the
-/// group, up to 500 ms for the leader to go, then SIGKILL to the group. The
-/// guard is disarmed first, so the group is signalled only here.
+/// Has the command's own process ended? On unix this only looks
+/// (`waitid` with `WNOWAIT`): the leader stays a zombie, so its pid and its
+/// group id cannot be reused until `stop_tree` has signalled the group and
+/// tokio's child has reaped it. On Windows the exit status is taken here.
 #[cfg(unix)]
-async fn stop_tree(child: &mut dyn ChildWrapper, group: &mut GroupGuard, graceful: bool) {
-    let Some(group) = group.0.take() else {
-        return;
+fn leader_ended(child: &mut dyn ChildWrapper, _status: &mut Option<ExitStatus>) -> bool {
+    let Some(pid) = child.id() else {
+        // Already reaped (not expected): nothing left to wait for.
+        return true;
     };
+    // SAFETY: `siginfo_t` is plain data that `waitid` fills in; zeroed it
+    // means "nothing to report".
+    unsafe {
+        let mut info: libc::siginfo_t = std::mem::zeroed();
+        let flags = libc::WEXITED | libc::WNOHANG | libc::WNOWAIT;
+        if libc::waitid(libc::P_PID, pid as libc::id_t, &mut info, flags) != 0 {
+            return true;
+        }
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let reported = info.si_pid();
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        let reported = info.si_pid;
+        reported != 0
+    }
+}
+
+#[cfg(windows)]
+fn leader_ended(child: &mut dyn ChildWrapper, status: &mut Option<ExitStatus>) -> bool {
+    match child.inner_mut().try_wait() {
+        Ok(Some(st)) => {
+            *status = Some(st);
+            true
+        }
+        Ok(None) => false,
+        Err(_) => true,
+    }
+}
+
+/// Ends everything the command started and returns the leader's status when
+/// it could be collected (unix). With `graceful`: SIGTERM to the group, up to
+/// 500 ms for the leader to end, then SIGKILL to the group. The guard stays
+/// armed until the SIGKILL has been sent, so a drop at any moment before that
+/// still kills the group; the leader is reaped (through tokio) only after the
+/// group was signalled.
+#[cfg(unix)]
+async fn stop_tree(
+    child: &mut dyn ChildWrapper,
+    group: &mut GroupGuard,
+    graceful: bool,
+) -> Option<ExitStatus> {
+    let id = group.0?;
     if graceful {
-        kill_group(group, libc::SIGTERM);
+        kill_group(id, libc::SIGTERM);
         let until = Instant::now() + TERM_GRACE;
-        while Instant::now() < until && !matches!(child.inner_mut().try_wait(), Ok(Some(_))) {
+        let mut ignored = None;
+        while Instant::now() < until && !leader_ended(child, &mut ignored) {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
-    kill_group(group, libc::SIGKILL);
+    kill_group(id, libc::SIGKILL);
+    group.0 = None;
     // Reap the leader through tokio, so its drop does not signal the pid.
-    let _ = tokio::time::timeout(Duration::from_millis(300), child.inner_mut().wait()).await;
+    tokio::time::timeout(Duration::from_millis(300), child.inner_mut().wait())
+        .await
+        .ok()
+        .and_then(Result::ok)
 }
 
 /// Windows: terminate the Job Object.
 #[cfg(windows)]
-async fn stop_tree(child: &mut dyn ChildWrapper, _graceful: bool) {
+async fn stop_tree(child: &mut dyn ChildWrapper, _graceful: bool) -> Option<ExitStatus> {
     let _ = child.start_kill();
+    None
 }
 
 enum End {
@@ -622,14 +676,10 @@ pub async fn run(
             _ = &mut timeout => break End::TimedOut,
             _ = tick.tick() => {
                 if exited_at.is_none() {
-                    // Tokio's own child: it must be the one that reaps.
-                    match child.inner_mut().try_wait() {
-                        Ok(Some(st)) => {
-                            status = Some(st);
-                            exited_at = Some(Instant::now());
-                        }
-                        Ok(None) => {}
-                        Err(_) => exited_at = Some(Instant::now()),
+                    // Unix: only looks; the leader is reaped after the
+                    // group has been signalled (see `stop_tree`).
+                    if leader_ended(&mut *child, &mut status) {
+                        exited_at = Some(Instant::now());
                     }
                 }
             }
@@ -646,9 +696,10 @@ pub async fn run(
 
     let natural = matches!(end, End::Exited);
     #[cfg(unix)]
-    stop_tree(&mut *child, &mut group, !natural).await;
+    let reaped = stop_tree(&mut *child, &mut group, !natural).await;
     #[cfg(windows)]
-    stop_tree(&mut *child, !natural).await;
+    let reaped = stop_tree(&mut *child, !natural).await;
+    status = status.or(reaped);
 
     // Whatever the stopped tree still wrote, but not for long: a grandchild
     // that holds the pipes open must not hold this up.
@@ -792,6 +843,17 @@ mod tests {
             &CancellationToken::new(),
         )
         .await
+    }
+
+    /// A short, char-safe view of text for assertion messages.
+    fn shown(text: &str) -> String {
+        let chars: Vec<char> = text.chars().collect();
+        if chars.len() <= 160 {
+            return format!("{text:?}");
+        }
+        let head: String = chars[..80].iter().collect();
+        let tail: String = chars[chars.len() - 80..].iter().collect();
+        format!("{head:?} ... {tail:?} ({} chars)", chars.len())
     }
 
     fn pos(haystack: &str, needle: &str) -> usize {
@@ -1126,9 +1188,9 @@ mod tests {
         let shell = detect();
         let dir = tempfile::tempdir().unwrap();
         let r = go(&shell, dir.path(), "echo hello", &limits(long(20))).await;
-        assert_eq!(r.exit_code, Some(0));
+        assert_eq!(r.exit_code, Some(0), "{}", shown(&r.kept));
         assert!(!r.timed_out && !r.stopped);
-        assert_eq!(r.kept.trim(), "hello");
+        assert_eq!(r.kept.trim(), "hello", "{}", shown(&r.kept));
         assert!(r.seconds > 0.0);
     }
 
@@ -1180,7 +1242,7 @@ mod tests {
         let started = Instant::now();
         let r = go(&shell, dir.path(), cmd, &limits(long(20))).await;
         assert!(!r.timed_out);
-        assert!(r.kept.contains("done:["), "{:?}", r.kept);
+        assert!(r.kept.contains("done:["), "{}", shown(&r.kept));
         assert!(started.elapsed() < Duration::from_secs(long(10)));
     }
 
@@ -1294,7 +1356,7 @@ mod tests {
         );
         assert_eq!(r.exit_code, Some(0));
         assert!(!r.timed_out && !r.stopped);
-        assert!(r.kept.contains("started"));
+        assert!(r.kept.contains("started"), "{}", shown(&r.kept));
         let pid = wait_for_pid_file(&dir.path().join("pid.txt")).await;
         assert!(
             wait_gone(pid).await,
@@ -1309,24 +1371,28 @@ mod tests {
         let cmd = pick(
             &shell,
             "awk 'BEGIN { for (i = 0; i < 100000; i++) printf \"line%05d\\n\", i }'",
-            "1..100000 | ForEach-Object { 'line{0:D5}' -f $_ }",
+            "0..99999 | ForEach-Object { 'line{0:D5}' -f $_ }",
         );
         let r = go(&shell, dir.path(), cmd, &limits(long(60))).await;
-        assert_eq!(r.exit_code, Some(0));
-        assert!(
-            r.kept.chars().count() <= 200_000,
-            "{}",
-            r.kept.chars().count()
-        );
-        assert!(r.kept.starts_with("line00000"));
-        assert!(r.kept.trim_end().ends_with("line99999"));
-        assert!(r.kept.contains("characters left out"));
+        let k = shown(&r.kept);
+        assert_eq!(r.exit_code, Some(0), "{k}");
+        assert!(r.kept.chars().count() <= 200_000, "{k}");
+        assert!(r.kept.starts_with("line00000"), "{k}");
+        assert!(r.kept.trim_end().ends_with("line99999"), "{k}");
+        assert!(r.kept.contains("characters left out"), "{k}");
         let text = for_model(&r, &limits(60));
-        assert_eq!(r.total_chars, 1_000_000);
-        assert!(text.contains("[… 988000 characters left out …]"));
-        assert!(text.chars().count() <= "exit code 0\noutput:\n".len() + 12_000 + 64 + 40);
-        assert!(text.contains("line00000"));
-        assert!(text.contains("line99999\n(end of output; exit code 0)"));
+        let t = shown(&text);
+        assert_eq!(r.total_chars, 1_000_000, "{k}");
+        assert!(text.contains("[… 988000 characters left out …]"), "{t}");
+        assert!(
+            text.chars().count() <= "exit code 0\noutput:\n".len() + 12_000 + 64 + 40,
+            "{t}"
+        );
+        assert!(text.contains("line00000"), "{t}");
+        assert!(
+            text.contains("line99999\n(end of output; exit code 0)"),
+            "{t}"
+        );
     }
 
     #[tokio::test]
@@ -1340,7 +1406,7 @@ mod tests {
         );
         let r = go(&shell, dir.path(), cmd, &limits(long(20))).await;
         assert_eq!(r.exit_code, Some(0));
-        assert_eq!(r.kept.trim(), "a\u{FFFD}\u{FFFD}b");
+        assert_eq!(r.kept.trim(), "a\u{FFFD}\u{FFFD}b", "{}", shown(&r.kept));
     }
 
     #[tokio::test]
@@ -1357,8 +1423,8 @@ mod tests {
         let r = go(&shell, dir.path(), cmd, &limits(limit)).await;
         assert!(r.timed_out);
         assert!(started.elapsed() < Duration::from_secs(limit) + Duration::from_secs(2));
-        assert!(r.kept.chars().count() <= 200_000);
-        assert!(r.kept.contains("xxxxxxxxxx"));
+        assert!(r.kept.chars().count() <= 200_000, "{}", shown(&r.kept));
+        assert!(r.kept.contains("xxxxxxxxxx"), "{}", shown(&r.kept));
     }
 
     #[tokio::test]
@@ -1371,7 +1437,12 @@ mod tests {
             "\"term=[$env:TERM] nocolor=[$env:NO_COLOR] pager=[$env:PAGER]\"",
         );
         let r = go(&shell, dir.path(), cmd, &limits(long(20))).await;
-        assert_eq!(r.kept.trim(), "term=[dumb] nocolor=[1] pager=[cat]");
+        assert_eq!(
+            r.kept.trim(),
+            "term=[dumb] nocolor=[1] pager=[cat]",
+            "{}",
+            shown(&r.kept)
+        );
     }
 
     #[tokio::test]
@@ -1384,8 +1455,13 @@ mod tests {
             r#"Write-Output 'héllo ✓ "q" 100% C:\dir\'"#,
         );
         let r = go(&shell, dir.path(), cmd, &limits(long(20))).await;
-        assert_eq!(r.exit_code, Some(0), "{:?}", r.kept);
-        assert_eq!(r.kept.trim(), r#"héllo ✓ "q" 100% C:\dir\"#);
+        assert_eq!(r.exit_code, Some(0), "{}", shown(&r.kept));
+        assert_eq!(
+            r.kept.trim(),
+            r#"héllo ✓ "q" 100% C:\dir\"#,
+            "{}",
+            shown(&r.kept)
+        );
     }
 
     #[tokio::test]
@@ -1436,7 +1512,7 @@ mod tests {
         let cmd = pick(
             &shell,
             "awk 'BEGIN { for (i = 0; i < 2000; i++) printf \"line%05d\\n\", i }'",
-            "1..2000 | ForEach-Object { 'line{0:D5}' -f $_ }",
+            "0..1999 | ForEach-Object { 'line{0:D5}' -f $_ }",
         );
         let calls: Mutex<Vec<String>> = Mutex::new(Vec::new());
         let r = run(
@@ -1449,10 +1525,11 @@ mod tests {
         )
         .await;
         let calls = calls.into_inner().unwrap();
-        assert_eq!(r.exit_code, Some(0));
+        assert_eq!(r.exit_code, Some(0), "{}", shown(&r.kept));
         assert!(calls.iter().all(|c| c.chars().count() <= 4_000));
         assert!(calls.len() < 200, "{} calls", calls.len());
-        assert!(calls.last().unwrap().ends_with("line01999\n"));
+        let last = calls.last().unwrap();
+        assert!(last.ends_with("line01999\n"), "{}", shown(last));
     }
 
     #[tokio::test]
@@ -1569,6 +1646,55 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn dropping_the_run_during_the_stop_grace_still_kills_what_ignores_sigterm() {
+        let shell = detect();
+        let dir = tempfile::tempdir().unwrap();
+        let cmd = "sh -c 'trap \"\" TERM; echo $$ > a.pid; exec sleep 74' & \
+                   trap \"\" TERM; echo $$ > b.pid; sleep 73 & echo $! > c.pid; wait";
+        let lim = limits(120);
+        let cancel = CancellationToken::new();
+        let pids = {
+            let running = run(&shell, dir.path(), cmd, &lim, &|_| {}, &cancel);
+            let stop_then_give_up = async {
+                let a = wait_for_pid_file(&dir.path().join("a.pid")).await;
+                let b = wait_for_pid_file(&dir.path().join("b.pid")).await;
+                let c = wait_for_pid_file(&dir.path().join("c.pid")).await;
+                cancel.cancel();
+                // Inside the 500 ms SIGTERM grace; nothing has been killed yet.
+                tokio::time::sleep(Duration::from_millis(150)).await;
+                [a, b, c]
+            };
+            tokio::select! {
+                _ = running => panic!("the command should still be running"),
+                pids = stop_then_give_up => pids,
+            }
+        };
+        for pid in pids {
+            assert!(wait_gone(pid).await, "process {pid} is still running");
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_leader_can_be_seen_to_have_ended_without_being_reaped() {
+        let mut cmd = tokio::process::Command::new("/bin/sh");
+        cmd.args(["-c", "exit 3"]);
+        let mut child: Box<dyn ChildWrapper> = Box::new(cmd.spawn().unwrap());
+        let mut status = None;
+        for _ in 0..200 {
+            if leader_ended(&mut *child, &mut status) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(leader_ended(&mut *child, &mut status), "never ended");
+        // Still waitable afterwards, with its real status.
+        let st = child.wait().await.unwrap();
+        assert_eq!(st.code(), Some(3));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn a_command_has_no_controlling_terminal() {
         let shell = detect();
         let dir = tempfile::tempdir().unwrap();
@@ -1609,7 +1735,7 @@ mod tests {
         let r = go(&shell, &gone, cmd, &limits(20)).await;
         assert_eq!(r.exit_code, None);
         assert!(!r.timed_out && !r.stopped);
-        assert!(r.kept.contains("folder"), "{:?}", r.kept);
+        assert!(r.kept.contains("folder"), "{}", shown(&r.kept));
         assert!(!marker.exists());
         assert!(
             dir.path().join("not-there").metadata().is_err(),

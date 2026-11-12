@@ -37,11 +37,12 @@ pub const FIXED_ENV: &[(&str, &str)] = &[
     ("PAGER", "cat"),
 ];
 
+/// Environment variables with this prefix are exported bash functions.
+const EXPORTED_FUNCTION_PREFIX: &str = "BASH_FUNC_";
+
 /// Put in front of every PowerShell command so non-ASCII output reaches the
 /// app as UTF-8 (without a byte-order mark). It is fixed and is not part of
 /// what the user approved: it only sets how output is encoded.
-const EXPORTED_FUNCTION_PREFIX: &str = "BASH_FUNC_";
-
 pub const POWERSHELL_PREFIX: &str = "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
