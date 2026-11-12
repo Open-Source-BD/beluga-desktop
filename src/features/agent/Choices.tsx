@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
+import { useState, type KeyboardEvent, type MouseEvent, type ReactNode, type Ref } from "react";
 import type { Answer } from "../../lib/ipc";
 
 export interface Choice {
@@ -13,6 +13,10 @@ interface Props {
   choices: Choice[];
   decline: { label: string; /** The decline opens a note field first. */ note: boolean; answer?: Answer };
   busy: boolean;
+  /** False for the first moments of a card: its buttons ignore activation and look disabled. */
+  armed: boolean;
+  /** The approve buttons stay off (the user has not yet seen all of what they approve). */
+  lock?: boolean;
   onAnswer: (answer: Answer) => void;
   /** The decline button: the least dangerous action, which takes focus when the card appears. */
   safeRef: Ref<HTMLButtonElement>;
@@ -22,11 +26,16 @@ interface Props {
 export const NOTE_LABEL = "Tell it what to do instead (optional)";
 
 /** A card's buttons. A decline that takes a note reveals the field; Enter in it sends. */
-export default function Choices({ choices, decline, busy, onAnswer, safeRef }: Props) {
+export default function Choices({ choices, decline, busy, armed, lock = false, onAnswer, safeRef }: Props) {
   const [noting, setNoting] = useState(false);
   const [note, setNote] = useState("");
+  /** Activation of a card button: not before it is armed, and never the repeat of a double click. */
+  const press = (act: () => void) => (e: MouseEvent) => {
+    if (!armed || e.detail > 1) return;
+    act();
+  };
   const sendNote = () => {
-    if (busy) return;
+    if (busy || !armed) return;
     const text = note.trim();
     onAnswer({ decision: "decline", note: text === "" ? null : text });
   };
@@ -44,8 +53,9 @@ export default function Choices({ choices, decline, busy, onAnswer, safeRef }: P
             type="button"
             className={i === 0 ? "card-btn primary" : "card-btn"}
             aria-label={c.name}
-            disabled={busy}
-            onClick={() => onAnswer(c.answer)}
+            disabled={busy || lock}
+            aria-disabled={!armed || undefined}
+            onClick={press(() => onAnswer(c.answer))}
           >
             {c.label}
           </button>
@@ -55,11 +65,12 @@ export default function Choices({ choices, decline, busy, onAnswer, safeRef }: P
           className="card-btn"
           ref={safeRef}
           disabled={busy}
+          aria-disabled={!armed || undefined}
           aria-expanded={decline.note ? noting : undefined}
-          onClick={() => {
+          onClick={press(() => {
             if (decline.note) setNoting(true);
             else if (decline.answer) onAnswer(decline.answer);
-          }}
+          })}
         >
           {decline.label}
         </button>
@@ -78,7 +89,7 @@ export default function Choices({ choices, decline, busy, onAnswer, safeRef }: P
             onChange={(e) => setNote(e.target.value)}
             onKeyDown={onKey}
           />
-          <button type="button" className="card-btn" disabled={busy} onClick={sendNote}>
+          <button type="button" className="card-btn" disabled={busy} aria-disabled={!armed || undefined} onClick={press(sendNote)}>
             Send
           </button>
         </div>

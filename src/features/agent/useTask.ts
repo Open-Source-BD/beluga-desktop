@@ -73,6 +73,7 @@ export function useTask(chatId: string | null, tick = 0) {
     background: s.background,
     project: s.project,
     waiting: s.waiting,
+    running: s.running,
     refresh,
     forget,
     /** The `tick` that was current when the shown state was asked for; -1 before any answer. */

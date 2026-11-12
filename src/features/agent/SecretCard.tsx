@@ -8,11 +8,12 @@ type Secret = Extract<Approval, { kind: "secret" }>;
 interface Props {
   approval: Secret;
   busy: boolean;
+  armed: boolean;
   onAnswer: (answer: Answer) => void;
   safeRef: Ref<HTMLButtonElement>;
 }
 
-export default function SecretCard({ approval: a, busy, onAnswer, safeRef }: Props) {
+export default function SecretCard({ approval: a, busy, armed, onAnswer, safeRef }: Props) {
   return (
     <>
       <p className="card-q" id={`card-${a.id}`}>
@@ -26,6 +27,7 @@ export default function SecretCard({ approval: a, busy, onAnswer, safeRef }: Pro
         choices={[{ label: "Allow once", answer: { decision: "once" } }]}
         decline={{ label: "Don't allow", note: true }}
         busy={busy}
+        armed={armed}
         onAnswer={onAnswer}
         safeRef={safeRef}
       />

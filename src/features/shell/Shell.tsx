@@ -9,6 +9,7 @@ import ApprovalCard from "../agent/ApprovalCard";
 import Background from "../agent/Background";
 import EditsChip from "../agent/EditsChip";
 import PlanList from "../agent/PlanList";
+import { useChatWatch } from "../agent/useChatWatch";
 import { useTask } from "../agent/useTask";
 import { useFullness } from "../chat/useFullness";
 import { toUiError } from "../chat/errors";
@@ -44,6 +45,7 @@ import {
   renameChat,
   revokeEdits,
   skillFile,
+  stop as stopTurn,
   rowsAfter,
   takeUserMessage,
   type Answer,
@@ -170,12 +172,20 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     setSelectedId,
     refreshChats,
   });
-  const chat = useChat(selectedId, onTurnEnd);
+  const chat = useChat(selectedId, onTurnEnd, (id, text, attachments) => {
+    // A first send that Stop cancelled before anything went out: the text goes back to the box.
+    if (selectedRef.current === id) control.current?.replace(text, attachments);
+  });
   const task = useTask(selectedId, chat.taskTick);
+  const watch = useChatWatch(chats.map((c) => c.id));
   // The checklist: what the running task last sent, else the core's. It stays while items are
   // open (a paused task) and goes when the task ends with everything done.
   // While the task runs, its events are the truth; once it settles the core's state is.
-  const running = chat.status === "streaming";
+  const localRun = chat.status === "streaming";
+  // The core runs a turn for this chat that this window holds no event channel to (the web view
+  // was reloaded): the chat is shown as working and its state is polled until the turn ends.
+  const remote = !localRun && task.running && task.loadedTick >= chat.taskTick;
+  const running = localRun || remote;
   // Until the refresh for the settle has returned, the core's list may be the pre-task one.
   const pending = running || task.loadedTick < chat.taskTick;
   // The card the core waits on: from its events while the task runs, else from the core's own
@@ -187,7 +197,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   const card = selectedId ? (chat.approval ?? taskCard) : null;
   const [answering, setAnswering] = useState<string | null>(null);
   const answeringRef = useRef<string | null>(null);
-  const [cardError, setCardError] = useState<{ id: string; message: string } | null>(null);
+  const [cardError, setCardError] = useState<{ chatId: string; id: string; message: string } | null>(null);
   // A refusal belongs to the chat it happened in.
   useEffect(() => setCardError(null), [selectedId]);
   const planItems = pending ? (chat.plan ?? task.plan) : task.plan;
@@ -198,6 +208,44 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   const usage = chat.status === "streaming" && chat.usage ? chat.usage : allowance.usage;
   const selected = chats.find((c) => c.id === selectedId);
   const hasMessages = chat.messages.length > 0 || chat.pendingUser !== null;
+
+  /** Stop: the running turn, whether this window started it or only found it running. */
+  const stopSelected = () => {
+    if (remote && selectedId) stopTurn(selectedId).catch(() => {});
+    else chat.stop();
+  };
+
+  // A turn found running without a channel: ask for its state every 2 seconds (cards are drawn
+  // from each answer) until it ends, then read the rows once and let a queued message go.
+  const taskRefresh0 = task.refresh;
+  useEffect(() => {
+    if (!remote || !selectedId) return;
+    const id = selectedId;
+    const timer = setInterval(() => void taskRefresh0(id), 2000);
+    return () => clearInterval(timer);
+  }, [remote, selectedId, taskRefresh0]);
+  const wasRemote = useRef<string | null>(null);
+  useEffect(() => {
+    if (remote) {
+      wasRemote.current = selectedId;
+      return;
+    }
+    const id = wasRemote.current;
+    if (id === null) return;
+    if (id !== selectedId) {
+      wasRemote.current = null;
+      return;
+    }
+    if (task.loadedTick < chat.taskTick || task.running) return;
+    wasRemote.current = null;
+    void chat.reload().then(() => {
+      refreshChats();
+      refreshAllowance();
+      flushRef.current(id);
+    });
+    // Only the end of a remote turn matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remote, selectedId, task.running, task.loadedTick, chat.taskTick]);
 
   /**
    * Answers the open card. One answer per card: the card stays off from the first until it
@@ -218,7 +266,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
       const message = toUiError(e).message;
       answeringRef.current = null;
       setAnswering(null);
-      setCardError({ id: cardId, message });
+      setCardError({ chatId, id: cardId, message });
       if (message === NOT_WAITING) chat.dismissApproval(chatId, cardId);
       void task.refresh(chatId);
       return false;
@@ -260,11 +308,11 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
         text = r.rest || "Start.";
       }
     }
-    if (card && selectedId) return answerWithMessage(original ?? text, attachments);
+    if (card && selectedId && editingRef.current?.chatId !== selectedId) return answerWithMessage(original ?? text, attachments);
     if (!modelId || creating) return;
     const edit = editingRef.current;
     if (edit && edit.chatId === selectedId) return sendEdit(edit, modelId, text, attachments, intent);
-    if (selectedId && chat.status === "streaming") {
+    if (selectedId && running) {
       // A reply is running: hold this one (replacing any earlier) until it is done.
       setQueued((all) => ({
         ...all,
@@ -398,7 +446,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   }, [chat.status]);
 
   const editMessage = async (message: StoredMessage) => {
-    if (!selectedId || chat.status === "streaming") return;
+    if (!selectedId || running || card) return;
     const latest = chat.messages.filter((m) => m.kind === "message" && m.role === "user").pop();
     if (latest?.id === message.id) return startEdit(message);
     try {
@@ -443,7 +491,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
 
   // Up arrow in an empty box: edit the latest user message.
   const editLatest = () => {
-    if (chat.status === "streaming" || chat.pendingUser !== null) return;
+    if (running || card || chat.pendingUser !== null) return;
     const latest = chat.messages.filter((m) => m.kind === "message" && m.role === "user").pop();
     if (latest) void editMessage(latest);
   };
@@ -656,7 +704,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
         onRemove={() => setQueued(({ [selectedId]: _gone, ...rest }) => rest)}
       />
     )}
-    {selectedId && !card && cardError && (
+    {selectedId && !card && cardError && cardError.chatId === selectedId && (
       <p className="card-error standalone" role="alert">
         {cardError.message}
       </p>
@@ -666,9 +714,9 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
         key={card.id}
         approval={card}
         busy={answering === card.id}
-        error={cardError && cardError.id === card.id ? cardError.message : null}
+        error={cardError && cardError.chatId === selectedId && cardError.id === card.id ? cardError.message : null}
         onAnswer={(a) => void answerCard(a)}
-        onStop={chat.stop}
+        onStop={stopSelected}
       />
     )}
     <Composer
@@ -677,7 +725,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
       draftId={selectedId}
       sendWithModifier={sendWithModifier}
       onEmptyUp={editLatest}
-      onEscape={editing ? cancelEdit : card ? chat.stop : undefined}
+      onEscape={editing ? cancelEdit : card ? stopSelected : undefined}
       menu={menus.menu}
       fieldAria={menus.fieldAria}
       onKeyIntercept={menus.onKeyIntercept}
@@ -686,9 +734,9 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
         menus.onTextChange(t, c);
       }}
       onSend={handleSend}
-      onStop={chat.stop}
+      onStop={stopSelected}
       // With a card open the button sends the answer; Esc stops the task.
-      streaming={chat.status === "streaming" && !card}
+      streaming={running && !card}
       disabled={creating || models === null || blocked}
       noModel={models !== null && modelId === null}
       hasMessages={hasMessages}
@@ -724,6 +772,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
             deleted.current.add(id);
             chat.forget(id);
             task.forget(id);
+            watch.forget(id);
             discardDraft(id);
             setQueued(({ [id]: _gone, ...rest }) => rest);
             if (id === selectedId) select(null);
@@ -743,7 +792,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
         folder={activeSkills.folder}
         onOpenFolder={() => void openFolder()}
         onCloseFolder={() => void closeFolder()}
-        needsYou={chat.waitingIds.filter((id) => id !== selectedId || showSettings || showSkills)}
+        needsYou={[...new Set([...chat.waitingIds, ...watch.waitingIds])].filter((id) => id !== selectedId || showSettings || showSkills)}
         footer={
           allowance.status ? (
             <Gauge
@@ -815,7 +864,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
                 chatId={selectedId}
                 waiting={chat.waiting}
                 notSent={chat.unsent !== null}
-                onEdit={(m) => void editMessage(m)}
+                onEdit={card || running ? undefined : (m) => void editMessage(m)}
                 onRetryReply={() => chat.regenerate(modelId)}
                 onRetryWithModel={retryWithAnotherModel}
                 onRetry={() => chat.retry(modelId)}

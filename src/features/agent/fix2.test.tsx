@@ -83,3 +83,27 @@ describe("calls of an earlier run", () => {
     expect(screen.getByText("Waiting to run")).toBeInTheDocument();
   });
 });
+
+describe("a failed turn that ran tools", () => {
+  const msgs = [
+    row({ id: "u", role: "user", text: "q" }),
+    row({ id: "a1", tool_calls: [call("c1")] }),
+    row({ id: "t1", role: "tool", kind: "tool", tool_call_id: "c1", tool_meta: { name: "n", status: "ok", summary: "done", detail: null } }),
+  ];
+  const err = { kind: "network" as const, message: "Offline", retryable: true };
+
+  it("offers Continue instead of Retry", () => {
+    const onContinue = vi.fn();
+    render(<Thread {...props} status="failed" error={err} messages={msgs} onContinue={onContinue} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Offline");
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    screen.getByRole("button", { name: "Continue" }).click();
+    expect(onContinue).toHaveBeenCalled();
+  });
+
+  it("a plain chat keeps Retry", () => {
+    render(<Thread {...props} status="failed" error={err} messages={[msgs[0]]} onContinue={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+  });
+});

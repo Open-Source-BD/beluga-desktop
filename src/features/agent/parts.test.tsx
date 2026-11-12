@@ -60,6 +60,21 @@ describe("Background", () => {
   });
 });
 
+describe("Background, a command that ends", () => {
+  it("keeps the open output with the final text and says it ended, until closed", async () => {
+    const { rerender } = render(<Background chatId="c" items={[bg({})]} onError={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: "npm run dev" }));
+    await screen.findByText("ready on 3000");
+    ipc.backgroundOutput.mockResolvedValue("ready on 3000\nbye");
+    rerender(<Background chatId="c" items={[bg({ running: false, exit_code: 0 })]} onError={vi.fn()} />);
+    expect(await screen.findByText(/bye/)).toBeInTheDocument();
+    expect(screen.getByText("This command has ended.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "npm run dev" }));
+    expect(screen.queryByText("This command has ended.")).toBeNull();
+  });
+});
+
 describe("EditsChip", () => {
   it("is the chip 'Edits allowed' and clicking it asks to switch it off", async () => {
     const onOff = vi.fn();

@@ -96,3 +96,21 @@ describe("Allowed commands", () => {
     expect(await screen.findByText("No commands are always allowed.")).toBeInTheDocument();
   });
 });
+
+describe("No limit switch", () => {
+  it("is described by its sentence and has one visible label", async () => {
+    open();
+    const sw = await screen.findByRole("switch", { name: "No limit" });
+    expect(sw).toHaveAccessibleDescription("Tasks on paid models will not pause for cost.");
+    expect(screen.getAllByText("No limit")).toHaveLength(1);
+  });
+
+  it("switching it off with an empty field restores 1.00, never 0", async () => {
+    ipc.spendLimit.mockResolvedValue({ limit_usd: null, spent_today_usd: 0 });
+    open();
+    const sw = await screen.findByRole("switch", { name: "No limit" });
+    await userEvent.clear(screen.getByLabelText("Limit in dollars"));
+    await userEvent.click(sw);
+    expect(ipc.setSpendLimit).toHaveBeenCalledWith(1);
+  });
+});

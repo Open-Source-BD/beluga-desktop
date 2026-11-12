@@ -1,8 +1,9 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Approval, EngineEvent, StoredMessage, TurnResult } from "../../lib/ipc";
 import { model } from "../models/fixtures";
+import { setArmDelay } from "../agent/armDelay";
 import Shell from "./Shell";
 
 const ipc = vi.hoisted(() => ({
@@ -41,6 +42,7 @@ const DONE: TurnResult = { status: "done", reason: null, error: null };
 
 beforeEach(() => {
   vi.resetAllMocks();
+  setArmDelay(0);
   localStorage.clear();
   localStorage.setItem("lastModel", "test/model");
   ipc.listChats.mockResolvedValue([A, B]);
@@ -465,5 +467,157 @@ describe("a cleared card stays cleared", () => {
     await waitFor(() => expect(screen.queryByRole("group", { name: /Run this command/ })).toBeNull());
     await act(async () => {});
     expect(screen.queryByRole("group", { name: /Run this command/ })).toBeNull();
+  });
+});
+
+const CMD2: Approval = { ...CMD, id: "ap2", command: "rm -rf build" };
+
+describe("fix round 1: cards that follow each other", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("a second click inside 500 ms of the next card sends nothing; after it, the next card's answer", async () => {
+    render(<Shell />);
+    await open("Chat A");
+    await send();
+    ev("ca", { type: "approval_needed", approval: CMD });
+    const run = await screen.findByRole("button", { name: "Run once" });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    setArmDelay(500);
+    fireEvent.click(run);
+    await act(async () => {});
+    expect(ipc.answerApproval).toHaveBeenCalledTimes(1);
+    ev("ca", { type: "approval_cleared", id: "ap1" });
+    ev("ca", { type: "approval_needed", approval: CMD2 });
+    expect(await screen.findByText("rm -rf build")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Run once" }));
+    await act(async () => {});
+    expect(ipc.answerApproval).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    fireEvent.click(screen.getByRole("button", { name: "Run once" }));
+    await act(async () => {});
+    expect(ipc.answerApproval).toHaveBeenLastCalledWith("ca", "ap2", { decision: "once" });
+  });
+
+  it("answering chat A after going to B and back names chat A and its card", async () => {
+    render(<Shell />);
+    await open("Chat A");
+    await send();
+    ev("ca", { type: "approval_needed", approval: CMD });
+    await screen.findByRole("group", { name: /Run this command/ });
+    await open("Chat B");
+    await open("Chat A");
+    await userEvent.click(await screen.findByRole("button", { name: "Run once" }));
+    expect(ipc.answerApproval).toHaveBeenCalledWith("ca", "ap1", { decision: "once" });
+  });
+
+  it("Stop task on the card stops the task", async () => {
+    render(<Shell />);
+    await open("Chat A");
+    await send();
+    ev("ca", { type: "approval_needed", approval: CMD });
+    await userEvent.click(await screen.findByRole("button", { name: "Stop task" }));
+    expect(ipc.stop).toHaveBeenCalledWith("ca");
+  });
+
+  it("a refusal that arrives after switching chats does not show in the new chat", async () => {
+    let refuse!: (e: unknown) => void;
+    ipc.answerApproval.mockReturnValue(new Promise((_, rej) => { refuse = rej; }));
+    render(<Shell />);
+    await open("Chat A");
+    await send();
+    ev("ca", { type: "approval_needed", approval: CMD });
+    await userEvent.click(await screen.findByRole("button", { name: "Run once" }));
+    await open("Chat B");
+    await act(async () => refuse({ kind: "other", message: "Try again.", retryable: true }));
+    expect(screen.queryByText("Try again.")).toBeNull();
+  });
+
+  it("no edit pencil while a card is open or the task runs", async () => {
+    ipc.getMessages.mockResolvedValue([row({ id: "u", role: "user", text: "first" }), row({ id: "a", text: "Ok." })]);
+    render(<Shell />);
+    await open("Chat A");
+    expect(await screen.findAllByRole("button", { name: "Edit message" })).toHaveLength(1);
+    await send();
+    ev("ca", { type: "approval_needed", approval: CMD });
+    await screen.findByRole("group", { name: /Run this command/ });
+    expect(screen.queryByRole("button", { name: "Edit message" })).toBeNull();
+  });
+});
+
+describe("fix round 1: a task this window has no channel to", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("shows the chat as working: Stop is available, sends queue, the card is drawn, and polling ends with a reload", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    ipc.taskState.mockResolvedValue({ ...noTask, running: true });
+    render(<Shell />);
+    await open("Chat A");
+    await userEvent.type(await box(), "later{Enter}");
+    expect(await screen.findByText("Queued: later")).toBeInTheDocument();
+    expect(ipc.sendMessage).not.toHaveBeenCalled();
+    await userEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    expect(ipc.stop).toHaveBeenCalledWith("ca");
+    ipc.taskState.mockResolvedValue({ ...noTask, running: true, waiting: CMD });
+    const polls = ipc.taskState.mock.calls.filter((c) => c[0] === "ca").length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
+    expect(ipc.taskState.mock.calls.filter((c) => c[0] === "ca").length).toBeGreaterThan(polls);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
+    expect(await screen.findByRole("group", { name: /Run this command/ })).toBeInTheDocument();
+    const reads = ipc.getMessages.mock.calls.length;
+    ipc.taskState.mockResolvedValue(noTask);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
+    await waitFor(() => expect(ipc.getMessages.mock.calls.length).toBeGreaterThan(reads));
+    await waitFor(() => expect(screen.queryByRole("group", { name: /Run this command/ })).toBeNull());
+    const after = ipc.taskState.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    expect(ipc.taskState.mock.calls.length).toBe(after);
+  });
+
+  it("a startup sweep marks other chats that wait, and a 5-second poll continues only for running chats", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    ipc.taskState.mockImplementation((id: string) =>
+      Promise.resolve(id === "cb" ? { ...noTask, running: true, waiting: CMD } : noTask),
+    );
+    render(<Shell />);
+    const rowB = (await screen.findByRole("button", { name: /Chat B/ })).closest("li") as HTMLElement;
+    await waitFor(() => expect(within(rowB).getByText("needs you")).toBeInTheDocument());
+    const count = (id: string) => ipc.taskState.mock.calls.filter((c) => c[0] === id).length;
+    const [a0, b0] = [count("ca"), count("cb")];
+    await act(async () => { await vi.advanceTimersByTimeAsync(5100); });
+    expect(count("cb")).toBeGreaterThan(b0);
+    expect(count("ca")).toBe(a0);
+    ipc.taskState.mockResolvedValue(noTask);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5100); });
+    await waitFor(() => expect(within(rowB).queryByText("needs you")).toBeNull());
+    const b1 = count("cb");
+    await act(async () => { await vi.advanceTimersByTimeAsync(11000); });
+    expect(count("cb")).toBe(b1);
+  });
+
+  it("stops polling when unmounted", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    ipc.taskState.mockResolvedValue({ ...noTask, running: true });
+    const { unmount } = render(<Shell />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    unmount();
+    const n = ipc.taskState.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(12000); });
+    expect(ipc.taskState.mock.calls.length).toBe(n);
+  });
+});
+
+describe("fix round 1: a failed task that ran tools", () => {
+  it("shows Continue, not Retry", async () => {
+    ipc.getMessages.mockResolvedValue([
+      row({ id: "u", role: "user", text: "go" }),
+      row({ id: "a1", tool_calls: [{ id: "c1", name: "run_command", arguments: "{}" }] }),
+      row({ id: "t1", role: "tool", kind: "tool", tool_call_id: "c1", tool_meta: { name: "run_command", status: "ok", summary: "Ran x", detail: null } }),
+    ]);
+    render(<Shell />);
+    await open("Chat A");
+    await send();
+    await act(async () => finishes.ca({ status: "failed", reason: null, error: { kind: "network", message: "Offline", retryable: true } }));
+    expect(await screen.findByRole("button", { name: "Continue" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 });

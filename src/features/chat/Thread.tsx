@@ -278,6 +278,7 @@ export default function Thread({
             onSignInAgain={onSignInAgain}
             onPickModel={onPickModel}
             onRetry={onRetry}
+            onContinue={hasTools ? onContinue : undefined}
           />
         )}
       </div>

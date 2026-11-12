@@ -8,6 +8,7 @@ type KeepGoing = Extract<Approval, { kind: "keep_going" }>;
 interface Props {
   approval: KeepGoing;
   busy: boolean;
+  armed: boolean;
   onAnswer: (answer: Answer) => void;
   safeRef: Ref<HTMLButtonElement>;
 }
@@ -19,7 +20,7 @@ function status(a: KeepGoing): string {
   return "";
 }
 
-export default function KeepGoingCard({ approval: a, busy, onAnswer, safeRef }: Props) {
+export default function KeepGoingCard({ approval: a, busy, armed, onAnswer, safeRef }: Props) {
   const s = status(a);
   return (
     <>
@@ -30,6 +31,7 @@ export default function KeepGoingCard({ approval: a, busy, onAnswer, safeRef }: 
         choices={[{ label: "Keep going", answer: { decision: "keep_going" } }]}
         decline={{ label: "Stop here", note: false, answer: { decision: "stop_here" } }}
         busy={busy}
+        armed={armed}
         onAnswer={onAnswer}
         safeRef={safeRef}
       />

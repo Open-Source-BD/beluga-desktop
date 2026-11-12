@@ -313,3 +313,49 @@
   width: 100%;
   margin: 0;
 }
+
+/* Scrolling blocks always show their scrollbar, so nothing is hidden behind an invisible one. */
+.card-pre {
+  scrollbar-gutter: stable;
+}
+.card-pre::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+.card-pre::-webkit-scrollbar-track {
+  background: var(--floe);
+  border-radius: 6px;
+}
+.card-pre::-webkit-scrollbar-thumb {
+  background: var(--frame);
+  border: 2px solid var(--floe);
+  border-radius: 6px;
+}
+.card-btn[aria-disabled="true"],
+.card-stop[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: default;
+}
+.card-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+.card-stop {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 2px 4px;
+  border: 0;
+  background: none;
+  color: var(--ask-ink);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.card-stop:focus-visible {
+  outline: 2px solid var(--sonar);
+  outline-offset: 2px;
+}
+.card-stop:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

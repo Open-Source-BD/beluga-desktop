@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { setSpendLimit, spendLimit, type SpendLimit as Limit } from "../../lib/ipc";
 import { toUiError } from "../chat/errors";
 import Switch from "../skills/Switch";
@@ -8,6 +8,7 @@ export default function SpendLimit() {
   const [limit, setLimit] = useState<Limit | null>(null);
   const [field, setField] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const ids = useId();
 
   const load = useCallback(async () => {
     try {
@@ -34,6 +35,8 @@ export default function SpendLimit() {
   };
 
   const amount = Number(field);
+  // Switching No limit off with nothing in the field goes back to the default, never to 0.
+  const wanted = field.trim() === "" || !Number.isFinite(amount) ? 1 : amount;
   return (
     <div className="setting">
       <h2>Spending limit for paid models</h2>
@@ -62,10 +65,16 @@ export default function SpendLimit() {
             </button>
           </div>
           <div className="setting-row">
-            <span>No limit</span>
-            <Switch label="No limit" checked={limit.limit_usd === null} onChange={(on) => void apply(on ? null : amount)} />
+            <span id={`${ids}-label`}>No limit</span>
+            <Switch
+              label="No limit"
+              labelledBy={`${ids}-label`}
+              describedBy={`${ids}-desc`}
+              checked={limit.limit_usd === null}
+              onChange={(on) => void apply(on ? null : wanted)}
+            />
           </div>
-          <p className="setting-line">Tasks on paid models will not pause for cost.</p>
+          <p className="setting-line" id={`${ids}-desc`}>Tasks on paid models will not pause for cost.</p>
           <p className="setting-line">Several chats working at once can each go one request past the limit.</p>
           {error && (
             <p className="setting-error" role="alert">

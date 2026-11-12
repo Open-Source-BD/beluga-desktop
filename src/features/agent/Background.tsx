@@ -10,7 +10,7 @@ interface Props {
 }
 
 /** The output of one command, as text, read again once a second while it is open. */
-function Output({ chatId, id, version }: { chatId: string; id: string; version: BgInfo[] }) {
+function Output({ chatId, id, version, ended }: { chatId: string; id: string; version: BgInfo[]; ended: boolean }) {
   const [text, setText] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const last = useRef(0);
@@ -36,29 +36,35 @@ function Output({ chatId, id, version }: { chatId: string; id: string; version: 
   useEffect(() => {
     live.current = true;
     read.current();
+    // An ended command's output no longer changes: read it once more, then stop.
+    if (ended) return () => { live.current = false; };
     const timer = setInterval(() => read.current(), 1000);
     return () => {
       live.current = false;
       clearInterval(timer);
     };
-  }, [chatId, id]);
+  }, [chatId, id, ended]);
   // The commands changed: read now, but never more than once a second.
   useEffect(() => {
     if (Date.now() - last.current >= 1000) read.current();
   }, [version]);
   if (failed && text === null) return <p className="bg-note">Could not read the output.</p>;
   return (
-    <pre className="bg-out" tabIndex={0} aria-label="Output">
-      {text ?? ""}
-    </pre>
+    <>
+      <pre className="bg-out" tabIndex={0} aria-label="Output">
+        {text ?? ""}
+      </pre>
+      {ended && <p className="bg-note">This command has ended.</p>}
+    </>
   );
 }
 
 /** Running background commands above the message box. */
 export default function Background({ chatId, items, onError }: Props) {
   const [open, setOpen] = useState<string | null>(null);
-  const running = items.filter((i) => i.running);
-  if (running.length === 0) return null;
+  // A command that ends while its output is open stays listed until the user closes it.
+  const shown = items.filter((i) => i.running || i.id === open);
+  if (shown.length === 0) return null;
   const stop = async (id: string) => {
     try {
       await stopBackground(chatId, id);
@@ -68,10 +74,10 @@ export default function Background({ chatId, items, onError }: Props) {
   };
   return (
     <ul className="bg-strip" aria-label="Background commands">
-      {running.map((b) => (
+      {shown.map((b) => (
         <li key={b.id} className="bg-item">
           <div className="bg-row">
-            <span className="bg-label">Running:</span>
+            <span className="bg-label">{b.running ? "Running:" : "Ended:"}</span>
             <button
               type="button"
               className="bg-cmd"
@@ -80,11 +86,13 @@ export default function Background({ chatId, items, onError }: Props) {
             >
               <code style={{ whiteSpace: "pre" }}>{b.command}</code>
             </button>
-            <button type="button" className="btn bg-stop" onClick={() => void stop(b.id)}>
-              Stop
-            </button>
+            {b.running && (
+              <button type="button" className="btn bg-stop" onClick={() => void stop(b.id)}>
+                Stop
+              </button>
+            )}
           </div>
-          {open === b.id && <Output chatId={chatId} id={b.id} version={items} />}
+          {open === b.id && <Output chatId={chatId} id={b.id} version={items} ended={!b.running} />}
         </li>
       ))}
     </ul>

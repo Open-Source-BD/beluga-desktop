@@ -180,6 +180,8 @@ function withStoredRows(s: ChatState, messages: StoredMessage[]): Partial<ChatSt
 export function useChat(
   chatId: string | null,
   onTurnEnd?: (chatId: string, status: ChatStatus) => void,
+  /** A send that Stop cancelled before anything was sent: the text goes back to the box. */
+  onUnsent?: (chatId: string, text: string, attachments: AttachmentInput[]) => void,
 ): UseChat {
   const [states, setStates] = useState<Record<string, ChatState>>({});
   const streaming = useRef(new Set<string>());
@@ -191,6 +193,11 @@ export function useChat(
   const loadedRows = useRef(new Set<string>());
   const onTurnEndRef = useRef(onTurnEnd);
   onTurnEndRef.current = onTurnEnd;
+  const onUnsentRef = useRef(onUnsent);
+  onUnsentRef.current = onUnsent;
+  /** Chats whose send is waiting for the rows to be read; a Stop there cancels the send. */
+  const preloading = useRef(new Set<string>());
+  const cancelled = useRef(new Set<string>());
   const current = (chatId && states[chatId]) || EMPTY;
   const currentRef = useRef(current);
   currentRef.current = current;
@@ -420,8 +427,19 @@ export function useChat(
       };
       if (known) go();
       else {
+        preloading.current.add(id);
         void reload(id).then((rows) => {
+          preloading.current.delete(id);
           if (deleted.current.has(id)) return;
+          if (cancelled.current.delete(id)) {
+            // Stop pressed before anything was sent: nothing is, and the text goes back.
+            streaming.current.delete(id);
+            const prior = before as ChatState | null;
+            if (rows) loadedRows.current.add(id);
+            patch(id, (s) => ({ ...(prior ?? s), messages: rows ?? (prior ?? s).messages }));
+            if (pending) onUnsentRef.current?.(id, pending.text, pending.attachments);
+            return;
+          }
           if (rows) {
             loadedRows.current.add(id);
             patch(id, () => ({ messages: rows, runBase: new Set(rows.map((m) => m.id)) }));
@@ -446,6 +464,10 @@ export function useChat(
   );
 
   const stop = useCallback(() => {
+    if (chatId && preloading.current.has(chatId)) {
+      cancelled.current.add(chatId);
+      return;
+    }
     if (chatId && streaming.current.has(chatId)) {
       stopTurn(chatId).catch(() => {});
     }
@@ -454,6 +476,8 @@ export function useChat(
   const forget = useCallback((id: string) => {
     deleted.current.add(id);
     streaming.current.delete(id);
+    preloading.current.delete(id);
+    cancelled.current.delete(id);
     delete loadSeq.current[id];
     loadedRows.current.delete(id);
     delete lastModel.current[id];

@@ -159,3 +159,29 @@ describe("a send before the rows are loaded", () => {
     expect(h.result.current.run).toBeNull();
   });
 });
+
+describe("Stop while a first send waits for the rows", () => {
+  it("cancels that send: nothing is sent, the chat is idle and the text is handed back", async () => {
+    let n = 0;
+    let release!: (rows: StoredMessage[]) => void;
+    ipc.getMessages.mockImplementation(() =>
+      ++n === 1 ? new Promise(() => {}) : new Promise<StoredMessage[]>((r) => { release = r; }),
+    );
+    const unsent = vi.fn();
+    const h = renderHook(({ chat }) => useChat(chat, undefined, unsent), { initialProps: { chat: "a" } });
+    await waitFor(() => expect(ipc.getMessages).toHaveBeenCalledTimes(1));
+    act(() => { h.result.current.send("my text", [], "m1"); });
+    await waitFor(() => expect(ipc.getMessages).toHaveBeenCalledTimes(2));
+    act(() => h.result.current.stop());
+    await act(async () => release([]));
+    expect(ipc.sendMessage).not.toHaveBeenCalled();
+    expect(ipc.stop).not.toHaveBeenCalled();
+    expect(h.result.current.status).toBe("idle");
+    expect(h.result.current.pendingUser).toBeNull();
+    expect(unsent).toHaveBeenCalledWith("a", "my text", []);
+    // The chat can be sent to again.
+    ipc.getMessages.mockResolvedValue([]);
+    act(() => { h.result.current.send("again", [], "m1"); });
+    await waitFor(() => expect(ipc.sendMessage).toHaveBeenCalled());
+  });
+});

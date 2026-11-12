@@ -209,8 +209,9 @@ describe("useChat", () => {
     expect(ipc.sendMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("stop calls the stop command for the chat", () => {
+  it("stop calls the stop command for the chat", async () => {
     const { result } = renderHook(() => useChat("a"));
+    await act(async () => {});
     act(() => result.current.send("hi", [], "m1"));
     act(() => result.current.stop());
     expect(ipc.stop).toHaveBeenCalledWith("a");
