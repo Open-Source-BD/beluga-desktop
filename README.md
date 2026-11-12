@@ -18,7 +18,7 @@ No subscription. Start on free models, pay only for what you use.
 
 ---
 
-> **Early preview.** This is version 0.2: the chat foundation plus commands and skills. It is tested by an automated suite on macOS, Windows and Linux, but it is young software: expect rough edges and please [report what you find](https://github.com/shamirul-007/beluga-desktop/issues). "Beluga" is a working name and may change.
+> **Early preview.** This is version 0.3: the chat foundation, commands and skills, and now **project work**, where the app reads and edits files and runs commands in a folder you open. Project work is new in 0.3. It is tested by an automated suite on macOS, Windows and Linux against a simulated model, and it has not yet been confirmed against every model. It is young software: expect rough edges and please [report what you find](https://github.com/shamirul-007/beluga-desktop/issues). Before you use project work, read [What it can and cannot protect you from](#what-it-can-and-cannot-protect-you-from). "Beluga" is a working name and may change.
 
 ## Why Beluga
 
@@ -44,10 +44,67 @@ What works in this version:
 | **Attachments** | Attach text files and, for models that can read them, images. Paste an image, drop files on the conversation, or paste a long text (4,000 characters or more) as a file chip. |
 | **`/` menu** | Type `/` in the message box for commands (`/new`, `/model`, `/skills`, `/usage`, `/compact`, `/export`, `/settings`, `/help`) and skills. Picking a skill switches it on for that chat. |
 | **`@` files** | Choose a project folder for a chat, then type `@` to attach a file from it. Files are read by the app and never from outside the chosen folder. |
+| **Project work** | Open a folder in a chat and the model works on it by itself: it reads, searches, creates and edits files, runs commands, keeps a checklist, and carries on until the task is done or it needs you. It asks first; see [Project work](#project-work). |
 | **Skills screen** | Turn skills and whole packs on or off, read what a skill does, add your own from a folder, a zip or a GitHub address, and install optional extra packs. |
 | **Message actions** | Copy any message, copy a code block, retry a reply (optionally with another model), and edit and resend a message. Up arrow in an empty box edits your last message; a message sent while a reply is running waits in line; Esc stops a reply. |
 | **Bundled skill packs** | Fifteen skill packs for planning, test-first work, debugging, review and design are included; 21 skills are on by default. See [Bundled skill packs](#bundled-skill-packs). |
 | **Light, dark and system modes** | Follows your operating system by default. |
+
+## Project work
+
+A chat is a **project chat** when it has a folder open. In a project chat the model is given ten tools. A chat without a folder works as it did in 0.2. Only models that support tools can be used in a project chat; the model picker lists those.
+
+| Tool | What it does | Asks first? |
+|---|---|---|
+| `read_file` | Reads numbered lines of a text file: at most 400 lines or 16,000 characters per call. Files over 5 MB and binary files are refused. | No (yes for secret files) |
+| `list_dir` | Lists names, kinds and sizes in one folder. | No |
+| `find_files` | Finds paths by pattern, at most 200. | No |
+| `search` | Searches file contents with a regular expression, at most 100 matching lines. | No |
+| `edit_file` | Replaces exact text in a file. The file must have been read first. | Yes |
+| `write_file` | Creates a file, or replaces a whole file that was read first. | Yes |
+| `run_command` | Runs one shell command in the folder and returns its exit code and output. | Yes |
+| `update_plan` | Keeps a checklist, shown above the message box while the task runs. | No |
+| `command_output`, `stop_command` | Read the output of, or stop, a background command. | No |
+
+**Approvals.** A command shows a card with the whole command, its size and the folder it runs in, and three choices: **Run once**, **Always allow** a simple form of it in this project, or **Don't run** (with an optional note telling the model what to do instead). A file change shows the path and the change, with **Allow once**, **Allow all edits in this chat** or **Don't allow**. Once all edits are allowed, an "Edits allowed" chip near the message box shows it and switches it off. A card waits until you answer; the task spends nothing while it waits. A new card ignores clicks for half a second, and its buttons stay disabled until a command too long for its box has been scrolled to the end. Commands over 4,000 characters or 50 lines are refused without a card. Saved rules are listed per project in Settings, where each can be removed.
+
+**The trail.** Each action appears in the conversation as one line ("Read src/app.ts", "Edited src/app.ts (+12 -3)", "Ran `npm install` (exit 0, 14 s)") that opens to show the change or the output. Stop ends the task at any moment, and Continue picks it up again after a stop, a crash or a closed app. Everything is stored as it happens.
+
+**Commands.** On macOS and Linux a command runs in `/bin/bash` (or `/bin/sh` if there is no bash). On Windows the shell is PowerShell (`pwsh` if installed, otherwise `powershell.exe`), so commands are PowerShell commands. A command gets no keyboard input, so one that waits for typing fails. The default time limit is 120 seconds and the most the model can ask for is 600. The model sees at most 12,000 characters of output (the first 2,000 and the last 10,000); you can see up to 200,000. A command can run in the background (for a server that never exits); up to 4 per chat run at once, they are listed above the message box, and each has its own Stop.
+
+**Guards.**
+
+- Every 25 requests in one task it pauses and asks "Keep going?" with **Keep going** or **Stop here**.
+- At zero free requests on a free model it pauses with its work saved. It never switches models by itself.
+- A daily spending limit for paid models (default $1.00, minimum $0.10, or no limit) is set in Settings. It counts every paid request the app makes, not only project tasks.
+- It stops when the model makes the same failing call three times in a row, and retries a "too many requests" answer after the wait the server names (up to 60 seconds, 3 times per task).
+- When a chat grows past 70% of the model's context it shortens old tool results in what it sends, and if that is not enough it asks you to use `/compact`.
+
+If a model struggles, a stronger one usually does better. Which free models can manage a multi-step task is not yet known; this is why a tested "Recommended" list is still on the roadmap.
+
+## What it can and cannot protect you from
+
+Read this before you point project work at a folder you care about. Beluga asks before it acts, but **asking is the only safety boundary: there is no sandbox**.
+
+**What Beluga guarantees**
+
+- No command runs and no file changes without an approval you gave: once, by a rule you saved, or "all edits in this chat".
+- The file tools never read or write outside the folder you opened. They refuse; they do not ask. The check uses the real resolved path, so `..`, absolute paths, drive and network paths and links that leave the folder do not work.
+- A card shows the whole command and the real path, not a shortened or relative version.
+- Your OpenRouter key is never given to the model or to a command's environment.
+- Files that usually hold secrets (`.env`, private keys, `.npmrc`, credential files, and anything inside `.git`) ask before they are read, and the file tools cannot change them at all.
+
+**What Beluga does not protect you from**
+
+- **An approved command can do anything you can do on your computer.** It can read and delete files outside the folder, install software and use the network. The card's note "This command refers to a place outside the project folder" comes from reading the command's text; it is a hint, not a guarantee. Read each command before you approve it.
+- **Secret files are not safe from commands you approve.** The file tools ask before reading `.env` or `.git`, but a command you approve can read them.
+- **File contents and command output are sent to the model provider you chose**, as part of the conversation. Do not open a folder whose files must not leave your computer.
+- **A model can be misled by text inside a project's files**, such as a downloaded README or a comment that tells it to run something. Beluga tells the model that such text is information, not instructions, but that is not a guarantee. Your approvals are the defence, so read the cards.
+- **"Always allow" covers only simple forms of a command**, and the rule still runs whatever the project's own configuration makes that command do. `npm test` runs the `test` script in `package.json`; a build runs the project's build scripts; git commands use the repository's git configuration. Anything with a pipe, `&&`, `;`, a redirect, quotes or variables, and interpreters such as `bash`, `python` or `node`, always ask.
+- **"All edits" plus a saved rule can run unreviewed code.** If you allow all edits in a chat and have saved a rule such as `npm test`, the model can change what that command does (for example the test script in `package.json`) and then run it without a card. If you saved a rule, turn off "Edits allowed" or review the changes.
+- **Stop ends a command and everything it started**, except a process that deliberately detaches itself into its own session on macOS and Linux. Background commands end when the app quits normally; if the app is killed outright they keep running on macOS and Linux (they are ended on Windows). A server must be started directly, not with `&`.
+- **There is no undo.** Changes are real and Beluga keeps no copies. Use version control, and commit before you start a task.
+- **The daily spending limit is a guard, not a hard cap.** Several chats working at once can each go one request past it, and when a provider reports no cost for a request Beluga records an estimate from token counts and the model's listed prices.
 
 ## Download
 
@@ -136,22 +193,25 @@ A one-time top-up of $10 therefore raises the daily free limit twentyfold, and t
 - **Your key stays on your computer**, in the system keychain. It is handled only by the Rust core; the web-based interface cannot read it.
 - **Your chats stay on your computer**, in a local database in the app's data folder.
 - **Your messages go to OpenRouter** and the model provider you choose, under [OpenRouter's privacy terms](https://openrouter.ai/privacy).
+- **In a project chat, what the model reads also goes to them.** The contents of files it reads, the results of searches, and the output of commands it runs are sent to OpenRouter and the model provider you chose, as part of the conversation. Nothing else leaves your computer: the files and commands themselves stay local, and no other server is contacted. Commands you approve can use the network on their own; that is separate from the app. See [What it can and cannot protect you from](#what-it-can-and-cannot-protect-you-from).
 - The app's content security policy blocks all remote scripts, styles and fonts.
 
 Found a security problem? Please report it privately through [GitHub security advisories](https://github.com/shamirul-007/beluga-desktop/security/advisories/new) rather than a public issue.
 
 ## Roadmap
 
-Version 0.2 is the second of six planned stages.
+Version 0.3 is the third of six planned stages.
 
 | Stage | What it adds | Status |
 |---|---|---|
 | 1 | Sign-in, key storage, chat, model picker, gauge, appearance modes | **Released as 0.1** |
 | 2 | Commands and skills: the `/` menu, `@` files, the Skills screen, bundled skill packs, message actions | **Released as 0.2** |
-| 3 | Work on a project folder: read and edit files, run commands with your approval, spend limits | Planned |
+| 3 | Work on a project folder: read and edit files, run commands with your approval, spend limits | **In 0.3** |
 | 4 | Agent skills that act on their own: planning, test-first development, debugging, code review and design guidance | Planned |
 | 5 | Skill store with verified packs, and tested "Recommended" models | Planned |
 | 6 | Signed installers and automatic updates | Planned |
+
+Also planned, with no date: a tested "Recommended" list of models, and an operating-system sandbox for commands (there is none today, and there is no usable native sandbox on Windows yet).
 
 The full design is in [`docs/superpowers/specs`](docs/superpowers/specs/2026-11-11-beluga-desktop-design.md).
 
@@ -219,6 +279,7 @@ src-tauri/src/
   secrets.rs    key storage: keychain, session-only, or private file
   openrouter/   API client: models, key status, streaming chat
   engine/       the boundary every chat turn runs through
+  agent/        project work: tools, approvals, the command runner, guards
   store/        local SQLite database for chats and usage
   commands/     the typed commands the interface may call
 src/
