@@ -2,7 +2,7 @@
 
 use crate::agent::ToolCall;
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{HashMap, HashSet};
 
 /// One streamed piece of a tool call.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,45 +13,116 @@ pub struct Fragment {
     pub arguments: String,
 }
 
-#[derive(Default)]
+/// Most calls kept from one reply.
+const MAX_CALLS: usize = 32;
+/// Most bytes of arguments kept from one reply, all calls together.
+const MAX_ARGUMENT_BYTES: usize = 1_000_000;
+
 struct Partial {
+    index: u32,
     id: Option<String>,
     name: Option<String>,
     arguments: String,
+    cut: bool,
 }
 
-/// Joins fragments by index into whole calls.
+/// Joins fragments into whole calls. Fragments of one call share an index;
+/// a fragment with a different id or name than the call so far starts a new
+/// call, so providers that send every call at index 0 still work.
 #[derive(Default)]
 pub struct Collector {
-    calls: BTreeMap<u32, Partial>,
+    /// In the order the calls first appeared.
+    calls: Vec<Partial>,
+    /// The call each index is currently adding to.
+    current: HashMap<u32, usize>,
+    bytes: usize,
+    overflowed: bool,
 }
 
 impl Collector {
     pub fn push(&mut self, fragment: Fragment) {
-        let slot = self.calls.entry(fragment.index).or_default();
-        // Id and name arrive whole; a later repeat must not be appended.
+        if self.overflowed {
+            return;
+        }
+        let id = fragment.id.filter(|s| !s.is_empty());
+        let name = fragment.name.filter(|s| !s.is_empty());
+        let existing = self.current.get(&fragment.index).copied().filter(|&at| {
+            let c = &self.calls[at];
+            let differs = |mine: &Option<String>, theirs: &Option<String>| {
+                matches!((mine, theirs), (Some(m), Some(t)) if m != t)
+            };
+            !(differs(&c.id, &id) || differs(&c.name, &name))
+        });
+        let at = match existing {
+            Some(at) => at,
+            None => {
+                if self.calls.len() >= MAX_CALLS {
+                    self.overflowed = true;
+                    return;
+                }
+                self.calls.push(Partial {
+                    index: fragment.index,
+                    id: None,
+                    name: None,
+                    arguments: String::new(),
+                    cut: false,
+                });
+                self.current.insert(fragment.index, self.calls.len() - 1);
+                self.calls.len() - 1
+            }
+        };
+        let slot = &mut self.calls[at];
         if slot.id.is_none() {
-            slot.id = fragment.id.filter(|s| !s.is_empty());
+            slot.id = id;
         }
         if slot.name.is_none() {
-            slot.name = fragment.name.filter(|s| !s.is_empty());
+            slot.name = name;
         }
+        if self.bytes + fragment.arguments.len() > MAX_ARGUMENT_BYTES {
+            slot.cut = true;
+            self.overflowed = true;
+            return;
+        }
+        self.bytes += fragment.arguments.len();
         slot.arguments.push_str(&fragment.arguments);
     }
 
-    /// The calls in index order. A call with no id gets `call_{index}`; a call
-    /// with no name is dropped.
+    /// True when a limit cut the reply short: the calls from `finish` are
+    /// then only those collected so far.
+    pub fn overflowed(&self) -> bool {
+        self.overflowed
+    }
+
+    /// The calls in the order they appeared, with ids unique within the
+    /// reply. A call with no id gets `call_{index}`; a call with no name, or
+    /// whose arguments were cut by the byte limit, is dropped.
     pub fn finish(self) -> Vec<ToolCall> {
-        self.calls
+        let kept: Vec<Partial> = self
+            .calls
             .into_iter()
-            .filter_map(|(index, p)| {
-                Some(ToolCall {
-                    id: p.id.unwrap_or_else(|| format!("call_{index}")),
-                    name: p.name?,
-                    arguments: p.arguments,
-                })
-            })
-            .collect()
+            .filter(|p| p.name.is_some() && !p.cut)
+            .collect();
+        let taken: HashSet<String> = kept.iter().filter_map(|p| p.id.clone()).collect();
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut out = Vec::new();
+        for p in kept {
+            let synthesised = p.id.is_none();
+            let wanted = p.id.unwrap_or_else(|| format!("call_{}", p.index));
+            let mut id = wanted.clone();
+            let mut n = 2;
+            // A suffixed or synthesised id must avoid every real id too.
+            while seen.contains(&id) || ((synthesised || id != wanted) && taken.contains(&id)) {
+                id = format!("{wanted}_{n}");
+                n += 1;
+            }
+            seen.insert(id.clone());
+            out.push(ToolCall {
+                id,
+                name: p.name.unwrap_or_default(),
+                arguments: p.arguments,
+            });
+        }
+        out
     }
 }
 
@@ -63,15 +134,27 @@ pub fn parse_arguments(raw: &str) -> Result<Value, String> {
         return Ok(Value::Object(Default::default()));
     }
     if let Ok(v) = serde_json::from_str::<Value>(raw) {
-        return into_object(v);
+        return if v.is_null() {
+            Ok(Value::Object(Default::default()))
+        } else {
+            into_object(v)
+        };
     }
     let repaired = remove_trailing_commas(strip_fence(raw.trim()));
     match serde_json::from_str::<Value>(&repaired) {
         Ok(v) => into_object(v),
-        Err(first) => match serde_json::from_str::<Value>(&format!("{repaired}}}")) {
-            Ok(v) => into_object(v),
-            Err(_) => Err(format!("the arguments are not valid JSON ({first})")),
-        },
+        Err(first) => {
+            // A missing brace is only added after a finished value: text cut
+            // in the middle of a number could otherwise become another number.
+            let t = repaired.trim_end();
+            let complete = ["\"", "}", "]", "true", "false", "null"]
+                .iter()
+                .any(|end| t.ends_with(end));
+            match complete.then(|| serde_json::from_str::<Value>(&format!("{t}}}"))) {
+                Some(Ok(v)) => into_object(v),
+                _ => Err(format!("the arguments are not valid JSON ({first})")),
+            }
+        }
     }
 }
 
@@ -163,8 +246,9 @@ mod tests {
         c.push(part(1, Some("x"), None, "{}"));
         let calls = c.finish();
         let ids: Vec<_> = calls.iter().map(|c| c.id.as_str()).collect();
-        assert_eq!(ids, ["call_0", "call_2"]);
-        assert_eq!(calls[0].name, "a");
+        // Calls come out in the order they first appeared.
+        assert_eq!(ids, ["call_2", "call_0"]);
+        assert_eq!(calls[1].name, "a");
     }
 
     #[test]
@@ -196,7 +280,100 @@ mod tests {
 
     #[test]
     fn parse_missing_brace() {
-        assert_eq!(parse_arguments("{\"a\": 1").unwrap(), json!({"a": 1}));
+        assert_eq!(parse_arguments("{\"a\": \"b\"").unwrap(), json!({"a": "b"}));
+    }
+
+    #[test]
+    fn two_calls_at_index_0_with_different_ids_stay_two() {
+        let mut c = Collector::default();
+        c.push(part(0, Some("a"), Some("read_file"), "{\"a\":"));
+        c.push(part(0, None, None, "1}"));
+        c.push(part(0, Some("b"), Some("read_file"), "{\"b\":2}"));
+        let calls = c.finish();
+        let got: Vec<_> = calls
+            .iter()
+            .map(|c| (c.id.as_str(), c.arguments.as_str()))
+            .collect();
+        assert_eq!(got, [("a", "{\"a\":1}"), ("b", "{\"b\":2}")]);
+    }
+
+    #[test]
+    fn two_calls_at_index_0_without_ids_but_different_names_stay_two() {
+        let mut c = Collector::default();
+        c.push(part(0, None, Some("list_dir"), "{}"));
+        c.push(part(0, None, Some("read_file"), "{\"path\":\"a\"}"));
+        let calls = c.finish();
+        let got: Vec<_> = calls
+            .iter()
+            .map(|c| (c.id.as_str(), c.name.as_str()))
+            .collect();
+        assert_eq!(got, [("call_0", "list_dir"), ("call_0_2", "read_file")]);
+    }
+
+    #[test]
+    fn repeated_ids_get_a_suffix() {
+        let mut c = Collector::default();
+        c.push(part(0, Some("x"), Some("a"), "{}"));
+        c.push(part(1, Some("x"), Some("b"), "{}"));
+        c.push(part(2, Some("x"), Some("c"), "{}"));
+        let ids: Vec<_> = c.finish().into_iter().map(|c| c.id).collect();
+        assert_eq!(ids, ["x", "x_2", "x_3"]);
+    }
+
+    #[test]
+    fn a_synthesised_id_never_collides_with_a_real_one() {
+        let mut c = Collector::default();
+        c.push(part(0, None, Some("a"), "{}"));
+        c.push(part(1, Some("call_0"), Some("b"), "{}"));
+        let calls = c.finish();
+        assert_eq!(calls[1].id, "call_0");
+        assert_ne!(calls[0].id, "call_0");
+        assert_ne!(calls[0].id, calls[1].id);
+    }
+
+    #[test]
+    fn more_than_32_calls_overflow_and_keep_the_first_32() {
+        let mut c = Collector::default();
+        for i in 0..33 {
+            c.push(part(i, Some(&format!("c{i}")), Some("n"), "{}"));
+        }
+        assert!(c.overflowed());
+        let calls = c.finish();
+        assert_eq!(calls.len(), 32);
+        assert_eq!(calls[31].id, "c31");
+    }
+
+    #[test]
+    fn arguments_over_a_million_bytes_overflow_and_drop_the_cut_call() {
+        let mut c = Collector::default();
+        c.push(part(0, Some("ok"), Some("n"), "{}"));
+        let big = "x".repeat(600_000);
+        c.push(part(1, Some("big"), Some("n"), &big));
+        assert!(!c.overflowed());
+        c.push(part(1, None, None, &big));
+        assert!(c.overflowed());
+        c.push(part(2, Some("late"), Some("n"), "{}"));
+        let calls = c.finish();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "ok");
+    }
+
+    #[test]
+    fn missing_brace_repairs_only_after_a_complete_value() {
+        assert!(parse_arguments("{\"limit\": 40").is_err());
+        assert_eq!(parse_arguments("{\"a\":\"b\"").unwrap(), json!({"a": "b"}));
+        assert_eq!(
+            parse_arguments("{\"a\":[1,2]").unwrap(),
+            json!({"a": [1, 2]})
+        );
+        assert_eq!(parse_arguments("{\"a\":true").unwrap(), json!({"a": true}));
+        assert_eq!(parse_arguments("null").unwrap(), json!({}));
+    }
+
+    #[test]
+    fn non_object_arguments_are_errors() {
+        assert!(parse_arguments("[1]").is_err());
+        assert!(parse_arguments("5").is_err());
     }
 
     #[test]

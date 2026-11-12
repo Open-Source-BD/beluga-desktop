@@ -233,8 +233,10 @@ fn handle_data(data: &str, out: &mut VecDeque<Result<Delta, ApiError>>) {
             let function = &part["function"];
             let arguments = match &function["arguments"] {
                 Value::String(s) => s.clone(),
-                Value::Object(_) => function["arguments"].to_string(),
-                _ => String::new(),
+                Value::Null => String::new(),
+                // Objects are serialised; anything else is passed on as raw
+                // JSON so the argument check rejects it.
+                other => other.to_string(),
             };
             out.push_back(Ok(Delta::ToolCallPart {
                 index: part["index"]
@@ -730,5 +732,17 @@ mod tests {
         );
         let (_, calls, _) = run_tools(body).await;
         assert_eq!(calls[0].arguments, "{\"path\":\".\"}");
+    }
+
+    #[tokio::test]
+    async fn arguments_that_are_not_a_string_or_object_are_kept_as_raw_json() {
+        for (raw, want) in [("[1]", "[1]"), ("5", "5"), ("true", "true")] {
+            let body = format!(
+                "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"index\":0,\"id\":\"c\",\"function\":{{\"name\":\"list_dir\",\"arguments\":{raw}}}}}]}}}}]}}\n\ndata: [DONE]\n\n"
+            );
+            let (_, calls, _) = run_tools(&body).await;
+            assert_eq!(calls[0].arguments, want);
+            assert!(crate::openrouter::tool_calls::parse_arguments(&calls[0].arguments).is_err());
+        }
     }
 }
