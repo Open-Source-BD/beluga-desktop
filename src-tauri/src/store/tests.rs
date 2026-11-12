@@ -322,6 +322,37 @@ fn folder_roundtrip_and_clear() {
 }
 
 #[test]
+fn a_folder_change_clears_the_edits_flag_and_the_same_folder_keeps_it() {
+    let s = store();
+    let c = s.create_chat("m/a").unwrap();
+    s.set_folder(&c.id, Some("/tmp/a")).unwrap();
+    s.set_edits_allowed(&c.id, true).unwrap();
+    // The same folder again: kept.
+    s.set_folder(&c.id, Some("/tmp/a")).unwrap();
+    assert!(s.edits_allowed(&c.id).unwrap());
+    // Another folder: cleared.
+    s.set_folder(&c.id, Some("/tmp/b")).unwrap();
+    assert!(!s.edits_allowed(&c.id).unwrap());
+    // Closed, then the same folder reopened: cleared by the close.
+    s.set_edits_allowed(&c.id, true).unwrap();
+    s.set_folder(&c.id, None).unwrap();
+    assert!(!s.edits_allowed(&c.id).unwrap());
+    s.set_folder(&c.id, Some("/tmp/b")).unwrap();
+    assert!(!s.edits_allowed(&c.id).unwrap());
+    // From no folder to a folder (a chat opened with edits allowed).
+    s.set_edits_allowed(&c.id, true).unwrap();
+    s.set_folder(&c.id, None).unwrap();
+    s.set_edits_allowed(&c.id, true).unwrap();
+    s.set_folder(&c.id, Some("/tmp/c")).unwrap();
+    assert!(!s.edits_allowed(&c.id).unwrap());
+    // Another chat is untouched.
+    let d = s.create_chat("m/a").unwrap();
+    s.set_edits_allowed(&d.id, true).unwrap();
+    s.set_folder(&c.id, Some("/tmp/d")).unwrap();
+    assert!(s.edits_allowed(&d.id).unwrap());
+}
+
+#[test]
 fn summary_sets_the_boundary() {
     let s = store();
     let c = s.create_chat("m/a").unwrap();

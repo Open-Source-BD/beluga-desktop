@@ -3,7 +3,7 @@
 
 use serde_json::Value;
 
-use super::paths::{Project, invisible};
+use super::paths::{InProject, Project, invisible};
 use super::secrets::is_secret;
 use super::{ToolOutcome, ToolStatus};
 use crate::folder::{MAX_READ_BYTES, read_bounded};
@@ -157,17 +157,22 @@ pub fn read_file(
             }
         }
     };
-    let bytes = match loaded {
-        Ok(b) => b,
-        Err(e) => return fail(e, summary),
-    };
+    match loaded {
+        Ok(bytes) => numbered(&bytes, offset, limit, summary),
+        Err(e) => fail(e, summary),
+    }
+}
+
+/// A file's bytes as numbered lines from `offset`, at most `limit` lines
+/// and `MAX_CHARS` characters.
+fn numbered(bytes: &[u8], offset: usize, limit: usize, summary: String) -> ToolOutcome {
     if bytes.contains(&0) {
         return fail(
             "That file looks like a binary file, so it cannot be read as text.".to_string(),
             summary,
         );
     }
-    let text = String::from_utf8_lossy(&bytes);
+    let text = String::from_utf8_lossy(bytes);
     let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
     let lines: Vec<&str> = text.lines().collect();
     if lines.is_empty() {
@@ -209,6 +214,92 @@ pub fn read_file(
         out.push(format!("(lines {offset}-{last} of {total}; more remain)"));
     }
     ok(out.join("\n"), summary)
+}
+
+/// Which file a path led to when an approval card was built.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileId {
+    #[cfg(unix)]
+    dev: u64,
+    #[cfg(unix)]
+    ino: u64,
+}
+
+const SWAPPED: &str = "That file changed after the user approved reading it, so it was not read.";
+
+/// The identity of the regular file at `real`, without following a link.
+/// `None` for a link, a folder, a special file or a missing path.
+pub fn file_id(real: &std::path::Path) -> Option<FileId> {
+    let meta = std::fs::symlink_metadata(real).ok()?;
+    if !meta.file_type().is_file() {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some(FileId {
+            dev: meta.dev(),
+            ino: meta.ino(),
+        })
+    }
+    #[cfg(not(unix))]
+    Some(FileId {})
+}
+
+/// `read_file` for a file the user approved on a card: reads `target.real`
+/// as resolved then, with no further resolution. The file is opened once,
+/// without following a link and without blocking on a pipe; on the open
+/// handle it must be a regular file and, on unix, the same file (device and
+/// inode) as `id`. On Windows the identity is not compared on the handle;
+/// the caller's check of the path before and after the read stands in.
+pub fn read_resolved(target: &InProject, id: &FileId, args: &Value) -> ToolOutcome {
+    let summary = format!("Read {}", path_summary(&target.shown));
+    let (offset, limit) = match window(args) {
+        Ok(w) => w,
+        Err(e) => return fail(e, summary),
+    };
+    match load_resolved(&target.real, id) {
+        Ok(bytes) => numbered(&bytes, offset, limit, summary),
+        Err(e) => fail(e, summary),
+    }
+}
+
+fn load_resolved(real: &std::path::Path, id: &FileId) -> Result<Vec<u8>, String> {
+    const BIG: &str = "That file is larger than 5 MB, so it cannot be read.";
+    // Checked before opening: opening a pipe that took its place would block.
+    if file_id(real).as_ref() != Some(id) {
+        return Err(SWAPPED.to_string());
+    }
+    let file = open_no_follow(real).map_err(|_| SWAPPED.to_string())?;
+    let meta = file.metadata().map_err(|_| SWAPPED.to_string())?;
+    if !meta.is_file() {
+        return Err(SWAPPED.to_string());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if meta.dev() != id.dev || meta.ino() != id.ino {
+            return Err(SWAPPED.to_string());
+        }
+    }
+    if meta.len() > MAX_READ_BYTES {
+        return Err(BIG.to_string());
+    }
+    read_bounded(file, MAX_READ_BYTES).ok_or_else(|| BIG.to_string())
+}
+
+#[cfg(unix)]
+fn open_no_follow(real: &std::path::Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(real)
+}
+
+#[cfg(not(unix))]
+fn open_no_follow(real: &std::path::Path) -> std::io::Result<std::fs::File> {
+    std::fs::File::open(real)
 }
 
 /// The `offset` (1-based) and `limit` arguments.
@@ -321,6 +412,81 @@ mod tests {
     use std::fs;
     use std::path::Path;
     use tempfile::TempDir;
+
+    fn resolved(p: &Project, name: &str) -> (InProject, FileId) {
+        let target = p.existing(name).unwrap();
+        let id = file_id(&target.real).unwrap();
+        (target, id)
+    }
+
+    #[test]
+    fn read_resolved_reads_the_approved_file_like_read_file() {
+        let (t, p, lib) = setup();
+        fs::write(t.path().join(".env"), "A=1\nB=2\nC=3\n").unwrap();
+        let (target, id) = resolved(&p, ".env");
+        let args = json!({"path": ".env", "offset": 2, "limit": 1});
+        assert_eq!(
+            read_resolved(&target, &id, &args),
+            read_file(&p, &lib, &args, true)
+        );
+        assert!(
+            read_resolved(&target, &id, &json!({}))
+                .text
+                .contains("1\tA=1")
+        );
+        // Bad window arguments are still errors.
+        let bad = read_resolved(&target, &id, &json!({"offset": 0}));
+        assert_eq!(bad.status, ToolStatus::Error);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_resolved_refuses_a_file_swapped_after_the_card() {
+        const SWAPPED: &str =
+            "That file changed after the user approved reading it, so it was not read.";
+        let (t, p, _) = setup();
+        let env = t.path().join(".env");
+        fs::write(t.path().join("other.pem"), "PRIVATE\n").unwrap();
+        // Replaced by another file (a different inode at the same path).
+        fs::write(&env, "A=1\n").unwrap();
+        let (target, id) = resolved(&p, ".env");
+        fs::write(t.path().join("swap"), "PRIVATE\n").unwrap();
+        fs::rename(t.path().join("swap"), &env).unwrap();
+        let out = read_resolved(&target, &id, &json!({}));
+        assert_eq!(
+            (out.status, out.text.as_str()),
+            (ToolStatus::Error, SWAPPED)
+        );
+        // Replaced by a link to another secret.
+        fs::write(&env, "A=1\n").unwrap();
+        let (target, id) = resolved(&p, ".env");
+        fs::remove_file(&env).unwrap();
+        std::os::unix::fs::symlink(t.path().join("other.pem"), &env).unwrap();
+        let out = read_resolved(&target, &id, &json!({}));
+        assert_eq!(
+            (out.status, out.text.as_str()),
+            (ToolStatus::Error, SWAPPED)
+        );
+        // Replaced by a named pipe: refused without blocking.
+        fs::remove_file(&env).unwrap();
+        fs::write(&env, "A=1\n").unwrap();
+        let (target, id) = resolved(&p, ".env");
+        fs::remove_file(&env).unwrap();
+        let made = std::process::Command::new("mkfifo")
+            .arg(&env)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let out = read_resolved(&target, &id, &json!({}));
+        assert_eq!(out.status, ToolStatus::Error);
+        assert!(!out.text.contains("PRIVATE"));
+        // The same file, changed in place, is still the approved file.
+        fs::remove_file(&env).unwrap();
+        fs::write(&env, "A=1\n").unwrap();
+        let (target, id) = resolved(&p, ".env");
+        fs::write(&env, "A=2\n").unwrap();
+        assert!(read_resolved(&target, &id, &json!({})).text.contains("A=2"));
+    }
 
     fn setup() -> (TempDir, Project, Library) {
         let t = tempfile::tempdir().unwrap();

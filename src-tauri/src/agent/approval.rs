@@ -4,7 +4,8 @@
 //! `ask` gives the card a fresh random id, registers it, emits
 //! `ApprovalNeeded` and waits. It ends on an answer, on cancel, or when the
 //! chat's waiting card is dropped (`drop_chat`); every way but an accepted
-//! answer is a decline. `ApprovalCleared` follows exactly once, also when the
+//! answer is `Unanswered::Stopped`, which callers report as not run, never
+//! as the user's decline. `ApprovalCleared` follows exactly once, also when the
 //! waiting future is dropped. `answer` refuses, with one fixed message and
 //! without changing anything, an id that is not the one waiting for that
 //! chat and an answer the card does not offer.
@@ -22,9 +23,14 @@ pub const NOT_WAITING: &str = "That request is no longer waiting.";
 /// Longest note or message kept from an answer, in characters.
 const MAX_NOTE_CHARS: usize = 4_000;
 
-/// Another card is already waiting in this chat.
+/// Why `ask` returned without an answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Busy;
+pub enum Unanswered {
+    /// Another card is already waiting in this chat.
+    Busy,
+    /// The turn was stopped, or the chat deleted or its folder changed.
+    Stopped,
+}
 
 struct Pending {
     approval: Approval,
@@ -92,10 +98,6 @@ fn cut_answer(answer: Answer) -> Answer {
     }
 }
 
-fn declined() -> Answer {
-    Answer::Decline { note: None }
-}
-
 impl Approvals {
     pub fn new() -> Self {
         Self::default()
@@ -105,31 +107,19 @@ impl Approvals {
         self.waiting.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Asks the user and waits. A second card for a chat that already has
-    /// one waiting is a programming error: it is not shown and the answer is
-    /// a decline.
+    /// Asks the user and waits for the answer. `Err(Busy)`: another card
+    /// already waits in this chat (a programming error; nothing is shown).
+    /// `Err(Stopped)`: the turn was cancelled, or the chat was deleted or its
+    /// folder changed, before an answer arrived.
     pub async fn ask(
-        &self,
-        chat_id: &str,
-        approval: Approval,
-        emit: &(dyn Fn(EngineEvent) + Send + Sync),
-        cancel: &CancellationToken,
-    ) -> Answer {
-        self.request(chat_id, approval, emit, cancel)
-            .await
-            .unwrap_or_else(|Busy| declined())
-    }
-
-    /// Like `ask`, but says when another card is already waiting.
-    pub async fn request(
         &self,
         chat_id: &str,
         mut approval: Approval,
         emit: &(dyn Fn(EngineEvent) + Send + Sync),
         cancel: &CancellationToken,
-    ) -> Result<Answer, Busy> {
+    ) -> Result<Answer, Unanswered> {
         if cancel.is_cancelled() {
-            return Ok(declined());
+            return Err(Unanswered::Stopped);
         }
         let id = uuid::Uuid::new_v4().to_string();
         approval.set_id(id.clone());
@@ -137,7 +127,7 @@ impl Approvals {
         {
             let mut w = self.lock();
             if w.contains_key(chat_id) {
-                return Err(Busy);
+                return Err(Unanswered::Busy);
             }
             w.insert(
                 chat_id.to_string(),
@@ -154,18 +144,18 @@ impl Approvals {
             emit,
         };
         emit(EngineEvent::ApprovalNeeded { approval });
+        // The sender is dropped without an answer by `drop_chat`.
         let answer = tokio::select! {
             biased;
-            _ = cancel.cancelled() => declined(),
-            r = rx => r.unwrap_or_else(|_| declined()),
+            _ = cancel.cancelled() => None,
+            r = rx => r.ok(),
         };
         drop(clear);
         // A cancel that raced the answer wins.
-        Ok(if cancel.is_cancelled() {
-            declined()
-        } else {
-            answer
-        })
+        match answer {
+            Some(a) if !cancel.is_cancelled() => Ok(a),
+            _ => Err(Unanswered::Stopped),
+        }
     }
 
     /// Delivers the user's answer to the card waiting in `chat_id`.
@@ -189,7 +179,7 @@ impl Approvals {
         self.lock().get(chat_id).map(|p| p.approval.clone())
     }
 
-    /// Drops the chat's waiting card; its waiter resolves as declined.
+    /// Drops the chat's waiting card; its waiter ends as `Stopped`.
     pub fn drop_chat(&self, chat_id: &str) {
         self.lock().remove(chat_id);
     }
@@ -273,7 +263,7 @@ mod tests {
             let id = waiting_id(&a, "c1").await;
             a.answer("c1", &id, Answer::Once).unwrap();
         });
-        assert_eq!(got, Answer::Once);
+        assert_eq!(got, Ok(Answer::Once));
         assert!(a.waiting("c1").is_none());
         let ev = events.lock().unwrap().clone();
         let EngineEvent::ApprovalNeeded { approval } = &ev[0] else {
@@ -339,8 +329,8 @@ mod tests {
                 a.answer("B", &idb, Answer::Once).unwrap();
             }
         );
-        assert_eq!(got.0, Answer::Decline { note: None });
-        assert_eq!(got.1, Answer::Once);
+        assert_eq!(got.0, Ok(Answer::Decline { note: None }));
+        assert_eq!(got.1, Ok(Answer::Once));
     }
 
     #[tokio::test]
@@ -400,13 +390,13 @@ mod tests {
                     }
                     a.answer("c", &id, good.clone()).unwrap();
                 });
-                assert_eq!(got, good, "{card:?}");
+                assert_eq!(got, Ok(good), "{card:?}");
             }
         }
     }
 
     #[tokio::test]
-    async fn cancel_while_waiting_declines_and_a_late_answer_is_refused() {
+    async fn cancel_while_waiting_stops_and_a_late_answer_is_refused() {
         let a = Approvals::new();
         let (events, emit) = recorder();
         let cancel = CancellationToken::new();
@@ -415,7 +405,7 @@ mod tests {
             cancel.cancel();
             id
         });
-        assert_eq!(got, Answer::Decline { note: None });
+        assert_eq!(got, Err(Unanswered::Stopped));
         assert!(a.waiting("c").is_none());
         assert_eq!(
             a.answer("c", &id, Answer::Once).unwrap_err().message,
@@ -430,6 +420,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_cancel_racing_an_answer_wins() {
+        let a = Approvals::new();
+        let (_, emit) = recorder();
+        let cancel = CancellationToken::new();
+        let (got, _) = tokio::join!(a.ask("c", secret(), &emit, &cancel), async {
+            let id = waiting_id(&a, "c").await;
+            a.answer("c", &id, Answer::Once).unwrap();
+            cancel.cancel();
+        });
+        assert_eq!(got, Err(Unanswered::Stopped));
+    }
+
+    #[tokio::test]
     async fn an_already_cancelled_ask_shows_nothing() {
         let a = Approvals::new();
         let (events, emit) = recorder();
@@ -437,7 +440,7 @@ mod tests {
         cancel.cancel();
         assert_eq!(
             a.ask("c", secret(), &emit, &cancel).await,
-            Answer::Decline { note: None }
+            Err(Unanswered::Stopped)
         );
         assert!(events.lock().unwrap().is_empty());
     }
@@ -450,18 +453,14 @@ mod tests {
         let (first, _) = tokio::join!(a.ask("c", secret(), &emit, &cancel), async {
             let id = waiting_id(&a, "c").await;
             assert_eq!(
-                a.request("c", command(None), &emit, &cancel).await,
-                Err(Busy)
-            );
-            assert_eq!(
                 a.ask("c", command(None), &emit, &cancel).await,
-                Answer::Decline { note: None }
+                Err(Unanswered::Busy)
             );
             // Still the first card, still answerable.
             assert_eq!(a.waiting("c").unwrap().id(), id);
             a.answer("c", &id, Answer::Once).unwrap();
         });
-        assert_eq!(first, Answer::Once);
+        assert_eq!(first, Ok(Answer::Once));
         let shown = events
             .lock()
             .unwrap()
@@ -483,15 +482,15 @@ mod tests {
                 let idb = waiting_id(&a, "B").await;
                 a.answer("B", &idb, Answer::AllEdits).unwrap();
             });
-            assert_eq!(b, Answer::AllEdits);
+            assert_eq!(b, Ok(Answer::AllEdits));
             assert_eq!(a.waiting("A").unwrap().id(), ida);
             a.answer("A", &ida, Answer::Once).unwrap();
         });
-        assert_eq!(x, Answer::Once);
+        assert_eq!(x, Ok(Answer::Once));
     }
 
     #[tokio::test]
-    async fn dropping_the_chat_declines_the_waiting_card() {
+    async fn dropping_the_chat_stops_the_waiting_card() {
         let a = Approvals::new();
         let (_, emit) = recorder();
         let cancel = CancellationToken::new();
@@ -499,7 +498,7 @@ mod tests {
             waiting_id(&a, "c").await;
             a.drop_chat("c");
         });
-        assert_eq!(got, Answer::Decline { note: None });
+        assert_eq!(got, Err(Unanswered::Stopped));
         assert!(a.waiting("c").is_none());
     }
 
@@ -538,7 +537,7 @@ mod tests {
                 let id = waiting_id(&a, "c").await;
                 a.answer("c", &id, answer.clone()).unwrap();
             });
-            let len = match got {
+            let len = match got.unwrap() {
                 Answer::Decline { note: Some(n) } => n.chars().count(),
                 Answer::Message { text } => text.chars().count(),
                 other => panic!("{other:?}"),

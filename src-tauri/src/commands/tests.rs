@@ -3005,7 +3005,13 @@ async fn start_sleeper(h: &Harness, id: &str, dir: &std::path::Path) -> u32 {
     let info = h
         .state
         .background
-        .start(id, &shell, dir, cmd)
+        .start(
+            id,
+            &shell,
+            dir,
+            cmd,
+            &tokio_util::sync::CancellationToken::new(),
+        )
         .await
         .unwrap();
     assert!(info.running);
@@ -3359,7 +3365,10 @@ async fn a_scripted_engine_can_replace_the_real_one() {
 // ---- a chat's waiting card and read log follow the chat and its folder ----
 
 /// Starts waiting on a card in chat `id`; the returned handle yields the answer.
-async fn waiting_card(h: &Harness, id: &str) -> tokio::task::JoinHandle<crate::agent::Answer> {
+async fn waiting_card(
+    h: &Harness,
+    id: &str,
+) -> tokio::task::JoinHandle<Result<crate::agent::Answer, crate::agent::approval::Unanswered>> {
     let state = h.state.clone();
     let chat = id.to_string();
     let task = tokio::spawn(async move {
@@ -3381,7 +3390,7 @@ async fn waiting_card(h: &Harness, id: &str) -> tokio::task::JoinHandle<crate::a
 }
 
 #[tokio::test]
-async fn deleting_a_chat_declines_its_waiting_card_and_forgets_its_reads() {
+async fn deleting_a_chat_stops_its_waiting_card_and_forgets_its_reads() {
     let h = signed_out("http://unused");
     let (id, _dir) = folder_chat(&h);
     let log = h.state.read_logs.for_chat(&id);
@@ -3391,13 +3400,13 @@ async fn deleting_a_chat_declines_its_waiting_card_and_forgets_its_reads() {
         .await
         .expect("the card is still waiting")
         .unwrap();
-    assert_eq!(answer, crate::agent::Answer::Decline { note: None });
+    assert_eq!(answer, Err(crate::agent::approval::Unanswered::Stopped));
     assert!(h.state.approvals.waiting(&id).is_none());
     assert!(!Arc::ptr_eq(&log, &h.state.read_logs.for_chat(&id)));
 }
 
 #[tokio::test]
-async fn changing_a_chats_folder_declines_its_waiting_card_and_forgets_its_reads() {
+async fn changing_a_chats_folder_stops_its_waiting_card_and_forgets_its_reads() {
     let h = signed_out("http://unused");
     let (id, _dir) = folder_chat(&h);
     let log = h.state.read_logs.for_chat(&id);
@@ -3407,6 +3416,41 @@ async fn changing_a_chats_folder_declines_its_waiting_card_and_forgets_its_reads
         .await
         .expect("the card is still waiting")
         .unwrap();
-    assert_eq!(answer, crate::agent::Answer::Decline { note: None });
+    assert_eq!(answer, Err(crate::agent::approval::Unanswered::Stopped));
     assert!(!Arc::ptr_eq(&log, &h.state.read_logs.for_chat(&id)));
+}
+
+#[tokio::test]
+async fn changing_or_closing_a_chats_folder_takes_back_all_edits() {
+    let h = signed_out("http://unused");
+    let (id, dir) = folder_chat(&h);
+    let real = std::fs::canonicalize(dir.path()).unwrap();
+    let real = real.to_str().unwrap().to_string();
+    h.state.store.set_edits_allowed(&id, true).unwrap();
+    // Choosing the folder it already has keeps the grant.
+    *h.dialogs.pick.lock().unwrap() = Some(dir.path().to_path_buf());
+    folder::choose_chat_folder(&h.state, &id).await.unwrap();
+    assert!(h.state.store.edits_allowed(&id).unwrap());
+    folder::set_chat_folder(&h.state, &id, Some(real.clone()))
+        .await
+        .unwrap();
+    assert!(h.state.store.edits_allowed(&id).unwrap());
+    // Another folder through the dialog: taken back.
+    let other = tempfile::tempdir().unwrap();
+    *h.dialogs.pick.lock().unwrap() = Some(other.path().to_path_buf());
+    folder::choose_chat_folder(&h.state, &id).await.unwrap();
+    assert!(!h.state.store.edits_allowed(&id).unwrap());
+    // Back to the first (approved earlier): still asks.
+    h.state.store.set_edits_allowed(&id, true).unwrap();
+    folder::set_chat_folder(&h.state, &id, Some(real.clone()))
+        .await
+        .unwrap();
+    assert!(!h.state.store.edits_allowed(&id).unwrap());
+    // Closed and the same one reopened: asks.
+    h.state.store.set_edits_allowed(&id, true).unwrap();
+    folder::set_chat_folder(&h.state, &id, None).await.unwrap();
+    folder::set_chat_folder(&h.state, &id, Some(real))
+        .await
+        .unwrap();
+    assert!(!h.state.store.edits_allowed(&id).unwrap());
 }

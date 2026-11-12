@@ -21,10 +21,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
-use super::approval::{Approvals, Busy};
-use super::background::Background;
+use super::approval::{Approvals, Unanswered};
+use super::background::{Background, STOPPED_BEFORE};
 use super::change::{self, ReadLog};
-use super::paths::Project;
+use super::paths::{Project, invisible};
 use super::read::{self, clean, fail, ok, path_summary, required_str, summary_text};
 use super::run::{self, Limits};
 use super::shell::Shell;
@@ -50,6 +50,8 @@ const TOOL_NAMES: [&str; 10] = [
 /// Longest command accepted, in characters.
 const MAX_COMMAND_CHARS: usize = 20_000;
 const BUSY: &str = "Another request is already waiting for the user's answer in this chat, so this one was not done.";
+const HIDDEN_CHARACTERS: &str =
+    "That command contains hidden or control characters and cannot be run.";
 const UNFINISHED: &str = "That did not finish, so nothing was done.";
 const RULE_NOT_SAVED: &str =
     "The rule could not be saved, so this command will be asked about again next time.";
@@ -204,29 +206,64 @@ fn folder_text(root: &Path) -> String {
     }
 }
 
+/// A stop of the turn (or the chat's card dropped) before the action: not
+/// the user's decline. `what` completes "Not run: …".
+fn stopped(what: &str) -> Dispatched {
+    plain(ToolOutcome {
+        status: ToolStatus::NotRun,
+        text: "Not run: the task was stopped.".to_string(),
+        summary: format!("Not run: {what}"),
+        detail: None,
+    })
+}
+
+/// Why an approved action may no longer happen.
+enum NotCurrent {
+    Stopped,
+    Gone(&'static str),
+}
+
+impl NotCurrent {
+    fn outcome(self, what: &str, summary: String) -> Dispatched {
+        match self {
+            NotCurrent::Stopped => stopped(what),
+            NotCurrent::Gone(text) => plain(fail(text.to_string(), summary)),
+        }
+    }
+}
+
 /// `Ok` while the turn runs, the chat exists and its folder is still this
 /// project's. Checked after every card and before anything is run or written.
-async fn still_current(ctx: &Ctx<'_>) -> Result<(), String> {
+/// The stop is checked again last, after every await in here.
+async fn still_current(ctx: &Ctx<'_>) -> Result<(), NotCurrent> {
     const MOVED: &str = "This chat's project folder was closed or changed, so this was not done.";
     if ctx.cancel.is_cancelled() {
-        return Err("The task was stopped, so this was not done.".to_string());
+        return Err(NotCurrent::Stopped);
     }
     if !matches!(ctx.store.get_chat(ctx.chat_id), Ok(Some(_))) {
-        return Err("This chat no longer exists, so this was not done.".to_string());
+        return Err(NotCurrent::Gone(
+            "This chat no longer exists, so this was not done.",
+        ));
     }
     let Ok(Some(folder)) = ctx.store.folder(ctx.chat_id) else {
-        return Err(MOVED.to_string());
+        return Err(NotCurrent::Gone(MOVED));
     };
     let root = ctx.project.root.clone();
     let same = blocking(move || std::fs::canonicalize(&folder).is_ok_and(|r| r == root))
         .await
         .unwrap_or(false);
-    if same { Ok(()) } else { Err(MOVED.to_string()) }
+    if !same {
+        return Err(NotCurrent::Gone(MOVED));
+    }
+    if ctx.cancel.is_cancelled() {
+        return Err(NotCurrent::Stopped);
+    }
+    Ok(())
 }
 
-async fn ask(ctx: &Ctx<'_>, card: Approval) -> Result<Answer, Busy> {
+async fn ask(ctx: &Ctx<'_>, card: Approval) -> Result<Answer, Unanswered> {
     ctx.approvals
-        .request(ctx.chat_id, card, ctx.emit, ctx.cancel)
+        .ask(ctx.chat_id, card, ctx.emit, ctx.cancel)
         .await
 }
 
@@ -348,7 +385,14 @@ async fn read_file(ctx: &Ctx<'_>, args: Value, pair: &mut Pair<'_>) -> Dispatche
     };
     let project = ctx.project.clone();
     let p = path.clone();
-    let Some(Ok(asked)) = blocking(move || project.existing(&p)).await else {
+    // The file the card names, and its identity at card time.
+    let resolved = blocking(move || {
+        let found = project.existing(&p).ok()?;
+        let id = read::file_id(&found.real)?;
+        Some((found, id))
+    })
+    .await;
+    let Some(Some((asked, file))) = resolved else {
         return plain(fail(
             "That file could not be read.".to_string(),
             first.summary,
@@ -360,9 +404,9 @@ async fn read_file(ctx: &Ctx<'_>, args: Value, pair: &mut Pair<'_>) -> Dispatche
         path: clean(&asked.shown),
     };
     match ask(ctx, card).await {
-        Err(Busy) => busy(first.summary),
+        Err(Unanswered::Busy) => busy(first.summary),
         Ok(Answer::Once) => {
-            let (project, library) = (ctx.project.clone(), ctx.library.clone());
+            let project = ctx.project.clone();
             let summary = first.summary.clone();
             let out = blocking(move || {
                 const SWAPPED: &str =
@@ -373,7 +417,8 @@ async fn read_file(ctx: &Ctx<'_>, args: Value, pair: &mut Pair<'_>) -> Dispatche
                 if !same(&project) {
                     return fail(SWAPPED.to_string(), summary);
                 }
-                let out = read::read_file(&project, &library, &args, true);
+                // Exactly the approved file: opened once, no resolving again.
+                let out = read::read_resolved(&asked, &file, &args);
                 if !same(&project) {
                     return fail(SWAPPED.to_string(), summary);
                 }
@@ -383,6 +428,7 @@ async fn read_file(ctx: &Ctx<'_>, args: Value, pair: &mut Pair<'_>) -> Dispatche
             out.map(plain).unwrap_or_else(|| unfinished(&pending))
         }
         Ok(other) => refused_by_user(other, &what),
+        Err(Unanswered::Stopped) => stopped(&what),
     }
 }
 
@@ -445,7 +491,7 @@ async fn change_file(ctx: &Ctx<'_>, edit: bool, args: Value, pair: &mut Pair<'_>
             total_lines: change.total_lines,
         };
         match ask(ctx, card).await {
-            Err(Busy) => return busy(summary.to_string()),
+            Err(Unanswered::Busy) => return busy(summary.to_string()),
             Ok(Answer::Once) => {}
             Ok(Answer::AllEdits) => {
                 if ctx.store.set_edits_allowed(ctx.chat_id, true).is_err() {
@@ -453,10 +499,11 @@ async fn change_file(ctx: &Ctx<'_>, edit: bool, args: Value, pair: &mut Pair<'_>
                 }
             }
             Ok(other) => return refused_by_user(other, &what),
+            Err(Unanswered::Stopped) => return stopped(&what),
         }
     }
     if let Err(e) = still_current(ctx).await {
-        return plain(fail(e, summary.to_string()));
+        return e.outcome(&what, summary.to_string());
     }
     let log = ctx.read_log.clone();
     // Exactly the change whose lines were on the card.
@@ -502,6 +549,14 @@ fn command_args(args: &Value) -> Result<CommandArgs, String> {
     }
     if command.contains('\0') {
         return Err("The command contains a NUL character, so it was not run.".to_string());
+    }
+    // What the card shows must be what the shell runs: no character that is
+    // invisible, changes direction or moves the cursor.
+    if command
+        .chars()
+        .any(|c| (c.is_control() && c != '\n' && c != '\t') || invisible(c))
+    {
+        return Err(HIDDEN_CHARACTERS.to_string());
     }
     Ok(CommandArgs {
         command,
@@ -553,7 +608,7 @@ async fn command(ctx: &Ctx<'_>, args: Value, pair: &mut Pair<'_>) -> Dispatched 
             background,
         };
         match ask(ctx, card).await {
-            Err(Busy) => return busy(not_run),
+            Err(Unanswered::Busy) => return busy(not_run),
             Ok(Answer::Once) => {}
             Ok(Answer::Always) => {
                 // The user approved this command: it runs once even when the
@@ -565,11 +620,12 @@ async fn command(ctx: &Ctx<'_>, args: Value, pair: &mut Pair<'_>) -> Dispatched 
                 }
             }
             Ok(other) => return refused_by_user(other, &format!("run {shown}")),
+            Err(Unanswered::Stopped) => return stopped(&format!("run {shown}")),
         }
         let _ = ctx.store.set_setting(&seen_key, "1");
     }
     if let Err(e) = still_current(ctx).await {
-        return plain(fail(e, not_run));
+        return e.outcome(&format!("run {shown}"), not_run);
     }
     let mut d = if background {
         start_background(ctx, &command, &shown).await
@@ -636,10 +692,17 @@ async fn run_foreground(
 async fn start_background(ctx: &Ctx<'_>, command: &str, shown: &str) -> Dispatched {
     let info = match ctx
         .background
-        .start(ctx.chat_id, ctx.shell, &ctx.project.root, command)
+        .start(
+            ctx.chat_id,
+            ctx.shell,
+            &ctx.project.root,
+            command,
+            ctx.cancel,
+        )
         .await
     {
         Ok(info) => info,
+        Err(e) if e == STOPPED_BEFORE => return stopped(&format!("run {shown}")),
         Err(e) => return plain(fail(e, format!("Did not start {shown}"))),
     };
     let mut text = format!(

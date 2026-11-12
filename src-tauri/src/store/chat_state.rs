@@ -91,9 +91,15 @@ impl Store {
         stmt.query_map([], |r| r.get(0))?.collect()
     }
 
+    /// Sets or clears the chat's folder. Any real change (to another
+    /// folder, or to none) also takes back "all edits in this chat": that
+    /// grant was given for the folder the chat had. Setting the same folder
+    /// again keeps it. One statement, so no caller can forget it.
     pub fn set_folder(&self, chat_id: &str, folder: Option<&str>) -> Result<()> {
         self.conn().execute(
-            "UPDATE chats SET folder = ?2 WHERE id = ?1",
+            "UPDATE chats SET folder = ?2,
+                 edits_allowed = CASE WHEN folder IS ?2 THEN edits_allowed ELSE 0 END
+             WHERE id = ?1",
             params![chat_id, folder],
         )?;
         Ok(())

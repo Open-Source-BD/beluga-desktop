@@ -32,7 +32,10 @@ struct Fx {
     cancel: CancellationToken,
     chat: String,
     next: AtomicU32,
+    hook: Hook,
 }
+
+type Hook = Arc<Mutex<Option<Box<dyn Fn(&EngineEvent) + Send + Sync>>>>;
 
 fn real_str(p: &std::path::Path) -> String {
     std::fs::canonicalize(p)
@@ -53,6 +56,8 @@ impl Fx {
         let none = dir.path().join("no-skills");
         let events: Events = Arc::default();
         let sink = events.clone();
+        let hook: Hook = Arc::default();
+        let on_event = hook.clone();
         Fx {
             project,
             shell: detect(),
@@ -62,10 +67,16 @@ impl Fx {
             background: Background::new(Arc::new(NullSink)),
             read_log: Arc::default(),
             events,
-            emit: Box::new(move |e| sink.lock().unwrap().push(e)),
+            emit: Box::new(move |e| {
+                if let Some(f) = on_event.lock().unwrap().as_ref() {
+                    f(&e);
+                }
+                sink.lock().unwrap().push(e);
+            }),
             cancel: CancellationToken::new(),
             chat,
             next: AtomicU32::new(1),
+            hook,
             dir,
         }
     }
@@ -102,6 +113,11 @@ impl Fx {
 
     fn read(&self, name: &str) -> String {
         std::fs::read_to_string(self.path(name)).unwrap()
+    }
+
+    /// Runs `f` on every event as it is emitted, before it is recorded.
+    fn on_event(&self, f: impl Fn(&EngineEvent) + Send + Sync + 'static) {
+        *self.hook.lock().unwrap() = Some(Box::new(f));
     }
 
     fn events(&self) -> Vec<EngineEvent> {
@@ -1060,12 +1076,12 @@ async fn an_answer_for_chat_b_cannot_approve_chat_a() {
         }
     );
     declined(&d);
-    assert_eq!(b_answer, Answer::Once);
+    assert_eq!(b_answer, Ok(Answer::Once));
     assert_eq!(fx.read("a.txt"), "one\n");
 }
 
 #[tokio::test]
-async fn cancel_while_waiting_declines_clears_the_card_and_a_late_answer_changes_nothing() {
+async fn cancel_while_waiting_is_not_run_clears_the_card_and_a_late_answer_changes_nothing() {
     let fx = Fx::new();
     fx.write("a.txt", "one\n");
     fx.model_reads("a.txt").await;
@@ -1077,7 +1093,10 @@ async fn cancel_while_waiting_declines_clears_the_card_and_a_late_answer_changes
         fx.cancel.cancel();
         card
     });
-    declined(&d);
+    assert_eq!(d.outcome.status, ToolStatus::NotRun);
+    assert_eq!(d.outcome.text, "Not run: the task was stopped.");
+    assert_eq!(d.outcome.summary, "Not run: edit a.txt");
+    assert_eq!(d.user_message, None);
     assert!(fx.approvals.waiting(&fx.chat).is_none());
     assert!(fx.events().contains(&EngineEvent::ApprovalCleared {
         id: card.id().to_string()
@@ -1304,4 +1323,212 @@ async fn read_logs_are_kept_per_chat_and_forgotten() {
     assert!(!Arc::ptr_eq(&a, &logs.for_chat("b")));
     logs.forget("a");
     assert!(!Arc::ptr_eq(&a, &logs.for_chat("a")));
+}
+
+// ---------------------------------------------------------------------------
+// Fix round 1
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_folder_change_takes_back_all_edits() {
+    let fx = Fx::new();
+    fx.write("a.txt", "one\n");
+    fx.model_reads("a.txt").await;
+    fx.store.set_edits_allowed(&fx.chat, true).unwrap();
+    // Away to another folder and back: the grant is gone.
+    let other = tempfile::tempdir().unwrap();
+    fx.store
+        .set_folder(&fx.chat, Some(&real_str(other.path())))
+        .unwrap();
+    fx.store
+        .set_folder(&fx.chat, Some(fx.project.root.to_str().unwrap()))
+        .unwrap();
+    let (d, _) = fx
+        .answered(
+            "edit_file",
+            edit_args("a.txt", "one", "uno"),
+            Answer::Decline { note: None },
+        )
+        .await;
+    declined(&d);
+    assert_eq!(fx.read("a.txt"), "one\n");
+}
+
+const HIDDEN: &str = "That command contains hidden or control characters and cannot be run.";
+
+#[tokio::test]
+async fn commands_with_hidden_or_control_characters_are_refused_without_asking() {
+    let fx = Fx::new();
+    for c in [
+        '\u{202E}', '\u{2066}', '\u{200B}', '\u{FEFF}', '\r', '\u{1B}', '\u{7F}',
+    ] {
+        for bg in [false, true] {
+            let command = format!("echo safe{c} > made.txt");
+            let d = fx
+                .call("run_command", json!({"command": command, "background": bg}))
+                .await;
+            assert_eq!(d.outcome.status, ToolStatus::Error, "{c:?}");
+            assert_eq!(d.outcome.text, HIDDEN, "{c:?}");
+        }
+    }
+    assert!(!fx.path("made.txt").exists());
+    assert!(fx.background.list(&fx.chat).is_empty());
+}
+
+#[tokio::test]
+async fn a_multi_line_command_with_tabs_still_reaches_the_card() {
+    let fx = Fx::new();
+    let command = "echo one\n\techo two".to_string();
+    let (d, card) = fx
+        .answered(
+            "run_command",
+            json!({"command": command}),
+            Answer::Decline { note: None },
+        )
+        .await;
+    declined(&d);
+    let Approval::Command { command: shown, .. } = card else {
+        panic!();
+    };
+    assert_eq!(shown, command);
+}
+
+#[tokio::test]
+async fn a_stop_between_approval_and_start_starts_nothing() {
+    let fx = Fx::new();
+    let command = pick(
+        &fx.shell,
+        "echo x > made.txt; exec sleep 30",
+        "Set-Content -Path made.txt -Value x; Start-Sleep 60",
+    );
+    // The stop lands the moment the answer has been taken.
+    let cancel = fx.cancel.clone();
+    fx.on_event(move |e| {
+        if matches!(e, EngineEvent::ApprovalCleared { .. }) {
+            cancel.cancel();
+        }
+    });
+    let (d, _) = fx
+        .answered(
+            "run_command",
+            json!({"command": command, "background": true}),
+            Answer::Once,
+        )
+        .await;
+    assert_eq!(d.outcome.status, ToolStatus::NotRun, "{}", d.outcome.text);
+    assert_eq!(d.outcome.text, "Not run: the task was stopped.");
+    assert!(
+        d.outcome.summary.starts_with("Not run: run "),
+        "{}",
+        d.outcome.summary
+    );
+    tokio::time::sleep(Duration::from_millis(long(1) * 500)).await;
+    assert!(fx.background.list(&fx.chat).is_empty());
+    assert!(!fx.path("made.txt").exists());
+}
+
+#[tokio::test]
+async fn a_cancelled_turn_reaching_a_saved_rule_runs_nothing() {
+    // No card: the stop must be seen after the rule check, before a spawn.
+    let fx = Fx::new();
+    fx.store.add_rule(&fx.folder(), "echo hi").unwrap();
+    fx.cancel.cancel();
+    for bg in [true, false] {
+        let d = fx
+            .call(
+                "run_command",
+                json!({"command": "echo hi", "background": bg}),
+            )
+            .await;
+        assert_eq!(d.outcome.status, ToolStatus::NotRun, "{}", d.outcome.text);
+        assert_eq!(d.outcome.text, "Not run: the task was stopped.");
+        assert_eq!(d.outcome.detail, None);
+    }
+    assert!(fx.background.list(&fx.chat).is_empty());
+    assert!(
+        !fx.events()
+            .iter()
+            .any(|e| matches!(e, EngineEvent::ToolOutput { .. }))
+    );
+}
+
+#[tokio::test]
+async fn a_stopped_secret_read_or_command_is_not_run_not_declined() {
+    let fx = Fx::new();
+    fx.write(".env", "K=1\n");
+    for (name, args, what) in [
+        ("read_file", json!({"path": ".env"}), "Not run: read .env"),
+        (
+            "run_command",
+            json!({"command": "echo hi"}),
+            "Not run: run echo hi",
+        ),
+    ] {
+        let cancel = CancellationToken::new();
+        let before = fx.cards().len();
+        let call = fx.tool_call(name, &args.to_string());
+        let mut ctx = fx.ctx();
+        ctx.cancel = &cancel;
+        let (d, _) = tokio::join!(run_call(&ctx, &call), async {
+            fx.next_card(before).await;
+            cancel.cancel();
+        });
+        assert_eq!(d.outcome.status, ToolStatus::NotRun);
+        assert_eq!(d.outcome.text, "Not run: the task was stopped.");
+        assert_eq!(d.outcome.summary, what);
+    }
+}
+
+#[tokio::test]
+async fn a_call_dropped_while_its_card_waits_ends_as_not_run_and_does_nothing() {
+    let fx = Fx::new();
+    fx.write("a.txt", "one\n");
+    fx.model_reads("a.txt").await;
+    let command = pick(
+        &fx.shell,
+        "echo x > made.txt",
+        "Set-Content -Path made.txt -Value x",
+    );
+    for (name, args) in [
+        ("edit_file", edit_args("a.txt", "one", "uno")),
+        (
+            "run_command",
+            json!({"command": command, "background": true}),
+        ),
+    ] {
+        let start = fx.events().len();
+        let call = fx.tool_call(name, &args.to_string());
+        let ctx = fx.ctx();
+        {
+            let fut = run_call(&ctx, &call);
+            tokio::pin!(fut);
+            // Poll until the card shows, then drop the call.
+            let shown = tokio::select! {
+                _ = &mut fut => false,
+                _ = fx.next_card(fx.cards().len()) => true,
+            };
+            assert!(shown, "{name}");
+        }
+        let ev = fx.events()[start..].to_vec();
+        assert_eq!(ev.len(), 4, "{name}: {ev:?}");
+        assert!(matches!(&ev[0], EngineEvent::ToolStarted { call_id, .. } if *call_id == call.id));
+        let EngineEvent::ApprovalNeeded { approval } = &ev[1] else {
+            panic!("{ev:?}");
+        };
+        assert_eq!(
+            ev[2],
+            EngineEvent::ApprovalCleared {
+                id: approval.id().to_string()
+            }
+        );
+        assert!(matches!(
+            &ev[3],
+            EngineEvent::ToolFinished { call_id, status: ToolStatus::NotRun, .. } if *call_id == call.id
+        ));
+        assert!(fx.approvals.waiting(&fx.chat).is_none());
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(fx.read("a.txt"), "one\n");
+    assert!(!fx.path("made.txt").exists());
+    assert!(fx.background.list(&fx.chat).is_empty());
 }

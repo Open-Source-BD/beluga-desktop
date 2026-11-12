@@ -70,6 +70,10 @@ const STOP_WITHIN: Duration = Duration::from_secs(2);
 /// The event the interface refreshes its list on; the payload is the chat id.
 pub const CHANGED_EVENT: &str = "background-changed";
 
+pub const STOPPED_BEFORE: &str = "The task was stopped, so the command was not started.";
+pub const STOPPED_AFTER: &str =
+    "The task was stopped while the command was starting, so the command was stopped too.";
+
 pub const FIFTH: &str =
     "Four background commands are already running in this chat. Stop one first.";
 
@@ -295,14 +299,18 @@ impl Background {
         self.events.emit(CHANGED_EVENT, json!(chat_id));
     }
 
-    /// Starts `command` in `root` and returns at once. Refused (nothing
-    /// started) when the chat already runs four or the folder is missing.
+    /// Starts `command` in `root` and returns after the early-exit wait.
+    /// Refused (nothing started) when the chat already runs four, the folder
+    /// is missing, or `cancel` (the turn's token) is cancelled: it is checked
+    /// under the registry lock right before the spawn. A cancel during the
+    /// early-exit wait stops the command before this returns.
     pub async fn start(
         &self,
         chat_id: &str,
         shell: &Shell,
         root: &Path,
         command: &str,
+        cancel: &CancellationToken,
     ) -> Result<BgInfo, String> {
         if !root.is_dir() {
             return Err(format!(
@@ -315,6 +323,9 @@ impl Background {
             let chat = chats.entry(chat_id.to_string()).or_default();
             if chat.commands.iter().filter(|c| c.running()).count() >= MAX_RUNNING {
                 return Err(FIFTH.to_string());
+            }
+            if cancel.is_cancelled() {
+                return Err(STOPPED_BEFORE.to_string());
             }
             let child = super::run::spawn(shell, root, command)?;
             chat.issued += 1;
@@ -355,16 +366,26 @@ impl Background {
                     slot,
                 },
             };
-            let id = entry.id.clone();
+            let started = (entry.id.clone(), entry.ctl.clone());
             chat.commands.push(entry);
-            id
+            started
         };
+        let (id, ctl) = id;
         // A command that fails at once is finished by the time this returns.
         let waited = tokio::time::Instant::now() + EARLY_EXIT;
         while tokio::time::Instant::now() < waited
+            && !cancel.is_cancelled()
             && self.list(chat_id).iter().any(|i| i.id == id && i.running)
         {
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            tokio::select! {
+                _ = cancel.cancelled() => {}
+                _ = tokio::time::sleep(Duration::from_millis(10)) => {}
+            }
+        }
+        if cancel.is_cancelled() {
+            ctl.stop().await;
+            self.changed(chat_id);
+            return Err(STOPPED_AFTER.to_string());
         }
         let info = self.list(chat_id).into_iter().find(|i| i.id == id);
         self.changed(chat_id);
@@ -709,7 +730,13 @@ mod tests {
         let shell = detect();
         let t = Instant::now();
         let info = bg
-            .start("c1", &shell, dir.path(), ticker(&shell))
+            .start(
+                "c1",
+                &shell,
+                dir.path(),
+                ticker(&shell),
+                &CancellationToken::new(),
+            )
             .await
             .unwrap();
         assert!(t.elapsed() < Duration::from_secs(long(5)));
@@ -736,7 +763,9 @@ mod tests {
             "echo first; sleep 1.5; echo second; sleep 30",
             "'first'; Start-Sleep -Milliseconds 1500; 'second'; Start-Sleep 60",
         );
-        bg.start("c1", &shell, dir.path(), cmd).await.unwrap();
+        bg.start("c1", &shell, dir.path(), cmd, &CancellationToken::new())
+            .await
+            .unwrap();
         let (t1, _) = read_until(&bg, "c1", "bg1", |t, _| t.contains("first")).await;
         assert!(!t1.contains("second"));
         let (t2, _) = read_until(&bg, "c1", "bg1", |t, _| t.contains("second")).await;
@@ -748,9 +777,15 @@ mod tests {
     async fn a_command_that_exits_shows_running_false_and_its_code() {
         let (bg, ev, dir) = setup();
         let shell = detect();
-        bg.start("c1", &shell, dir.path(), "echo done; exit 3")
-            .await
-            .unwrap();
+        bg.start(
+            "c1",
+            &shell,
+            dir.path(),
+            "echo done; exit 3",
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         let (text, r) = read_until(&bg, "c1", "bg1", |_, r| !r.running).await;
         assert!(text.contains("done"), "{text:?}");
         assert_eq!(r.exit_code, Some(3));
@@ -767,7 +802,13 @@ mod tests {
         let (bg, _ev, dir) = setup();
         let shell = detect();
         let info = bg
-            .start("c1", &shell, dir.path(), "no-such-command-zzq-beluga")
+            .start(
+                "c1",
+                &shell,
+                dir.path(),
+                "no-such-command-zzq-beluga",
+                &CancellationToken::new(),
+            )
             .await
             .unwrap();
         assert_eq!(info.id, "bg1");
@@ -798,9 +839,15 @@ mod tests {
     async fn a_finished_command_stays_listed_and_a_second_read_is_empty_with_the_code() {
         let (bg, _ev, dir) = setup();
         let shell = detect();
-        bg.start("c1", &shell, dir.path(), "echo hi; exit 2")
-            .await
-            .unwrap();
+        bg.start(
+            "c1",
+            &shell,
+            dir.path(),
+            "echo hi; exit 2",
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         wait_finished(&bg, "c1", "bg1").await;
         let first = bg.output("c1", "bg1").unwrap();
         assert!(!first.running && first.exit_code == Some(2));
@@ -817,11 +864,26 @@ mod tests {
         assert_eq!(bg.list("c1").len(), 1, "reading does not remove it");
         assert!(bg.kept("c1", "bg1").unwrap().contains("hi"));
         let again = bg
-            .start("c1", &shell, dir.path(), "echo again")
+            .start(
+                "c1",
+                &shell,
+                dir.path(),
+                "echo again",
+                &CancellationToken::new(),
+            )
             .await
             .unwrap();
         assert_eq!(again.id, "bg2", "ids are never reused");
-        let other = bg.start("c2", &shell, dir.path(), "echo x").await.unwrap();
+        let other = bg
+            .start(
+                "c2",
+                &shell,
+                dir.path(),
+                "echo x",
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
         assert_eq!(other.id, "bg1", "ids are per chat");
     }
 
@@ -832,7 +894,13 @@ mod tests {
         let mut first = None;
         for n in 1..=12 {
             let info = bg
-                .start("c1", &shell, dir.path(), &format!("echo out{n}"))
+                .start(
+                    "c1",
+                    &shell,
+                    dir.path(),
+                    &format!("echo out{n}"),
+                    &CancellationToken::new(),
+                )
                 .await
                 .unwrap();
             if n == 1 {
@@ -861,15 +929,27 @@ mod tests {
         }
         // Running commands do not count toward the eight, nor the finished toward four.
         for _ in 0..4 {
-            bg.start("c1", &shell, dir.path(), ticker(&shell))
-                .await
-                .unwrap();
+            bg.start(
+                "c1",
+                &shell,
+                dir.path(),
+                ticker(&shell),
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
         }
         assert_eq!(bg.list("c1").len(), 12);
         assert_eq!(
-            bg.start("c1", &shell, dir.path(), ticker(&shell))
-                .await
-                .unwrap_err(),
+            bg.start(
+                "c1",
+                &shell,
+                dir.path(),
+                ticker(&shell),
+                &CancellationToken::new()
+            )
+            .await
+            .unwrap_err(),
             FIFTH
         );
         bg.stop_all().await;
@@ -886,7 +966,13 @@ mod tests {
         let mut seen = None;
         for _ in 0..4 {
             let info = bg
-                .start("c1", &shell, dir.path(), "no-such-command-zzq-beluga")
+                .start(
+                    "c1",
+                    &shell,
+                    dir.path(),
+                    "no-such-command-zzq-beluga",
+                    &CancellationToken::new(),
+                )
                 .await
                 .unwrap();
             if !info.running {
@@ -910,7 +996,13 @@ mod tests {
         let shell = detect();
         let t = Instant::now();
         let info = bg
-            .start("c1", &shell, dir.path(), ticker(&shell))
+            .start(
+                "c1",
+                &shell,
+                dir.path(),
+                ticker(&shell),
+                &CancellationToken::new(),
+            )
             .await
             .unwrap();
         assert!(info.running && info.exit_code.is_none());
@@ -924,9 +1016,15 @@ mod tests {
         let (bg, _ev, dir) = setup();
         let shell = detect();
         // The shell exits with 5 at once; its child keeps the pipes open.
-        bg.start("c1", &shell, dir.path(), "sleep 30 & exit 5")
-            .await
-            .unwrap();
+        bg.start(
+            "c1",
+            &shell,
+            dir.path(),
+            "sleep 30 & exit 5",
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         tokio::time::sleep(Duration::from_millis(400)).await;
         assert!(bg.list("c1")[0].running, "still inside the exit grace");
         bg.stop("c1", "bg1").await.unwrap();
@@ -940,7 +1038,9 @@ mod tests {
         let (bg, _ev, dir) = setup();
         let shell = detect();
         let c = with_grandchild(&shell, dir.path());
-        bg.start("c1", &shell, dir.path(), c).await.unwrap();
+        bg.start("c1", &shell, dir.path(), c, &CancellationToken::new())
+            .await
+            .unwrap();
         let pid = wait_for_pid_file(&dir.path().join("pid.txt")).await;
         bg.chats()["c1"].commands[0].ctl.abort.abort();
         let t = Instant::now();
@@ -956,9 +1056,15 @@ mod tests {
         assert!(!r.running && r.exit_code.is_none());
         // It no longer counts toward the four.
         for _ in 0..4 {
-            bg.start("c1", &shell, dir.path(), ticker(&shell))
-                .await
-                .unwrap();
+            bg.start(
+                "c1",
+                &shell,
+                dir.path(),
+                ticker(&shell),
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
         }
         bg.stop_all().await;
     }
@@ -978,10 +1084,66 @@ mod tests {
         let (bg, _ev, dir) = setup();
         let shell = detect();
         let gone = dir.path().join("not-there");
-        let e = bg.start("c1", &shell, &gone, "echo hi").await.unwrap_err();
+        let e = bg
+            .start("c1", &shell, &gone, "echo hi", &CancellationToken::new())
+            .await
+            .unwrap_err();
         assert!(e.contains("does not exist"), "{e}");
         assert!(bg.list("c1").is_empty());
         assert!(!gone.exists());
+    }
+
+    #[tokio::test]
+    async fn an_already_cancelled_turn_starts_nothing() {
+        let (bg, _ev, dir) = setup();
+        let shell = detect();
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let cmd = pick(
+            &shell,
+            "echo x > made.txt",
+            "Set-Content -Path made.txt -Value x",
+        );
+        let e = bg
+            .start("c1", &shell, dir.path(), cmd, &cancel)
+            .await
+            .unwrap_err();
+        assert_eq!(e, STOPPED_BEFORE);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(bg.list("c1").is_empty());
+        assert!(!dir.path().join("made.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn a_cancel_during_the_start_wait_stops_the_command_before_start_returns() {
+        let (bg, _ev, dir) = setup();
+        let shell = detect();
+        let cancel = CancellationToken::new();
+        let cmd = pick(
+            &shell,
+            "echo $$ > pid.txt; exec sleep 30",
+            "Set-Content -Path pid.txt -Value $PID; Start-Sleep 60",
+        );
+        let stop = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            stop.cancel();
+        });
+        let e = bg
+            .start("c1", &shell, dir.path(), cmd, &cancel)
+            .await
+            .unwrap_err();
+        assert_eq!(e, STOPPED_AFTER);
+        assert!(
+            bg.list("c1").iter().all(|i| !i.running),
+            "{:?}",
+            bg.list("c1")
+        );
+        if let Ok(text) = std::fs::read_to_string(dir.path().join("pid.txt"))
+            && let Ok(pid) = text.trim().parse::<u32>()
+        {
+            assert!(wait_gone(pid).await, "process {pid} is still running");
+        }
     }
 
     // ---- limits on output --------------------------------------------------
@@ -996,7 +1158,9 @@ mod tests {
             "i=1; while [ $i -le 40000 ]; do echo line$i; i=$((i+1)); done",
             "1..40000 | ForEach-Object { \"line$_\" }",
         );
-        bg.start("c1", &shell, dir.path(), cmd).await.unwrap();
+        bg.start("c1", &shell, dir.path(), cmd, &CancellationToken::new())
+            .await
+            .unwrap();
         let t = Instant::now();
         while bg.list("c1")[0].running {
             assert!(t.elapsed() < Duration::from_secs(long(30)));
@@ -1029,13 +1193,25 @@ mod tests {
         let shell = detect();
         for n in 1..=4 {
             let info = bg
-                .start("c1", &shell, dir.path(), ticker(&shell))
+                .start(
+                    "c1",
+                    &shell,
+                    dir.path(),
+                    ticker(&shell),
+                    &CancellationToken::new(),
+                )
                 .await
                 .unwrap();
             assert_eq!(info.id, format!("bg{n}"));
         }
         let e = bg
-            .start("c1", &shell, dir.path(), ticker(&shell))
+            .start(
+                "c1",
+                &shell,
+                dir.path(),
+                ticker(&shell),
+                &CancellationToken::new(),
+            )
             .await
             .unwrap_err();
         assert_eq!(
@@ -1045,16 +1221,28 @@ mod tests {
         assert_eq!(bg.list("c1").len(), 4);
         // Another chat is unaffected.
         assert_eq!(
-            bg.start("c2", &shell, dir.path(), ticker(&shell))
-                .await
-                .unwrap()
-                .id,
+            bg.start(
+                "c2",
+                &shell,
+                dir.path(),
+                ticker(&shell),
+                &CancellationToken::new()
+            )
+            .await
+            .unwrap()
+            .id,
             "bg1"
         );
         // Stopping one makes room.
         bg.stop("c1", "bg2").await.unwrap();
         let fifth = bg
-            .start("c1", &shell, dir.path(), ticker(&shell))
+            .start(
+                "c1",
+                &shell,
+                dir.path(),
+                ticker(&shell),
+                &CancellationToken::new(),
+            )
             .await
             .unwrap();
         assert_eq!(fifth.id, "bg5");
@@ -1066,14 +1254,32 @@ mod tests {
         let (bg, _ev, dir) = setup();
         let shell = detect();
         for _ in 0..4 {
-            bg.start("c1", &shell, dir.path(), "echo hi").await.unwrap();
+            bg.start(
+                "c1",
+                &shell,
+                dir.path(),
+                "echo hi",
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
         }
         let t = Instant::now();
         while bg.list("c1").iter().any(|i| i.running) {
             assert!(t.elapsed() < Duration::from_secs(long(20)));
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        assert!(bg.start("c1", &shell, dir.path(), "echo hi").await.is_ok());
+        assert!(
+            bg.start(
+                "c1",
+                &shell,
+                dir.path(),
+                "echo hi",
+                &CancellationToken::new()
+            )
+            .await
+            .is_ok()
+        );
     }
 
     // ---- stopping ----------------------------------------------------------
@@ -1083,7 +1289,9 @@ mod tests {
         let (bg, ev, dir) = setup();
         let shell = detect();
         let cmd = with_grandchild(&shell, dir.path());
-        bg.start("c1", &shell, dir.path(), cmd).await.unwrap();
+        bg.start("c1", &shell, dir.path(), cmd, &CancellationToken::new())
+            .await
+            .unwrap();
         let pid = wait_for_pid_file(&dir.path().join("pid.txt")).await;
         let before = ev.count("c1");
         let t = Instant::now();
@@ -1111,7 +1319,9 @@ mod tests {
         let shell = detect();
         let cmd = "sh -c 'trap \"\" TERM; echo $$ > a.pid; exec sleep 74' & \
                    trap \"\" TERM; echo $$ > b.pid; sleep 73 & echo $! > c.pid; wait";
-        bg.start("c1", &shell, dir.path(), cmd).await.unwrap();
+        bg.start("c1", &shell, dir.path(), cmd, &CancellationToken::new())
+            .await
+            .unwrap();
         let a = wait_for_pid_file(&dir.path().join("a.pid")).await;
         let b = wait_for_pid_file(&dir.path().join("b.pid")).await;
         let c = wait_for_pid_file(&dir.path().join("c.pid")).await;
@@ -1128,14 +1338,28 @@ mod tests {
         let (bg, ev, dir) = setup();
         let shell = detect();
         let c1 = with_grandchild(&shell, dir.path());
-        bg.start("c1", &shell, dir.path(), c1).await.unwrap();
+        bg.start("c1", &shell, dir.path(), c1, &CancellationToken::new())
+            .await
+            .unwrap();
         let pid = wait_for_pid_file(&dir.path().join("pid.txt")).await;
-        bg.start("c1", &shell, dir.path(), ticker(&shell))
-            .await
-            .unwrap();
-        bg.start("c2", &shell, dir.path(), ticker(&shell))
-            .await
-            .unwrap();
+        bg.start(
+            "c1",
+            &shell,
+            dir.path(),
+            ticker(&shell),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        bg.start(
+            "c2",
+            &shell,
+            dir.path(),
+            ticker(&shell),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         let before = ev.count("c1");
         let t = Instant::now();
         bg.stop_chat("c1").await;
@@ -1150,7 +1374,13 @@ mod tests {
         assert!(text.contains("tick"));
         // A new command in the cleared chat does not reuse an id.
         let again = bg
-            .start("c1", &shell, dir.path(), ticker(&shell))
+            .start(
+                "c1",
+                &shell,
+                dir.path(),
+                ticker(&shell),
+                &CancellationToken::new(),
+            )
             .await
             .unwrap();
         assert_eq!(again.id, "bg3");
@@ -1162,14 +1392,28 @@ mod tests {
         let (bg, _ev, dir) = setup();
         let shell = detect();
         let c = with_grandchild(&shell, dir.path());
-        bg.start("c1", &shell, dir.path(), c).await.unwrap();
+        bg.start("c1", &shell, dir.path(), c, &CancellationToken::new())
+            .await
+            .unwrap();
         let pid = wait_for_pid_file(&dir.path().join("pid.txt")).await;
-        bg.start("c2", &shell, dir.path(), ticker(&shell))
-            .await
-            .unwrap();
-        bg.start("c3", &shell, dir.path(), ticker(&shell))
-            .await
-            .unwrap();
+        bg.start(
+            "c2",
+            &shell,
+            dir.path(),
+            ticker(&shell),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        bg.start(
+            "c3",
+            &shell,
+            dir.path(),
+            ticker(&shell),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         let t = Instant::now();
         bg.stop_all().await;
         assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
@@ -1185,7 +1429,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let bg = Background::new(Arc::new(Events::default()));
         let c = with_grandchild(&shell, dir.path());
-        bg.start("c1", &shell, dir.path(), c).await.unwrap();
+        bg.start("c1", &shell, dir.path(), c, &CancellationToken::new())
+            .await
+            .unwrap();
         let pid = wait_for_pid_file(&dir.path().join("pid.txt")).await;
         assert!(alive(pid));
         drop(bg);
@@ -1202,7 +1448,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let bg = Background::new(Arc::new(Events::default()));
         let cmd = "trap \"\" TERM; echo $$ > b.pid; sleep 73 & echo $! > c.pid; wait";
-        bg.start("c1", &shell, dir.path(), cmd).await.unwrap();
+        bg.start("c1", &shell, dir.path(), cmd, &CancellationToken::new())
+            .await
+            .unwrap();
         let b = wait_for_pid_file(&dir.path().join("b.pid")).await;
         let c = wait_for_pid_file(&dir.path().join("c.pid")).await;
         drop(bg);
