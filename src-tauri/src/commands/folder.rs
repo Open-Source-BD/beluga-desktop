@@ -54,17 +54,17 @@ pub async fn set_chat_folder(
             Some(real)
         }
     };
-    release_old_folder(s, chat_id, stored.as_deref()).await?;
-    s.store
-        .set_folder(chat_id, stored.as_deref())
-        .map_err(local)
+    change_folder(s, chat_id, stored.as_deref()).await
 }
 
-/// Stops the chat's background commands, declines its waiting approval card
-/// and forgets what its model read when its folder is about to become `new`
-/// and that is not the folder it has now.
-async fn release_old_folder(s: &AppState, chat_id: &str, new: Option<&str>) -> Result<(), UiError> {
+/// Sets the chat's folder to `new`. When that is not the folder it has now,
+/// also stops the chat's turn and its background commands, declines its
+/// waiting approval card and forgets what its model read. The new folder is
+/// stored first, so a task woken by the stop sees the folder change (not a
+/// plain Stop) however long the background commands take to end.
+async fn change_folder(s: &AppState, chat_id: &str, new: Option<&str>) -> Result<(), UiError> {
     let current = s.store.folder(chat_id).map_err(local)?;
+    s.store.set_folder(chat_id, new).map_err(local)?;
     if current.as_deref() != new {
         // A task must not go on in a folder the chat has left: its turn is
         // stopped, and its waiting card ends as not run.
@@ -88,8 +88,7 @@ pub async fn choose_chat_folder(s: &AppState, chat_id: &str) -> Result<Option<St
     };
     let real = real_folder(picked.to_str().ok_or_else(cannot_open)?)?;
     s.store.approve_folder(&real).map_err(local)?;
-    release_old_folder(s, chat_id, Some(&real)).await?;
-    s.store.set_folder(chat_id, Some(&real)).map_err(local)?;
+    change_folder(s, chat_id, Some(&real)).await?;
     Ok(Some(real))
 }
 

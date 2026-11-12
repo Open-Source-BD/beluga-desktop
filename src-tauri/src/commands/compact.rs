@@ -7,6 +7,7 @@ use super::turn::{
     Register, TurnResult, TurnStatus, plain_history, preamble, register_turn, run_registered,
     system,
 };
+use crate::agent::guards;
 use crate::engine::{TurnOutcome, TurnRequest, UiError};
 use crate::state::AppState;
 use crate::store::StoredMessage;
@@ -131,6 +132,14 @@ pub async fn compact_chat(
     // No task stores rows while the summary is made; a send that replaces
     // this turn waits for it.
     let _held = s.task_locks.hold(chat_id).await;
+    // A paid summary obeys today's spending limit like any other request.
+    if let Some(refused) = guards::over_limit_for(s, model_id) {
+        let mut turns = s.turns();
+        if turns.get(chat_id).is_some_and(|t| t.id == registration.0) {
+            turns.remove(chat_id);
+        }
+        return Err(refused);
+    }
     let ran = run_registered(s, chat_id, registration, request, &|_| {}).await;
 
     // A turn that started in the chat meanwhile cancelled this one; should the

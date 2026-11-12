@@ -259,6 +259,9 @@ pub struct AppState {
     pub background: Background,
     /// The approval card waiting in each chat.
     pub approvals: Approvals,
+    /// Where the task guards get the key's status and wait out a rate
+    /// limit: the server and the clock (tests script both).
+    pub outside: Arc<dyn crate::agent::guards::Outside>,
     /// The files each chat's model has read, for edits.
     pub read_logs: ReadLogs,
     /// Opens the system folder and save dialogs.
@@ -362,6 +365,7 @@ impl AppState {
             data_dir,
             background: Background::new(events.clone()),
             approvals: Approvals::new(),
+            outside: Arc::new(crate::agent::guards::Server),
             read_logs: ReadLogs::default(),
             events,
             dialogs,

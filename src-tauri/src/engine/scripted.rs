@@ -44,6 +44,11 @@ impl ScriptedEngine {
         self.steps.lock().unwrap().extend(steps);
     }
 
+    /// Drops the steps still waiting.
+    pub fn clear(&self) {
+        self.steps.lock().unwrap().clear();
+    }
+
     /// Every request received so far, in order.
     pub fn requests(&self) -> Vec<StepRequest> {
         self.requests.lock().unwrap().clone()

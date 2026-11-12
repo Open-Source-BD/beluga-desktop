@@ -3,7 +3,7 @@
 use super::auth::revoke;
 use super::chat_state::{SKILL_NOTE, skills_to_send};
 use super::chats::local;
-use crate::agent::task;
+use crate::agent::{guards, task};
 use crate::engine::{EngineEvent, TurnOutcome, TurnRequest, UiError};
 use crate::openrouter::models::ModelCache;
 use crate::openrouter::stream::{Part, Role, WireMessage};
@@ -340,10 +340,21 @@ pub async fn send_message(
         return run_project_turn(s, chat_id, model_id, first, on_event).await;
     }
     let turn = take_over(s, chat_id).await;
+    refuse_over_limit(s, model_id)?;
     s.store
         .append_message(chat_id, "user", text, &attachments, false)
         .map_err(local)?;
     run_stored_turn(s, chat_id, model_id, &turn, on_event).await
+}
+
+/// Today's spending limit refuses a request on a paid model. Checked once
+/// the chat is taken over and before anything is stored or sent, so a
+/// refused send stores nothing.
+fn refuse_over_limit(s: &AppState, model_id: &str) -> Result<(), UiError> {
+    match guards::over_limit_for(s, model_id) {
+        Some(refused) => Err(refused),
+        None => Ok(()),
+    }
 }
 
 /// The chat's turn, taken over from whatever ran in it before: registered
@@ -453,7 +464,12 @@ async fn run_project_turn(
     before: Before<'_>,
     on_event: &(dyn Fn(EngineEvent) + Send + Sync),
 ) -> Result<TurnResult, UiError> {
+    if let Before::Retry { regenerate } = &before {
+        // Nothing to retry leaves a running turn alone.
+        project_retry(s, chat_id, *regenerate)?;
+    }
     let turn = take_over(s, chat_id).await;
+    refuse_over_limit(s, model_id)?;
     s.store.set_chat_model(chat_id, model_id).map_err(local)?;
     let repaired = task::repair(&s.store, chat_id).map_err(local)?;
     (0..repaired).for_each(|_| on_event(EngineEvent::MessageStored));
@@ -614,7 +630,21 @@ pub async fn retry_turn(
         let before = Before::Retry { regenerate };
         return run_project_turn(s, chat_id, model_id, before, on_event).await;
     }
+    // Nothing to retry leaves a running turn alone; after taking over, the
+    // conversation is read again (the turn that ran may have added to it).
+    plain_retry(s, chat_id, regenerate)?;
     let turn = take_over(s, chat_id).await;
+    let replaced = plain_retry(s, chat_id, regenerate)?;
+    refuse_over_limit(s, model_id)?;
+    if let Some(replaced) = replaced {
+        s.store.delete_message(chat_id, &replaced).map_err(local)?;
+    }
+    run_stored_turn(s, chat_id, model_id, &turn, on_event).await
+}
+
+/// On the one-request path, the reply a retry removes first, if any. `Err`
+/// when there is nothing to retry.
+fn plain_retry(s: &AppState, chat_id: &str, regenerate: bool) -> Result<Option<String>, UiError> {
     let messages = s.store.sendable_messages(chat_id).map_err(local)?;
     let replaced = messages
         .last()
@@ -623,12 +653,7 @@ pub async fn retry_turn(
     if answered.last().is_none_or(|m| m.role != "user") {
         return Err(UiError::other(NOTHING_TO_RETRY));
     }
-    if let Some(replaced) = replaced {
-        s.store
-            .delete_message(chat_id, &replaced.id)
-            .map_err(local)?;
-    }
-    run_stored_turn(s, chat_id, model_id, &turn, on_event).await
+    Ok(replaced.map(|m| m.id.clone()))
 }
 
 /// Stops the reply running in this chat, if any.

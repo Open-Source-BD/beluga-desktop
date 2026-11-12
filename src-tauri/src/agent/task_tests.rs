@@ -14,6 +14,7 @@ use crate::commands::{chats, compact, folder};
 use crate::engine::scripted::{ScriptedEngine, Step};
 use crate::engine::{EngineEvent, StepError, StepOutcome, StepRequest, UiError};
 use crate::openrouter::error::ApiError;
+use crate::openrouter::key_info::{FreeDaily, KeyStatus};
 use crate::openrouter::models::{ModelCache, ModelInfo};
 use crate::openrouter::stream::{Part, Role, WireMessage};
 use crate::secrets::{KeyStore, SessionStore};
@@ -27,6 +28,49 @@ use std::time::Duration;
 const TOOLS_MODEL: &str = "m/tools";
 const PLAIN_MODEL: &str = "m/plain";
 const SMALL_MODEL: &str = "m/small";
+const PAID_TOOLS: &str = "m/paid-tools";
+const PAID_PLAIN: &str = "m/paid-plain";
+
+/// The key's status and the clock as the guards see them: statuses are
+/// handed out in order, then `fallback` for every later fetch; a wait of
+/// `n` seconds takes `n × ms_per_second` milliseconds.
+#[derive(Default)]
+struct ScriptedOutside {
+    statuses: Mutex<std::collections::VecDeque<Option<KeyStatus>>>,
+    fallback: Mutex<Option<KeyStatus>>,
+    fetches: std::sync::atomic::AtomicUsize,
+    waits: Mutex<Vec<u64>>,
+    ms_per_second: std::sync::atomic::AtomicU64,
+}
+
+#[async_trait::async_trait]
+impl crate::agent::guards::Outside for ScriptedOutside {
+    async fn key_status(&self, _: &AppState) -> Option<KeyStatus> {
+        self.fetches
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let next = self.statuses.lock().unwrap().pop_front();
+        next.unwrap_or_else(|| self.fallback.lock().unwrap().clone())
+    }
+
+    async fn wait(&self, seconds: u64) {
+        self.waits.lock().unwrap().push(seconds);
+        let ms = self.ms_per_second.load(std::sync::atomic::Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(seconds * ms)).await;
+    }
+}
+
+fn free_left(remaining: u32) -> Option<KeyStatus> {
+    Some(KeyStatus {
+        is_free_tier: true,
+        free_daily: Some(FreeDaily {
+            used: 50 - remaining.min(50),
+            limit: 50,
+            remaining,
+        }),
+        usage_usd: 0.0,
+        limit_remaining_usd: None,
+    })
+}
 
 struct NullSink;
 impl EventSink for NullSink {
@@ -59,6 +103,16 @@ struct Fx {
     hook: Hook,
     /// Cards answered so far by `answer_cards`.
     answered: std::sync::atomic::AtomicUsize,
+    outside: Arc<ScriptedOutside>,
+}
+
+fn paid(id: &str, tools: bool) -> ModelInfo {
+    ModelInfo {
+        prompt_usd_per_mtok: 1.0,
+        completion_usd_per_mtok: 2.0,
+        is_free: false,
+        ..model(id, tools, 100_000)
+    }
 }
 
 fn model(id: &str, tools: bool, context_length: u64) -> ModelInfo {
@@ -135,7 +189,7 @@ fn fx(steps: Vec<Step>) -> Fx {
         HttpTimeouts::PRODUCTION,
     )
     .unwrap();
-    let state = AppState::with_engine(
+    let mut state = AppState::with_engine(
         http,
         "http://127.0.0.1:1".into(),
         Arc::new(keys),
@@ -153,9 +207,16 @@ fn fx(steps: Vec<Step>) -> Fx {
             model(TOOLS_MODEL, true, 100_000),
             model(PLAIN_MODEL, false, 100_000),
             model(SMALL_MODEL, true, 10_000),
+            paid(PAID_TOOLS, true),
+            paid(PAID_PLAIN, false),
         ],
     )
     .unwrap();
+    let outside = Arc::new(ScriptedOutside {
+        ms_per_second: 1.into(),
+        ..ScriptedOutside::default()
+    });
+    state.outside = outside.clone();
     let chat = state.store.create_chat(TOOLS_MODEL).unwrap().id;
     let root = real(project.path());
     state.store.approve_folder(&root).unwrap();
@@ -169,6 +230,7 @@ fn fx(steps: Vec<Step>) -> Fx {
         events: Arc::default(),
         hook: Arc::default(),
         answered: Default::default(),
+        outside,
     }
 }
 
@@ -1184,31 +1246,6 @@ async fn a_result_that_cannot_be_stored_fails_the_task_and_the_next_send_repairs
 }
 
 #[tokio::test]
-async fn the_guards_task_12_fills_in_let_the_task_continue_by_default() {
-    let mut g = Guards::default();
-    let mut messages = Vec::new();
-    assert_eq!(g.before_request(1, &mut messages), Next::Continue);
-    assert_eq!(g.keep_going(25).await, Next::Continue);
-    let outcome = crate::agent::ToolOutcome {
-        status: crate::agent::ToolStatus::Error,
-        text: "x".into(),
-        summary: "x".into(),
-        detail: None,
-    };
-    assert_eq!(
-        g.after_call(&call("c", "read_file", json!({})), &outcome),
-        Next::Continue
-    );
-    let e = StepError {
-        ui: UiError::from(ApiError::RateLimited {
-            retry_after_secs: Some(1),
-        }),
-        retry_after_secs: Some(1),
-    };
-    assert!(!g.retry_after(&e).await);
-}
-
-#[tokio::test]
 async fn fullness_counts_the_system_message_tools_and_tool_rows() {
     let f = fx(vec![]);
     let empty = chat_state::chat_fullness(&f.state, &f.chat, SMALL_MODEL, 0).unwrap();
@@ -1847,4 +1884,659 @@ async fn compaction_refuses_when_no_user_row_starts_the_open_task() {
         s.summary(&f.chat).unwrap(),
         Some(("S".to_string(), first.seq))
     );
+}
+
+// ---------------------------------------------------------------------------
+// Guards (Task 12)
+// ---------------------------------------------------------------------------
+
+use crate::agent::guards::{self as g, set_spend_limit};
+
+const LIMIT_REACHED: &str =
+    "You have reached today's spending limit of $1.00. You can change it in Settings.";
+
+fn costing(cost: f64, step: Step) -> Step {
+    match step {
+        Step::Reply(out) => Step::Reply(StepOutcome {
+            cost_usd: Some(cost),
+            ..out
+        }),
+        other => other,
+    }
+}
+
+fn rate_limited(retry_after_secs: Option<u64>) -> Step {
+    Step::Reply(StepOutcome {
+        error: Some(StepError {
+            ui: UiError::from(ApiError::RateLimited { retry_after_secs }),
+            retry_after_secs,
+        }),
+        ..StepOutcome::default()
+    })
+}
+
+fn list(id: &str) -> Step {
+    calls("", vec![call(id, "list_dir", json!({}))])
+}
+
+/// `n` replies, each one `list_dir` call with its own id.
+fn lists(n: usize) -> Vec<Step> {
+    (0..n).map(|i| list(&format!("l{i}"))).collect()
+}
+
+fn keep_going_cards(f: &Fx) -> Vec<(u32, Option<u32>, Option<f64>)> {
+    f.events()
+        .into_iter()
+        .filter_map(|e| match e {
+            EngineEvent::ApprovalNeeded {
+                approval:
+                    crate::agent::Approval::KeepGoing {
+                        requests,
+                        free_left,
+                        spent_today_usd,
+                        ..
+                    },
+            } => Some((requests, free_left, spent_today_usd)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn notes(f: &Fx) -> Vec<String> {
+    f.rows()
+        .into_iter()
+        .filter(|m| m.kind == "note")
+        .map(|m| m.text)
+        .collect()
+}
+
+impl Fx {
+    async fn try_send_on(&self, text: &str, model: &str) -> Result<TurnResult, UiError> {
+        let emit = self.emitter();
+        turn::send_message(&self.state, &self.chat, text, vec![], model, &emit).await
+    }
+
+    /// Sends "continue" after a pause and checks the task goes on: the
+    /// request is well-formed, ends with "continue", and the task is done.
+    async fn continues(&self, model: &str) {
+        self.engine.push(vec![say("going on")]);
+        let before = self.requests().len();
+        let r = self.send_on("continue", model).await;
+        assert_eq!(r.status, TurnStatus::Done, "{r:?}: {:?}", self.shape());
+        let reqs = self.requests();
+        assert_eq!(reqs.len(), before + 1);
+        let last = reqs.last().unwrap();
+        assert_well_formed(last);
+        assert!(last.tools.is_some());
+        assert_eq!(text_of(last.messages.last().unwrap()), "continue");
+        assert_rows_paired(self);
+    }
+}
+
+fn spend(f: &Fx, usd: f64) {
+    let other = f.state.store.create_chat(TOOLS_MODEL).unwrap().id;
+    f.state.store.record_usage(&other, 1, usd).unwrap();
+}
+
+#[tokio::test]
+async fn sends_and_retries_on_a_paid_model_over_the_limit_are_refused_before_any_request() {
+    let f = fx(vec![]);
+    spend(&f, 1.00);
+    // A plain send (a model without tools) and a project send.
+    for model in [PAID_PLAIN, PAID_TOOLS] {
+        let e = f.try_send_on("hi", model).await.unwrap_err();
+        assert_eq!(e.message, LIMIT_REACHED);
+        assert_eq!(e.kind, "daily_limit");
+    }
+    assert!(f.requests().is_empty());
+    assert!(f.shape().is_empty(), "nothing stored: {:?}", f.shape());
+    // A retry of a stored question.
+    f.state
+        .store
+        .append_message(&f.chat, "user", "q", &[], false)
+        .unwrap();
+    for model in [PAID_PLAIN, PAID_TOOLS] {
+        let emit = f.emitter();
+        let e = turn::retry_turn(&f.state, &f.chat, model, false, &emit)
+            .await
+            .unwrap_err();
+        assert_eq!(e.message, LIMIT_REACHED);
+    }
+    assert!(f.requests().is_empty());
+    assert_eq!(f.shape(), ["user"]);
+    // A free model is never blocked.
+    f.engine.push(vec![say("free")]);
+    assert_eq!(f.send("hi").await.status, TurnStatus::Done);
+    // No limit lets the paid send through.
+    set_spend_limit(&f.state.store, None).unwrap();
+    f.engine.push(vec![say("paid")]);
+    assert_eq!(
+        f.send_on("again", PAID_PLAIN).await.status,
+        TurnStatus::Done
+    );
+}
+
+#[tokio::test]
+async fn compaction_on_a_paid_model_over_the_limit_is_refused_and_leaves_the_chat_free() {
+    let f = fx(vec![]);
+    for (role, t) in [
+        ("user", "a"),
+        ("assistant", "b"),
+        ("user", "c"),
+        ("assistant", "d"),
+    ] {
+        f.state
+            .store
+            .append_message(&f.chat, role, t, &[], false)
+            .unwrap();
+    }
+    spend(&f, 1.50);
+    let e = compact::compact_chat(&f.state, &f.chat, PAID_PLAIN, None)
+        .await
+        .unwrap_err();
+    assert_eq!(e.message, LIMIT_REACHED);
+    assert!(f.requests().is_empty());
+    assert_eq!(f.state.store.summary(&f.chat).unwrap(), None);
+    assert!(!f.state.turns().contains_key(&f.chat));
+    // The chat is not left busy: a free compaction runs.
+    f.engine.push(vec![say("SUMMARY")]);
+    let r = compact::compact_chat(&f.state, &f.chat, TOOLS_MODEL, None)
+        .await
+        .unwrap();
+    assert_eq!(r.status, TurnStatus::Done);
+}
+
+#[tokio::test]
+async fn a_paid_task_crossing_the_limit_mid_task_pauses_with_daily_limit_and_keeps_its_rows() {
+    let f = fx(vec![costing(0.6, list("c1")), costing(0.6, list("c2"))]);
+    let r = f.send_on("go", PAID_TOOLS).await;
+    assert_eq!(r.status, TurnStatus::Paused);
+    assert_eq!(r.reason.as_deref(), Some("daily_limit"));
+    assert_eq!(f.requests().len(), 2);
+    assert_eq!(
+        f.shape(),
+        [
+            "user",
+            "assistant[list_dir]",
+            "tool:ok",
+            "assistant[list_dir]",
+            "tool:ok",
+            "note"
+        ]
+    );
+    assert_eq!(
+        notes(&f),
+        ["Paused: today's spending limit of $1.00 is reached. You can change it in Settings."]
+    );
+    assert_eq!(
+        f.events().last(),
+        Some(&EngineEvent::Paused {
+            reason: "daily_limit".into()
+        })
+    );
+    // A send while over the limit is refused and stores nothing.
+    let before = f.shape();
+    assert!(f.try_send_on("continue", PAID_TOOLS).await.is_err());
+    assert_eq!(f.shape(), before);
+    // Raised, the next send continues.
+    set_spend_limit(&f.state.store, Some(5.0)).unwrap();
+    f.continues(PAID_TOOLS).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn every_25_requests_the_task_asks_to_keep_going_and_stop_here_pauses() {
+    let f = fx(lists(50));
+    f.outside
+        .fallback
+        .lock()
+        .unwrap()
+        .replace(free_left(30).unwrap());
+    let (r, ()) = tokio::join!(
+        f.send("go"),
+        f.answer_cards(vec![Answer::KeepGoing, Answer::StopHere])
+    );
+    assert_eq!(r.status, TurnStatus::Paused, "{r:?}");
+    assert_eq!(r.reason.as_deref(), Some("keep_going_declined"));
+    assert_eq!(f.requests().len(), 50);
+    assert_eq!(
+        keep_going_cards(&f),
+        [(25, Some(30), None), (50, Some(30), None)]
+    );
+    // No note: the user chose to stop.
+    assert!(notes(&f).is_empty());
+    assert_eq!(f.shape().last().map(String::as_str), Some("tool:ok"));
+    f.continues(TOOLS_MODEL).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_keep_going_card_on_a_paid_model_shows_todays_spend() {
+    let mut steps = lists(25);
+    steps.push(say("done"));
+    let f = fx(steps);
+    spend(&f, 0.5);
+    let (r, ()) = tokio::join!(
+        f.send_on("go", PAID_TOOLS),
+        f.answer_cards(vec![Answer::KeepGoing])
+    );
+    assert_eq!(r.status, TurnStatus::Done, "{r:?}");
+    let cards = keep_going_cards(&f);
+    assert_eq!(cards.len(), 1);
+    let (requests, free, spent) = cards[0];
+    assert_eq!((requests, free), (25, None));
+    // $0.50 before, and 25 requests at $0.01.
+    assert!((spent.unwrap() - 0.75).abs() < 1e-9, "{spent:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_message_answer_to_keep_going_stores_the_user_row_and_continues() {
+    let mut steps = lists(25);
+    steps.push(say("ok, doing that"));
+    let f = fx(steps);
+    let (r, ()) = tokio::join!(
+        f.send("go"),
+        f.answer_cards(vec![Answer::Message {
+            text: "now tidy up".into()
+        }])
+    );
+    assert_eq!(r.status, TurnStatus::Done, "{r:?}");
+    let shape = f.shape();
+    let n = shape.len();
+    assert_eq!(shape[n - 3..], ["tool:ok", "user", "assistant"]);
+    assert_eq!(f.rows()[n - 2].text, "now tidy up");
+    let last = f.requests().pop().unwrap();
+    assert_well_formed(&last);
+    assert_eq!(text_of(last.messages.last().unwrap()), "now tidy up");
+    assert_eq!(f.requests().len(), 26);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stop_while_the_keep_going_card_waits_ends_the_task_as_stopped() {
+    let f = fx(lists(25));
+    let stopper = async {
+        f.wait_for(card_waits).await;
+        turn::stop(&f.state, &f.chat);
+    };
+    let (r, ()) = tokio::join!(f.send("go"), stopper);
+    assert_eq!(r.status, TurnStatus::Interrupted);
+    assert_eq!(r.reason.as_deref(), Some("stopped"));
+    assert_eq!(f.requests().len(), 25);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_free_model_with_no_free_requests_left_pauses_before_any_request() {
+    let f = fx(vec![]);
+    f.outside
+        .fallback
+        .lock()
+        .unwrap()
+        .replace(free_left(0).unwrap());
+    let r = f.send("go").await;
+    assert_eq!(r.status, TurnStatus::Paused);
+    assert_eq!(r.reason.as_deref(), Some("no_free_requests"));
+    assert!(f.requests().is_empty());
+    assert_eq!(f.shape(), ["user", "note"]);
+    assert_eq!(
+        notes(&f),
+        ["Paused: no free requests are left today. They reset at midnight UTC."]
+    );
+    // Read once, just now: a fresh 0 is not read again.
+    assert_eq!(
+        f.outside.fetches.load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+    f.outside
+        .fallback
+        .lock()
+        .unwrap()
+        .replace(free_left(5).unwrap());
+    f.continues(TOOLS_MODEL).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_free_allowance_reaching_zero_mid_task_pauses_at_the_next_check() {
+    let f = fx(lists(12));
+    f.outside.statuses.lock().unwrap().push_back(free_left(10));
+    f.outside
+        .fallback
+        .lock()
+        .unwrap()
+        .replace(free_left(0).unwrap());
+    let r = f.send("go").await;
+    assert_eq!(r.reason.as_deref(), Some("no_free_requests"), "{r:?}");
+    // Checked before the first request and again after ten.
+    assert_eq!(f.requests().len(), 10);
+    assert_eq!(f.shape().last().map(String::as_str), Some("note"));
+    assert_rows_paired(&f);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_key_status_that_cannot_be_read_never_blocks_a_task() {
+    // The fallback is None: every fetch fails.
+    let f = fx(vec![list("c1"), say("ok")]);
+    assert_eq!(f.send("go").await.status, TurnStatus::Done);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_rate_limit_is_waited_out_and_the_same_request_sent_again() {
+    let f = fx(vec![list("c1"), rate_limited(Some(2)), say("ok")]);
+    let r = f.send("go").await;
+    assert_eq!(r.status, TurnStatus::Done, "{r:?}");
+    assert!(f.events().contains(&EngineEvent::Waiting { seconds: 2 }));
+    assert_eq!(*f.outside.waits.lock().unwrap(), [2]);
+    let reqs = f.requests();
+    assert_eq!(reqs.len(), 3);
+    assert_eq!(reqs[1], reqs[2], "the retry is byte-identical");
+    // The rate-limited request was sent and counts.
+    assert_eq!(f.state.store.chat_usage(&f.chat).unwrap().0, 3);
+    assert_eq!(
+        f.shape(),
+        ["user", "assistant[list_dir]", "tool:ok", "assistant"]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_fourth_rate_limit_in_a_task_pauses_and_the_waits_are_capped() {
+    let f = fx(vec![
+        list("c1"),
+        rate_limited(None),
+        rate_limited(Some(120)),
+        rate_limited(Some(1)),
+        rate_limited(Some(1)),
+    ]);
+    let r = f.send("go").await;
+    assert_eq!(r.status, TurnStatus::Paused);
+    assert_eq!(r.reason.as_deref(), Some("rate_limited"));
+    assert_eq!(*f.outside.waits.lock().unwrap(), [10, 60, 1]);
+    let waiting: Vec<u64> = f
+        .events()
+        .into_iter()
+        .filter_map(|e| match e {
+            EngineEvent::Waiting { seconds } => Some(seconds),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(waiting, [10, 60, 1]);
+    assert_eq!(f.requests().len(), 5);
+    assert_eq!(
+        notes(&f),
+        ["Paused: the model is limiting requests. Try again in a minute."]
+    );
+    f.continues(TOOLS_MODEL).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stop_during_a_rate_limit_wait_ends_the_task_at_once() {
+    let f = fx(vec![list("c1"), rate_limited(Some(60))]);
+    // A real minute, unless the stop cuts it short.
+    f.outside
+        .ms_per_second
+        .store(1_000, std::sync::atomic::Ordering::SeqCst);
+    let stopper = async {
+        f.wait_for(|e| matches!(e, EngineEvent::Waiting { .. }))
+            .await;
+        turn::stop(&f.state, &f.chat);
+    };
+    let started = std::time::Instant::now();
+    let (r, ()) = tokio::join!(f.send("go"), stopper);
+    assert!(started.elapsed() < Duration::from_secs(long(10)));
+    assert_eq!(r.status, TurnStatus::Interrupted);
+    assert_eq!(r.reason.as_deref(), Some("stopped"));
+    assert_eq!(f.requests().len(), 2);
+    assert_eq!(f.shape(), ["user", "assistant[list_dir]", "tool:ok"]);
+}
+
+fn read_missing(id: &str) -> ToolCall {
+    call(id, "read_file", json!({"path": "missing.txt"}))
+}
+
+#[tokio::test]
+async fn three_identical_failing_calls_pause_the_task_with_the_struggling_note() {
+    let f = fx(vec![
+        calls("", vec![read_missing("c1")]),
+        calls("", vec![read_missing("c2")]),
+        calls(
+            "",
+            vec![read_missing("c3"), call("c4", "list_dir", json!({}))],
+        ),
+    ]);
+    let r = f.send("go").await;
+    assert_eq!(r.status, TurnStatus::Paused);
+    assert_eq!(r.reason.as_deref(), Some("going_in_circles"));
+    assert_eq!(f.requests().len(), 3);
+    assert_eq!(
+        f.shape(),
+        [
+            "user",
+            "assistant[read_file]",
+            "tool:error",
+            "assistant[read_file]",
+            "tool:error",
+            "assistant[read_file,list_dir]",
+            "tool:error",
+            "tool:not_run",
+            "note"
+        ]
+    );
+    assert_eq!(not_run_texts(&f), [PAUSED]);
+    assert_eq!(
+        notes(&f),
+        ["This model is struggling with this task. A stronger model usually does better."]
+    );
+    f.continues(TOOLS_MODEL).await;
+}
+
+#[tokio::test]
+async fn a_success_between_failing_calls_resets_the_count() {
+    let f = fx(vec![
+        calls("", vec![read_missing("c1"), read_missing("c2")]),
+        calls("", vec![call("c3", "list_dir", json!({}))]),
+        calls("", vec![read_missing("c4"), read_missing("c5")]),
+        say("I give up on that file."),
+    ]);
+    let r = f.send("go").await;
+    assert_eq!(r.status, TurnStatus::Done, "{r:?}");
+    assert!(notes(&f).is_empty());
+}
+
+#[tokio::test]
+async fn five_unreadable_calls_in_a_row_pause_the_task_with_the_struggling_note() {
+    let broken = |id: &str| ToolCall {
+        id: id.into(),
+        name: "read_file".into(),
+        arguments: "{\"path\": ".into(),
+    };
+    let f = fx(vec![
+        calls(
+            "",
+            vec![
+                call("c1", "make_coffee", json!({})),
+                broken("c2"),
+                call("c3", "make_tea", json!({})),
+            ],
+        ),
+        calls(
+            "",
+            vec![
+                broken("c4"),
+                broken("c5"),
+                call("c6", "list_dir", json!({})),
+            ],
+        ),
+    ]);
+    let r = f.send("go").await;
+    assert_eq!(r.reason.as_deref(), Some("going_in_circles"), "{r:?}");
+    assert_eq!(f.requests().len(), 2);
+    assert_eq!(
+        f.shape()[5..],
+        [
+            "assistant[read_file,read_file,list_dir]",
+            "tool:error",
+            "tool:error",
+            "tool:not_run",
+            "note"
+        ]
+    );
+    assert_eq!(
+        notes(&f),
+        ["This model is struggling with this task. A stronger model usually does better."]
+    );
+    f.continues(TOOLS_MODEL).await;
+}
+
+/// A file whose `read_file` result is about `chars` characters.
+fn big_file(f: &Fx, name: &str, chars: usize) {
+    let line = format!("{}\n", "y".repeat(59));
+    std::fs::write(f.path(name), line.repeat(chars / 60)).unwrap();
+}
+
+fn read_big(id: &str) -> ToolCall {
+    call(id, "read_file", json!({"path": "big.txt"}))
+}
+
+/// The fixed part of a project request on the small model, in characters.
+fn fixed_chars(f: &Fx) -> usize {
+    let name = std::path::Path::new(&real(f.project.path()))
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    prompt::system(os_name(), detect().name, &name)
+        .chars()
+        .count()
+        + schema::tools().to_string().chars().count()
+}
+
+#[tokio::test]
+async fn over_seventy_percent_the_oldest_results_are_trimmed_in_the_request_only() {
+    let mut steps: Vec<Step> = (0..6)
+        .map(|i| calls("", vec![read_big(&format!("c{i}"))]))
+        .collect();
+    steps.push(say("done"));
+    let f = fx(steps);
+    // 70% of the small model's 10,000 tokens is 28,000 characters: the
+    // fixed part and four results fit, six do not.
+    let room = 28_000 - fixed_chars(&f);
+    let result = room / 5;
+    assert!(result <= 16_000 - 1_000, "a read returns at most 16,000");
+    big_file(&f, "big.txt", result);
+    let r = f.send_on("go", SMALL_MODEL).await;
+    assert_eq!(r.status, TurnStatus::Done, "{r:?}");
+    let reqs = f.requests();
+    assert_eq!(reqs.len(), 7);
+    let tool_texts = |req: &StepRequest| -> Vec<String> {
+        req.messages
+            .iter()
+            .filter(|m| m.role == Role::Tool)
+            .map(text_of)
+            .collect()
+    };
+    let last = tool_texts(&reqs[6]);
+    assert_eq!(last.len(), 6);
+    let trimmed = last.iter().filter(|t| *t == g::TRIMMED).count();
+    assert!(trimmed >= 1, "{trimmed}");
+    // The oldest first, never the last four.
+    assert!(last[..trimmed].iter().all(|t| t == g::TRIMMED));
+    assert!(last[trimmed..].iter().all(|t| t != g::TRIMMED));
+    assert!(trimmed <= 2);
+    // Once trimmed, trimmed in every later request: the start of each
+    // request is the start of the next.
+    for pair in reqs.windows(2) {
+        let (a, b) = (tool_texts(&pair[0]), tool_texts(&pair[1]));
+        for (x, y) in a.iter().zip(&b) {
+            if x == g::TRIMMED {
+                assert_eq!(y, g::TRIMMED);
+            }
+        }
+    }
+    for r in &reqs {
+        assert_well_formed(r);
+    }
+    // What is stored and shown is never trimmed.
+    let stored: Vec<StoredMessage> = f.rows().into_iter().filter(|m| m.kind == "tool").collect();
+    assert_eq!(stored.len(), 6);
+    assert!(stored.iter().all(|m| m.text.chars().count() > result / 2));
+}
+
+#[tokio::test]
+async fn a_chat_trimming_cannot_fit_pauses_with_the_chat_full_note() {
+    let mut steps: Vec<Step> = (0..4)
+        .map(|i| calls("", vec![read_big(&format!("c{i}"))]))
+        .collect();
+    steps.push(say("never sent"));
+    let f = fx(steps);
+    // Four results alone, which are never trimmed, are over 70%.
+    let room = 28_000 - fixed_chars(&f);
+    big_file(&f, "big.txt", room / 4 + 1_000);
+    let r = f.send_on("go", SMALL_MODEL).await;
+    assert_eq!(r.status, TurnStatus::Paused, "{r:?}");
+    assert_eq!(r.reason.as_deref(), Some("chat_full"));
+    assert_eq!(f.requests().len(), 4);
+    assert_eq!(
+        notes(&f),
+        ["This chat is too full to continue. Use /compact to shorten it, then say continue."]
+    );
+    // /compact, then "continue".
+    f.engine.clear();
+    f.engine.push(vec![say("SUMMARY")]);
+    let c = compact::compact_chat(&f.state, &f.chat, SMALL_MODEL, None)
+        .await
+        .unwrap();
+    assert_eq!(c.status, TurnStatus::Done);
+    f.continues(SMALL_MODEL).await;
+}
+
+// ---------------------------------------------------------------------------
+// Carried over from Task 11
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn closing_the_folder_with_a_background_command_running_ends_the_task_with_the_folder_reason()
+{
+    let f = fx(vec![
+        calls(
+            "",
+            vec![call(
+                "c1",
+                "run_command",
+                json!({"command": sleeper(), "background": true}),
+            )],
+        ),
+        Step::UntilCancelled("Waiting for the server".into()),
+    ]);
+    let close = async {
+        f.answer_cards(vec![Answer::Once]).await;
+        f.wait_for(|e| matches!(e, EngineEvent::TextDelta { .. }))
+            .await;
+        folder::set_chat_folder(&f.state, &f.chat, None)
+            .await
+            .unwrap();
+    };
+    let (r, ()) = tokio::join!(f.send("start the server"), close);
+    assert_eq!(r.status, TurnStatus::Interrupted);
+    assert_eq!(r.reason.as_deref(), Some("folder_missing"));
+    assert_eq!(notes(&f), [FOLDER_GONE]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_plain_retry_with_nothing_to_retry_leaves_a_running_task_alone() {
+    let f = fx(vec![card_then_reads(), say("finished")]);
+    let retry = async {
+        f.wait_for(card_waits).await;
+        let emit = f.emitter();
+        // The model has no tools: the one-request path. The last row is a
+        // reply with calls, so there is nothing to retry.
+        let r = turn::retry_turn(&f.state, &f.chat, PLAIN_MODEL, false, &emit).await;
+        assert_eq!(
+            r.unwrap_err().message,
+            "There is nothing to retry in this chat."
+        );
+        assert!(
+            f.state.approvals.waiting(&f.chat).is_some(),
+            "the card still waits"
+        );
+        f.answer_cards(vec![Answer::Once]).await;
+    };
+    let (r, ()) = tokio::join!(f.send("write"), retry);
+    assert_eq!(r.status, TurnStatus::Done, "{r:?}");
+    assert!(f.path("b.txt").exists());
 }

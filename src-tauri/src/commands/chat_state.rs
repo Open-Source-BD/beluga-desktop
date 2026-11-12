@@ -13,6 +13,7 @@ use super::turn::{decode, is_image};
 use crate::agent::{prompt, schema, task};
 use crate::engine::UiError;
 use crate::openrouter::models::{ModelCache, ModelInfo};
+use crate::openrouter::stream::{Part, WireMessage};
 use crate::skills::MAX_BODY_CHARS;
 use crate::skills::library::SkillView;
 use crate::state::AppState;
@@ -26,7 +27,7 @@ pub const MAX_ACTIVE_SKILLS: usize = 3;
 
 /// What an image attachment counts for in `chat_fullness`, in characters.
 const IMAGE_CHARS: usize = 1_000;
-pub(super) const CHARS_PER_TOKEN: usize = 4;
+pub(crate) const CHARS_PER_TOKEN: usize = 4;
 
 pub(super) const NO_CHAT: &str = "That chat no longer exists.";
 const NOT_AVAILABLE: &str = "This skill is not available. Check it in Skills.";
@@ -265,6 +266,31 @@ pub(super) fn message_chars(m: &StoredMessage, image_chars: usize) -> usize {
             .sum::<usize>()
 }
 
+/// What `total_chars` of request text is as a percentage of a context of
+/// `context_length` tokens, at four characters a token (not capped at 100).
+/// The one estimate behind the fullness meter and trimming.
+pub(crate) fn percent_of_context(total_chars: usize, context_length: u64) -> f64 {
+    let tokens = total_chars as f64 / CHARS_PER_TOKEN as f64;
+    tokens / context_length as f64 * 100.0
+}
+
+/// A message about to be sent, counted the way `chat_fullness` counts a
+/// stored row: its text, 1,000 characters per image, and the names and
+/// arguments of its calls.
+pub(crate) fn wire_chars(m: &WireMessage) -> usize {
+    m.parts
+        .iter()
+        .map(|p| match p {
+            Part::Text(t) => chars(t),
+            Part::ImageDataUrl(_) => IMAGE_CHARS,
+        })
+        .sum::<usize>()
+        + m.tool_calls
+            .iter()
+            .map(|c| chars(&c.name) + chars(&c.arguments))
+            .sum::<usize>()
+}
+
 /// How much of `model_id`'s context the next turn would use: in a project
 /// chat the system message and the tool definitions; the skills note and
 /// fitting skill bodies, the summary, every sendable row's text (tool
@@ -304,9 +330,8 @@ pub fn chat_fullness(
                 .map(|c| chars(&c.name) + chars(&c.arguments))
                 .sum::<usize>();
     }
-    let tokens = total as f64 / CHARS_PER_TOKEN as f64;
     Ok(Fullness {
-        percent: (tokens / model.context_length as f64 * 100.0).round() as u32,
+        percent: percent_of_context(total, model.context_length).round() as u32,
         context_length: model.context_length,
     })
 }

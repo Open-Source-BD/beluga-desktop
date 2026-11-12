@@ -35,7 +35,7 @@ use crate::skills::library::Library;
 use crate::store::Store;
 
 /// The tools, in the order the schema lists them.
-const TOOL_NAMES: [&str; 10] = [
+pub(crate) const TOOL_NAMES: [&str; 10] = [
     "read_file",
     "list_dir",
     "find_files",

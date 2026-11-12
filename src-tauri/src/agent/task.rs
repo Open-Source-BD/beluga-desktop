@@ -9,9 +9,9 @@
 //! send can repair (`repair`) and send. `history` also never sends a call
 //! without a result, should the store hold one anyway.
 //!
-//! The checks Task 12 adds (spend limit, free allowance, trimming, the pause
-//! every 25 requests, going in circles, waiting out a rate limit) are the
-//! methods of `Guards`; each lets the task continue until then.
+//! The limits (spend limit, free allowance, trimming, the pause every 25
+//! requests, going in circles, waiting out a rate limit) are the methods of
+//! `guards::Guards`, called at fixed points of the loop.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -19,14 +19,16 @@ use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
 use super::dispatch::{self, Ctx};
+pub use super::guards::Next;
+use super::guards::{self, Env, Guards, KeepGoing, Retry};
 use super::paths::Project;
 use super::read::summary_text;
 use super::shell::{self, Shell};
-use super::{ToolCall, ToolOutcome, ToolStatus, prompt, schema};
+use super::{ToolCall, ToolStatus, prompt, schema};
 use crate::commands::chat_state::skills_to_send;
 use crate::commands::chats::local;
 use crate::commands::turn::{TurnResult, model_is_blind, preamble_with, system, wire};
-use crate::engine::{EngineEvent, StepError, StepRequest, UiError};
+use crate::engine::{EngineEvent, StepRequest, UiError};
 use crate::openrouter::models::ModelCache;
 use crate::openrouter::stream::{Part, Role, WireMessage};
 use crate::state::AppState;
@@ -59,49 +61,6 @@ pub const LOST: &str = "The result of this call was lost; it may have run. Check
 
 /// Overflowed replies in a row that pause the task.
 const MAX_OVERFLOWS: u32 = 2;
-
-/// What a guard decides.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Next {
-    Continue,
-    /// Stop and wait for the user; the reason is a `TurnResult` reason.
-    Pause(&'static str),
-}
-
-/// The checks around each request and call. Task 12 fills these in; until
-/// then every one lets the task continue.
-#[derive(Debug, Default)]
-pub struct Guards {
-    /// Unreadable calls in a row; an overflowed reply counts as one.
-    pub unreadable_in_a_row: u32,
-}
-
-impl Guards {
-    /// Before each request, with the task's request count so far: the spend
-    /// limit, the free allowance, and trimming `messages` to fit.
-    pub fn before_request(&mut self, _requests: u32, _messages: &mut Vec<WireMessage>) -> Next {
-        Next::Continue
-    }
-
-    /// Every 25 requests (`requests` is a multiple of 25): ask whether to
-    /// keep going.
-    pub async fn keep_going(&mut self, _requests: u32) -> Next {
-        Next::Continue
-    }
-
-    /// After each dispatched call: going in circles.
-    pub fn after_call(&mut self, _call: &ToolCall, _outcome: &ToolOutcome) -> Next {
-        Next::Continue
-    }
-
-    /// A request failed: `true` sends it again (a rate limit waited out).
-    pub async fn retry_after(&mut self, _error: &StepError) -> bool {
-        false
-    }
-}
-
-/// Requests between two "Keep going?" checks.
-const KEEP_GOING_EVERY: u32 = 25;
 
 /// One lock per chat, held by a running project task while it stores rows.
 /// A new send in the chat cancels the running task and takes the lock once
@@ -360,6 +319,8 @@ pub async fn run_task(
     {
         Some(Ok(project)) => {
             let system = system_text(&project);
+            let model = guards::model_info(s, model_id);
+            let tools_chars = schema::tools().to_string().chars().count();
             let mut task = Task {
                 s,
                 chat_id,
@@ -374,7 +335,7 @@ pub async fn run_task(
                 stored: false,
                 overflows_in_a_row: 0,
                 tell_overflow: false,
-                guards: Guards::default(),
+                guards: Guards::new(model, tools_chars),
             };
             task.run().await
         }
@@ -401,7 +362,7 @@ pub async fn run_task(
     result
 }
 
-impl Task<'_> {
+impl<'a> Task<'a> {
     async fn run(&mut self) -> End {
         match repair(&self.s.store, self.chat_id) {
             Ok(n) => (0..n).for_each(|_| (self.emit)(EngineEvent::MessageStored)),
@@ -411,18 +372,33 @@ impl Task<'_> {
             if self.cancel.is_cancelled() {
                 return self.cancelled().await;
             }
+            if self.guards.keep_going_due() {
+                match self.guards.keep_going(&self.env(), self.requests).await {
+                    KeepGoing::Continue => {}
+                    KeepGoing::Message(text) => {
+                        if let Err(e) =
+                            self.s
+                                .store
+                                .append_message(self.chat_id, "user", &text, &[], false)
+                        {
+                            return End::Failed(local(e));
+                        }
+                        self.stored_row();
+                    }
+                    KeepGoing::Pause(reason) => return self.pause(reason),
+                    KeepGoing::Stopped => return self.cancelled().await,
+                }
+            }
             let mut messages = match self.messages() {
                 Ok(m) => m,
                 Err(e) => return End::Failed(e),
             };
-            if self.requests > 0
-                && self.requests.is_multiple_of(KEEP_GOING_EVERY)
-                && let Next::Pause(reason) = self.guards.keep_going(self.requests).await
+            if let Next::Pause(reason) = self
+                .guards
+                .before_request(&self.env(), self.requests, &mut messages)
+                .await
             {
-                return End::Paused(reason);
-            }
-            if let Next::Pause(reason) = self.guards.before_request(self.requests, &mut messages) {
-                return End::Paused(reason);
+                return self.pause(reason);
             }
             let request = StepRequest {
                 model_id: self.model_id.to_string(),
@@ -446,8 +422,15 @@ impl Task<'_> {
                 };
             }
             if let Some(error) = step.error {
-                if self.guards.retry_after(&error).await {
-                    continue;
+                // A rate limit is waited out and the same request sent
+                // again; a reply cut part way is not (its text is kept).
+                if step.text.is_empty() {
+                    match self.guards.retry_after(&self.env(), &error).await {
+                        Retry::No => {}
+                        Retry::Again => continue,
+                        Retry::Pause(reason) => return self.pause(reason),
+                        Retry::Stopped => return self.cancelled().await,
+                    }
                 }
                 if let Err(e) = self.store_partial(&step.text) {
                     return End::Failed(e);
@@ -504,6 +487,33 @@ impl Task<'_> {
                 return self.folder_gone();
             }
         }
+    }
+
+    fn env(&self) -> Env<'a> {
+        Env {
+            s: self.s,
+            chat_id: self.chat_id,
+            emit: self.emit,
+            cancel: self.cancel.clone(),
+        }
+    }
+
+    /// Pauses the task for `reason`, after the reason's note. Today's
+    /// spending limit reached before this task stored anything is the same
+    /// refusal a plain send gets.
+    fn pause(&mut self, reason: &'static str) -> End {
+        if reason == guards::DAILY_LIMIT
+            && !self.stored
+            && let Some(refused) = guards::over_limit_for(self.s, self.model_id)
+        {
+            return End::Failed(refused);
+        }
+        if let Some(text) = guards::pause_note(reason, &self.s.store)
+            && let Err(e) = self.note(&text)
+        {
+            return End::Failed(e);
+        }
+        End::Paused(reason)
     }
 
     /// The end of a cancelled task: a folder change (which also cancels)
@@ -574,6 +584,7 @@ impl Task<'_> {
         let cost = cost_usd.unwrap_or(0.0);
         self.requests += 1;
         self.cost_usd += cost;
+        self.guards.counted();
         let _ = self.s.store.record_usage(self.chat_id, 1, cost);
         (self.emit)(EngineEvent::Usage {
             requests: self.requests,
@@ -614,7 +625,7 @@ impl Task<'_> {
     /// tells the model. A second in a row pauses the task.
     fn overflowed(&mut self, text: &str) -> Option<End> {
         self.overflows_in_a_row += 1;
-        self.guards.unreadable_in_a_row += 1;
+        let circles = self.guards.overflowed();
         if !text.is_empty() {
             if let Err(e) = self
                 .s
@@ -629,7 +640,10 @@ impl Task<'_> {
             return Some(End::Failed(e));
         }
         if self.overflows_in_a_row >= MAX_OVERFLOWS {
-            return Some(End::Paused("going_in_circles"));
+            return Some(End::Paused(guards::GOING_IN_CIRCLES));
+        }
+        if let Next::Pause(reason) = circles {
+            return Some(self.pause(reason));
         }
         self.tell_overflow = true;
         None
@@ -695,7 +709,10 @@ impl Task<'_> {
                 return Some(end);
             }
             if let Next::Pause(reason) = self.guards.after_call(call, &d.outcome) {
-                return Some(self.skip(rest, PAUSED, End::Paused(reason)));
+                return Some(match self.skip(rest, PAUSED, End::Done) {
+                    End::Failed(e) => End::Failed(e),
+                    _ => self.pause(reason),
+                });
             }
         }
         None

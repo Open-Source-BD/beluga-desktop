@@ -110,6 +110,7 @@ pub mod approval;
 pub mod background;
 pub mod change;
 pub mod dispatch;
+pub mod guards;
 pub mod paths;
 pub mod plan;
 pub mod prompt;

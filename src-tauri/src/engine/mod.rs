@@ -44,6 +44,11 @@ impl UiError {
         Self::new("other", message, false)
     }
 
+    /// Today's spending limit for paid models is reached.
+    pub(crate) fn daily_limit(message: &str) -> Self {
+        Self::new("daily_limit", message, false)
+    }
+
     /// Signing out could not delete the stored key.
     pub(crate) fn key_not_removed() -> Self {
         Self::new(
