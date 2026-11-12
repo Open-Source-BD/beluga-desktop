@@ -233,7 +233,7 @@ impl Project {
         let mut prefix = PathBuf::new();
         for (i, c) in comps.iter().enumerate() {
             prefix.push(c.as_os_str());
-            if matches!(c, Component::CurDir) {
+            if matches!(c, Component::CurDir | Component::Prefix(_)) {
                 continue;
             }
             if std::fs::canonicalize(&prefix).is_ok_and(|r| r == self.root) {
