@@ -85,8 +85,34 @@ pub fn run() {
             h::cancel_add,
             h::remove_skill,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // `Exit` is the last event of every normal quit (the menu or
+            // shortcut on macOS, the last window closing on Windows and
+            // Linux, an explicit `exit`); `ExitRequested` can be vetoed and a
+            // closed window is not a quit on macOS, so neither is used. The
+            // runtime is still alive here, so the stop can be awaited.
+            if let tauri::RunEvent::Exit = event {
+                stop_background_commands(app);
+            }
+        });
+}
+
+/// Ends every chat's background commands before the process goes, waiting
+/// for the stops (each is bounded to about two seconds).
+fn stop_background_commands(app: &tauri::AppHandle) {
+    let Some(state) = app.try_state::<Arc<state::AppState>>() else {
+        return;
+    };
+    let state = state.inner().clone();
+    tauri::async_runtime::block_on(async move {
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(4),
+            state.background.stop_all(),
+        )
+        .await;
+    });
 }
 
 /// The bundled skill tree: `<resource dir>/skills` in a built app. A dev run

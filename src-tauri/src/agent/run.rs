@@ -40,12 +40,12 @@ const FLUSH_EVERY: Duration = Duration::from_millis(100);
 const FLUSH_CHARS: usize = 4_000;
 /// How long output is still collected after the child exited, waiting for the
 /// pipes to close, before the rest of its tree is stopped.
-const EXIT_GRACE: Duration = Duration::from_secs(1);
+pub(super) const EXIT_GRACE: Duration = Duration::from_secs(1);
 /// How long output is still collected after the tree was stopped.
-const DRAIN_AFTER_STOP: Duration = Duration::from_millis(300);
+pub(super) const DRAIN_AFTER_STOP: Duration = Duration::from_millis(300);
 /// On unix, how long the tree gets to end after SIGTERM before SIGKILL.
 #[cfg(unix)]
-const TERM_GRACE: Duration = Duration::from_millis(500);
+pub(super) const TERM_GRACE: Duration = Duration::from_millis(500);
 /// Longest escape sequence given up on as a sequence (so an unterminated one
 /// cannot swallow the rest of the output).
 const MAX_SEQUENCE: usize = 4_096;
@@ -118,7 +118,7 @@ enum Esc {
 /// character across chunks, no ANSI escape sequences, no control characters
 /// except newline and tab, and every line ending as `\n`.
 #[derive(Default)]
-struct Cleaner {
+pub(super) struct Cleaner {
     /// An incomplete character at the end of the last chunk.
     carry: Vec<u8>,
     esc: Esc,
@@ -127,7 +127,7 @@ struct Cleaner {
 }
 
 impl Cleaner {
-    fn feed(&mut self, bytes: &[u8]) -> String {
+    pub(super) fn feed(&mut self, bytes: &[u8]) -> String {
         let mut buf = std::mem::take(&mut self.carry);
         buf.extend_from_slice(bytes);
         let mut out = String::with_capacity(buf.len());
@@ -159,7 +159,7 @@ impl Cleaner {
     }
 
     /// The end of the stream: a character cut off by it is one replacement.
-    fn finish(&mut self) -> String {
+    pub(super) fn finish(&mut self) -> String {
         if self.carry.is_empty() {
             String::new()
         } else {
@@ -247,7 +247,7 @@ impl Cleaner {
 }
 
 /// `"\n[… {n} characters left out …]\n"`
-fn left_out(n: u64) -> String {
+pub(super) fn left_out(n: u64) -> String {
     format!("\n[… {n} characters left out …]\n")
 }
 
@@ -425,7 +425,7 @@ impl Relay {
 }
 
 /// Reads one pipe to its end (or until the receiver is gone).
-async fn pump<R: AsyncRead + Unpin>(mut pipe: R, tx: mpsc::Sender<String>) {
+pub(super) async fn pump<R: AsyncRead + Unpin>(mut pipe: R, tx: mpsc::Sender<String>) {
     let mut cleaner = Cleaner::default();
     let mut buf = vec![0u8; 16 * 1024];
     loop {
@@ -481,19 +481,57 @@ fn not_run(started: Instant, message: String, stopped: bool) -> Ran {
 ///   guard is still armed and kills the group; the leader has not been
 ///   reaped, so the group id is still valid.
 #[cfg(unix)]
-struct GroupGuard(Option<i32>);
+pub(super) struct GroupGuard(GroupSlot);
+
+/// The group id of a command, shared so that a second holder (the background
+/// registry) can send the last-resort SIGKILL even when the task that owns the
+/// guard cannot run any more. Whoever swaps the id out is the only one that
+/// signals; a disarmed slot (0) is never signalled.
+#[cfg(unix)]
+#[derive(Clone)]
+pub(super) struct GroupSlot(std::sync::Arc<std::sync::atomic::AtomicI32>);
 
 #[cfg(unix)]
-impl Drop for GroupGuard {
-    fn drop(&mut self) {
-        if let Some(group) = self.0.take() {
+impl GroupSlot {
+    /// SIGKILL to the group, once; nothing if it was disarmed already.
+    pub(super) fn kill(&self) {
+        let group = self.0.swap(0, std::sync::atomic::Ordering::SeqCst);
+        if group != 0 {
             kill_group(group, libc::SIGKILL);
         }
     }
 }
 
 #[cfg(unix)]
-fn kill_group(group: i32, signal: i32) {
+impl GroupGuard {
+    pub(super) fn new(group: Option<i32>) -> Self {
+        Self(GroupSlot(std::sync::Arc::new(
+            std::sync::atomic::AtomicI32::new(group.unwrap_or(0)),
+        )))
+    }
+
+    pub(super) fn slot(&self) -> GroupSlot {
+        self.0.clone()
+    }
+
+    fn id(&self) -> Option<i32> {
+        Some(self.0.0.load(std::sync::atomic::Ordering::SeqCst)).filter(|g| *g != 0)
+    }
+
+    fn disarm(&mut self) {
+        self.0.0.store(0, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[cfg(unix)]
+impl Drop for GroupGuard {
+    fn drop(&mut self) {
+        self.0.kill();
+    }
+}
+
+#[cfg(unix)]
+pub(super) fn kill_group(group: i32, signal: i32) {
     // SAFETY: `killpg` only sends a signal; any failure (the group is gone) is
     // ignored on purpose.
     unsafe {
@@ -506,7 +544,7 @@ fn kill_group(group: i32, signal: i32) {
 /// group id cannot be reused until `stop_tree` has signalled the group and
 /// tokio's child has reaped it. On Windows the exit status is taken here.
 #[cfg(unix)]
-fn leader_ended(child: &mut dyn ChildWrapper, _status: &mut Option<ExitStatus>) -> bool {
+pub(super) fn leader_ended(child: &mut dyn ChildWrapper, _status: &mut Option<ExitStatus>) -> bool {
     let Some(pid) = child.id() else {
         // Already reaped (not expected): nothing left to wait for.
         return true;
@@ -528,7 +566,7 @@ fn leader_ended(child: &mut dyn ChildWrapper, _status: &mut Option<ExitStatus>) 
 }
 
 #[cfg(windows)]
-fn leader_ended(child: &mut dyn ChildWrapper, status: &mut Option<ExitStatus>) -> bool {
+pub(super) fn leader_ended(child: &mut dyn ChildWrapper, status: &mut Option<ExitStatus>) -> bool {
     match child.inner_mut().try_wait() {
         Ok(Some(st)) => {
             *status = Some(st);
@@ -546,12 +584,12 @@ fn leader_ended(child: &mut dyn ChildWrapper, status: &mut Option<ExitStatus>) -
 /// still kills the group; the leader is reaped (through tokio) only after the
 /// group was signalled.
 #[cfg(unix)]
-async fn stop_tree(
+pub(super) async fn stop_tree(
     child: &mut dyn ChildWrapper,
     group: &mut GroupGuard,
     graceful: bool,
 ) -> Option<ExitStatus> {
-    let id = group.0?;
+    let id = group.id()?;
     if graceful {
         kill_group(id, libc::SIGTERM);
         let until = Instant::now() + TERM_GRACE;
@@ -561,7 +599,7 @@ async fn stop_tree(
         }
     }
     kill_group(id, libc::SIGKILL);
-    group.0 = None;
+    group.disarm();
     // Reap the leader through tokio, so its drop does not signal the pid.
     tokio::time::timeout(Duration::from_millis(300), child.inner_mut().wait())
         .await
@@ -571,7 +609,7 @@ async fn stop_tree(
 
 /// Windows: terminate the Job Object.
 #[cfg(windows)]
-async fn stop_tree(child: &mut dyn ChildWrapper, _graceful: bool) -> Option<ExitStatus> {
+pub(super) async fn stop_tree(child: &mut dyn ChildWrapper, _graceful: bool) -> Option<ExitStatus> {
     let _ = child.start_kill();
     None
 }
@@ -580,6 +618,31 @@ enum End {
     Exited,
     TimedOut,
     Cancelled,
+}
+
+/// Starts `command` in `project_root`: its own session (unix) or Job Object
+/// that ends with its handle (Windows), no console window, the scrubbed
+/// environment. The error is a plain message.
+pub(super) fn spawn(
+    shell: &Shell,
+    project_root: &Path,
+    command: &str,
+) -> Result<Box<dyn ChildWrapper>, String> {
+    let mut cmd = shell.command(command, std::env::vars_os());
+    cmd.current_dir(project_root);
+    let mut wrap = CommandWrap::from(cmd);
+    wrap.wrap(KillOnDrop);
+    #[cfg(unix)]
+    wrap.wrap(ProcessSession);
+    #[cfg(windows)]
+    {
+        wrap.wrap(CreationFlags(
+            windows::Win32::System::Threading::CREATE_NO_WINDOW,
+        ));
+        wrap.wrap(JobObject);
+    }
+    wrap.spawn()
+        .map_err(|err| format!("Could not start {}: {err}", shell.program.display()))
 }
 
 /// Runs `command` in `project_root` with the given shell. Returns when it
@@ -610,32 +673,13 @@ pub async fn run(
         );
     }
 
-    let mut cmd = shell.command(command, std::env::vars_os());
-    cmd.current_dir(project_root);
-    let mut wrap = CommandWrap::from(cmd);
-    wrap.wrap(KillOnDrop);
-    #[cfg(unix)]
-    wrap.wrap(ProcessSession);
-    #[cfg(windows)]
-    {
-        wrap.wrap(CreationFlags(
-            windows::Win32::System::Threading::CREATE_NO_WINDOW,
-        ));
-        wrap.wrap(JobObject);
-    }
-    let mut child = match wrap.spawn() {
+    let mut child = match spawn(shell, project_root, command) {
         Ok(child) => child,
-        Err(err) => {
-            return not_run(
-                started,
-                format!("Could not start {}: {err}", shell.program.display()),
-                false,
-            );
-        }
+        Err(message) => return not_run(started, message, false),
     };
     // The leader of its own session and group: the group id is its pid.
     #[cfg(unix)]
-    let mut group = GroupGuard(child.id().and_then(|pid| i32::try_from(pid).ok()));
+    let mut group = GroupGuard::new(child.id().and_then(|pid| i32::try_from(pid).ok()));
 
     let (tx, mut rx) = mpsc::channel::<String>(32);
     let mut readers = Vec::new();
@@ -817,22 +861,6 @@ mod tests {
         }
     }
 
-    /// Generous on Windows, where PowerShell start-up alone can take seconds.
-    fn slow() -> bool {
-        cfg!(windows)
-    }
-
-    fn long(secs: u64) -> u64 {
-        if slow() { secs * 6 } else { secs }
-    }
-
-    fn pick<'a>(shell: &Shell, posix: &'a str, ps: &'a str) -> &'a str {
-        match shell.family {
-            ShellFamily::Posix => posix,
-            ShellFamily::PowerShell => ps,
-        }
-    }
-
     async fn go(shell: &Shell, dir: &Path, command: &str, limits: &Limits) -> Ran {
         run(
             shell,
@@ -862,50 +890,7 @@ mod tests {
             .unwrap_or_else(|| panic!("{needle:?} not in {haystack:?}"))
     }
 
-    fn alive(pid: u32) -> bool {
-        #[cfg(unix)]
-        {
-            let out = std::process::Command::new("ps")
-                .args(["-o", "stat=", "-p", &pid.to_string()])
-                .output()
-                .unwrap();
-            let stat = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            !stat.is_empty() && !stat.starts_with('Z')
-        }
-        #[cfg(windows)]
-        {
-            let script = format!(
-                "if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{ 'alive' }} else {{ 'gone' }}"
-            );
-            let out = std::process::Command::new("powershell.exe")
-                .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-                .output()
-                .unwrap();
-            String::from_utf8_lossy(&out.stdout).contains("alive")
-        }
-    }
-
-    async fn wait_gone(pid: u32) -> bool {
-        for _ in 0..100 {
-            if !alive(pid) {
-                return true;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        false
-    }
-
-    async fn wait_for_pid_file(path: &Path) -> u32 {
-        for _ in 0..400 {
-            if let Ok(text) = std::fs::read_to_string(path)
-                && let Ok(pid) = text.trim().parse::<u32>()
-            {
-                return pid;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        panic!("pid file {} never appeared", path.display());
-    }
+    use crate::agent::test_support::{long, pick, slow, wait_for_pid_file, wait_gone};
 
     // ---- the output cleaner -------------------------------------------------
 

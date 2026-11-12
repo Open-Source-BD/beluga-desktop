@@ -35,7 +35,14 @@ fn real_folder(path: &str) -> Result<String, UiError> {
 /// Sets the chat's folder to a folder the user picked earlier in a system
 /// dialog (`choose_chat_folder`), or clears it. Any other path is refused:
 /// the web view cannot name a folder of its own.
-pub fn set_chat_folder(s: &AppState, chat_id: &str, path: Option<String>) -> Result<(), UiError> {
+///
+/// Closing the folder or changing it to another stops the chat's background
+/// commands first: they were started in the old one.
+pub async fn set_chat_folder(
+    s: &AppState,
+    chat_id: &str,
+    path: Option<String>,
+) -> Result<(), UiError> {
     require_chat(s, chat_id)?;
     let stored = match path {
         None => None,
@@ -47,18 +54,35 @@ pub fn set_chat_folder(s: &AppState, chat_id: &str, path: Option<String>) -> Res
             Some(real)
         }
     };
+    release_old_folder(s, chat_id, stored.as_deref()).await?;
     s.store
         .set_folder(chat_id, stored.as_deref())
         .map_err(local)
 }
 
-pub fn choose_chat_folder(s: &AppState, chat_id: &str) -> Result<Option<String>, UiError> {
+/// Stops the chat's background commands when its folder is about to become
+/// `new` and that is not the folder it has now.
+async fn release_old_folder(s: &AppState, chat_id: &str, new: Option<&str>) -> Result<(), UiError> {
+    let current = s.store.folder(chat_id).map_err(local)?;
+    if current.as_deref() != new {
+        s.background.stop_chat(chat_id).await;
+    }
+    Ok(())
+}
+
+pub async fn choose_chat_folder(s: &AppState, chat_id: &str) -> Result<Option<String>, UiError> {
     require_chat(s, chat_id)?;
-    let Some(picked) = s.dialogs.pick_folder() else {
+    // The dialog blocks until it closes: keep it off the async threads.
+    let dialogs = s.dialogs.clone();
+    let picked = tokio::task::spawn_blocking(move || dialogs.pick_folder())
+        .await
+        .map_err(|_| UiError::other("That did not finish. Try again."))?;
+    let Some(picked) = picked else {
         return Ok(None);
     };
     let real = real_folder(picked.to_str().ok_or_else(cannot_open)?)?;
     s.store.approve_folder(&real).map_err(local)?;
+    release_old_folder(s, chat_id, Some(&real)).await?;
     s.store.set_folder(chat_id, Some(&real)).map_err(local)?;
     Ok(Some(real))
 }

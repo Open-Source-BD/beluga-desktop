@@ -107,7 +107,7 @@ pub async fn rename_chat(state: S<'_>, id: String, title: String) -> Result<(), 
 
 #[tauri::command]
 pub async fn delete_chat(state: S<'_>, id: String) -> Result<(), UiError> {
-    chats::delete_chat(&state, &id)
+    chats::delete_chat(&state, &id).await
 }
 
 #[tauri::command]
@@ -281,7 +281,7 @@ pub async fn set_chat_folder(
     chat_id: String,
     path: Option<String>,
 ) -> Result<(), UiError> {
-    folder::set_chat_folder(&state, &chat_id, path)
+    folder::set_chat_folder(&state, &chat_id, path).await
 }
 
 #[tauri::command]
@@ -304,8 +304,7 @@ pub async fn attach_folder_file(
 
 #[tauri::command]
 pub async fn choose_chat_folder(state: S<'_>, chat_id: String) -> Result<Option<String>, UiError> {
-    let s = state.inner().clone();
-    blocking(move || folder::choose_chat_folder(&s, &chat_id)).await
+    folder::choose_chat_folder(&state, &chat_id).await
 }
 
 #[tauri::command]

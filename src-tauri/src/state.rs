@@ -1,6 +1,7 @@
 //! Shared app state behind the Tauri commands. Deliberately has no `Debug`
 //! impl: nothing here may ever format the key.
 
+use crate::agent::background::Background;
 use crate::dialogs::Dialogs;
 use crate::engine::{DirectEngine, Engine};
 use crate::secrets::{FileStore, KeyStore, KeychainStore, SecretError, StorageKind};
@@ -251,6 +252,8 @@ pub struct AppState {
     /// Held while anything is moved into or out of the skills folder.
     pub skills_write: Mutex<()>,
     pub events: Arc<dyn EventSink>,
+    /// The chats' long-running commands (dev servers and the like).
+    pub background: Background,
     /// Opens the system folder and save dialogs.
     pub dialogs: Arc<dyn Dialogs>,
     pub turns: Mutex<HashMap<String, RunningTurn>>,
@@ -348,6 +351,7 @@ impl AppState {
             staged_add: Mutex::new(None),
             skills_write: Mutex::new(()),
             data_dir,
+            background: Background::new(events.clone()),
             events,
             dialogs,
             turns: Mutex::new(HashMap::new()),

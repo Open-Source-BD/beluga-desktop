@@ -30,6 +30,7 @@ pub struct ToolOutcome {
     pub detail: Option<String>,
 }
 
+pub mod background;
 pub mod change;
 pub mod paths;
 pub mod plan;
@@ -40,3 +41,6 @@ pub mod schema;
 pub mod search;
 pub mod secrets;
 pub mod shell;
+
+#[cfg(test)]
+pub(crate) mod test_support;

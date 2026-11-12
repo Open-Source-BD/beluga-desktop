@@ -52,11 +52,13 @@ pub fn rename_chat(s: &AppState, id: &str, title: &str) -> Result<(), UiError> {
     s.store.rename_chat(id, title).map_err(local)
 }
 
-/// Stops a reply still running in the chat, then removes it.
-pub fn delete_chat(s: &AppState, id: &str) -> Result<(), UiError> {
+/// Stops a reply still running in the chat and the chat's background
+/// commands, then removes it.
+pub async fn delete_chat(s: &AppState, id: &str) -> Result<(), UiError> {
     if let Some(turn) = s.turns().remove(id) {
         turn.cancel.cancel();
     }
+    s.background.stop_chat(id).await;
     s.store.delete_chat(id).map_err(local)
 }
 

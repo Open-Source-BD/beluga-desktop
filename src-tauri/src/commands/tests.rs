@@ -835,8 +835,8 @@ async fn a_reply_that_goes_silent_fails_as_a_network_error() {
     assert_eq!(r.error.map(|e| e.kind), Some("network".to_string()));
 }
 
-#[test]
-fn production_timeouts_match_the_ruling() {
+#[tokio::test]
+async fn production_timeouts_match_the_ruling() {
     let t = HttpTimeouts::PRODUCTION;
     assert_eq!(t.connect, Duration::from_secs(15));
     assert_eq!(t.read, Duration::from_secs(60));
@@ -1029,9 +1029,10 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
         &h.state,
         &id,
         Some(tree.path().to_str().unwrap().to_string()),
-    )));
+    )
+    .await));
     *h.dialogs.pick.lock().unwrap() = Some(tree.path().to_path_buf());
-    record(to(&folder::choose_chat_folder(&h.state, &id)));
+    record(to(&folder::choose_chat_folder(&h.state, &id).await));
     record(to(&folder::approved_folders(&h.state)));
     let listed = folder::folder_files(&h.state, &id, "a");
     assert_eq!(listed.as_ref().map(|l| l.total), Ok(1));
@@ -1040,7 +1041,7 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
     assert!(attached.is_ok(), "{attached:?}");
     record(to(&attached));
     record(to(&folder::attach_folder_file(&h.state, &id, "../x")));
-    record(to(&folder::set_chat_folder(&h.state, &id, None)));
+    record(to(&folder::set_chat_folder(&h.state, &id, None).await));
     // The success path, in a harness that has a skill to activate.
     let f = skills_fx(&server.uri(), &[("a", 10)], &[]);
     let skill_chat = chats::create_chat(&f.h.state, "m/a").unwrap().id;
@@ -1105,7 +1106,7 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
     turn::stop(&h.state, &id);
     record(to(&auth::sign_out(&h.state)));
     record(to(&auth::auth_status(&h.state)));
-    record(to(&chats::delete_chat(&h.state, &id)));
+    record(to(&chats::delete_chat(&h.state, &id).await));
     wait_for_event(&h.events, "auth://finished").await;
     for (name, payload) in h.events.all() {
         record(json!([name, payload]));
@@ -2983,9 +2984,82 @@ fn registering_only_if_free_refuses_a_busy_chat_and_registers_a_free_one() {
 fn folder_chat(h: &Harness) -> (String, tempfile::TempDir) {
     let id = chats::create_chat(&h.state, "m/a").unwrap().id;
     let dir = tempfile::tempdir().unwrap();
-    *h.dialogs.pick.lock().unwrap() = Some(dir.path().to_path_buf());
-    folder::choose_chat_folder(&h.state, &id).unwrap();
+    let real = std::fs::canonicalize(dir.path()).unwrap();
+    let real = real.to_str().unwrap();
+    h.state.store.approve_folder(real).unwrap();
+    h.state.store.set_folder(&id, Some(real)).unwrap();
     (id, dir)
+}
+
+// ---- background commands follow the chat and its folder ----
+
+/// Starts a command that writes its pid and sleeps, in the chat's folder.
+async fn start_sleeper(h: &Harness, id: &str, dir: &std::path::Path) -> u32 {
+    use crate::agent::{shell::detect, test_support};
+    let shell = detect();
+    let cmd = test_support::pick(
+        &shell,
+        "echo $$ > pid.txt; exec sleep 30",
+        "Set-Content -Path pid.txt -Value $PID; Start-Sleep 60",
+    );
+    let info = h
+        .state
+        .background
+        .start(id, &shell, dir, cmd)
+        .await
+        .unwrap();
+    assert!(info.running);
+    test_support::wait_for_pid_file(&dir.join("pid.txt")).await
+}
+
+async fn assert_stopped(h: &Harness, id: &str, pid: u32) {
+    assert!(
+        crate::agent::test_support::wait_gone(pid).await,
+        "process {pid} is still running"
+    );
+    assert!(h.state.background.list(id).is_empty());
+}
+
+#[tokio::test]
+async fn deleting_a_chat_stops_its_background_commands() {
+    let h = signed_out("http://unused");
+    let (id, dir) = folder_chat(&h);
+    let pid = start_sleeper(&h, &id, dir.path()).await;
+    chats::delete_chat(&h.state, &id).await.unwrap();
+    assert_stopped(&h, &id, pid).await;
+}
+
+#[tokio::test]
+async fn closing_a_chats_folder_stops_its_background_commands() {
+    let h = signed_out("http://unused");
+    let (id, dir) = folder_chat(&h);
+    let pid = start_sleeper(&h, &id, dir.path()).await;
+    folder::set_chat_folder(&h.state, &id, None).await.unwrap();
+    assert_stopped(&h, &id, pid).await;
+}
+
+#[tokio::test]
+async fn changing_a_chats_folder_stops_its_background_commands() {
+    let h = signed_out("http://unused");
+    let (id, dir) = folder_chat(&h);
+    let pid = start_sleeper(&h, &id, dir.path()).await;
+    let other = tempfile::tempdir().unwrap();
+    *h.dialogs.pick.lock().unwrap() = Some(other.path().to_path_buf());
+    folder::choose_chat_folder(&h.state, &id).await.unwrap();
+    assert_stopped(&h, &id, pid).await;
+
+    // Choosing a folder the chat already has changes nothing, so nothing stops.
+    let pid = start_sleeper(&h, &id, other.path()).await;
+    folder::choose_chat_folder(&h.state, &id).await.unwrap();
+    assert_eq!(h.state.background.list(&id).len(), 1);
+    assert!(crate::agent::test_support::alive(pid));
+    // Another chat is never touched.
+    let (other_chat, other_dir) = folder_chat(&h);
+    let other_pid = start_sleeper(&h, &other_chat, other_dir.path()).await;
+    folder::set_chat_folder(&h.state, &id, None).await.unwrap();
+    assert_stopped(&h, &id, pid).await;
+    assert!(crate::agent::test_support::alive(other_pid));
+    h.state.background.stop_all().await;
 }
 
 fn decoded(a: &turn::AttachmentInput) -> Vec<u8> {
@@ -2995,8 +3069,8 @@ fn decoded(a: &turn::AttachmentInput) -> Vec<u8> {
         .unwrap()
 }
 
-#[test]
-fn set_chat_folder_refuses_a_missing_path_and_a_file() {
+#[tokio::test]
+async fn set_chat_folder_refuses_a_missing_path_and_a_file() {
     let h = signed_out("http://unused");
     let id = chats::create_chat(&h.state, "m/a").unwrap().id;
     let dir = tempfile::tempdir().unwrap();
@@ -3008,36 +3082,39 @@ fn set_chat_folder_refuses_a_missing_path_and_a_file() {
         file.to_str().unwrap().to_string(),
         "relative/dir".to_string(),
     ] {
-        assert_eq!(folder::set_chat_folder(&h.state, &id, Some(bad)), refused);
+        assert_eq!(
+            folder::set_chat_folder(&h.state, &id, Some(bad)).await,
+            refused
+        );
     }
     assert_eq!(h.state.store.folder(&id).unwrap(), None);
     assert_eq!(
-        folder::set_chat_folder(&h.state, "nope", None),
+        folder::set_chat_folder(&h.state, "nope", None).await,
         Err(UiError::other("That chat no longer exists."))
     );
 
     // `None` clears.
-    assert_eq!(folder::set_chat_folder(&h.state, &id, None), Ok(()));
+    assert_eq!(folder::set_chat_folder(&h.state, &id, None).await, Ok(()));
 }
 
-#[test]
-fn set_chat_folder_refuses_a_real_directory_the_user_never_picked() {
+#[tokio::test]
+async fn set_chat_folder_refuses_a_real_directory_the_user_never_picked() {
     let h = signed_out("http://unused");
     let id = chats::create_chat(&h.state, "m/a").unwrap().id;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().to_str().unwrap().to_string();
     assert_eq!(
-        folder::set_chat_folder(&h.state, &id, Some(path.clone())),
+        folder::set_chat_folder(&h.state, &id, Some(path.clone())).await,
         Err(UiError::other("That folder could not be opened."))
     );
     assert_eq!(h.state.store.folder(&id).unwrap(), None);
 
     // After a pick (for one chat) it can be reused for another.
     *h.dialogs.pick.lock().unwrap() = Some(dir.path().to_path_buf());
-    folder::choose_chat_folder(&h.state, &id).unwrap();
+    folder::choose_chat_folder(&h.state, &id).await.unwrap();
     let other = chats::create_chat(&h.state, "m/a").unwrap().id;
     assert_eq!(
-        folder::set_chat_folder(&h.state, &other, Some(path)),
+        folder::set_chat_folder(&h.state, &other, Some(path)).await,
         Ok(())
     );
     let real = std::fs::canonicalize(dir.path()).unwrap();
@@ -3047,12 +3124,12 @@ fn set_chat_folder_refuses_a_real_directory_the_user_never_picked() {
     );
 }
 
-#[test]
-fn choose_chat_folder_stores_the_canonical_path_and_a_cancel_changes_nothing() {
+#[tokio::test]
+async fn choose_chat_folder_stores_the_canonical_path_and_a_cancel_changes_nothing() {
     let h = signed_out("http://unused");
     let id = chats::create_chat(&h.state, "m/a").unwrap().id;
     // A cancelled pick.
-    assert_eq!(folder::choose_chat_folder(&h.state, &id), Ok(None));
+    assert_eq!(folder::choose_chat_folder(&h.state, &id).await, Ok(None));
     assert_eq!(h.state.store.folder(&id).unwrap(), None);
     assert_eq!(folder::approved_folders(&h.state), Ok(vec![]));
 
@@ -3064,7 +3141,7 @@ fn choose_chat_folder_stores_the_canonical_path_and_a_cancel_changes_nothing() {
     let real = std::fs::canonicalize(dir.path().join("sub")).unwrap();
     let real = real.to_str().unwrap().to_string();
     assert_eq!(
-        folder::choose_chat_folder(&h.state, &id),
+        folder::choose_chat_folder(&h.state, &id).await,
         Ok(Some(real.clone()))
     );
     assert_eq!(h.state.store.folder(&id).unwrap(), Some(real.clone()));
@@ -3073,24 +3150,24 @@ fn choose_chat_folder_stores_the_canonical_path_and_a_cancel_changes_nothing() {
     // A cancel afterwards leaves the stored folder alone.
     *h.dialogs.pick.lock().unwrap() = None;
     assert!(matches!(
-        folder::choose_chat_folder(&h.state, &id),
+        folder::choose_chat_folder(&h.state, &id).await,
         Ok(None)
     ));
     assert!(h.state.store.folder(&id).unwrap().is_some());
     assert_eq!(
-        folder::choose_chat_folder(&h.state, "nope"),
+        folder::choose_chat_folder(&h.state, "nope").await,
         Err(UiError::other("That chat no longer exists."))
     );
 }
 
-#[test]
-fn approved_folders_are_listed_most_recent_first() {
+#[tokio::test]
+async fn approved_folders_are_listed_most_recent_first() {
     let h = signed_out("http://unused");
     let id = chats::create_chat(&h.state, "m/a").unwrap().id;
     let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     for d in [&a, &b, &a] {
         *h.dialogs.pick.lock().unwrap() = Some(d.path().to_path_buf());
-        folder::choose_chat_folder(&h.state, &id).unwrap();
+        folder::choose_chat_folder(&h.state, &id).await.unwrap();
     }
     let list = folder::approved_folders(&h.state).unwrap();
     let real = |d: &tempfile::TempDir| {
