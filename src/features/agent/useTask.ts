@@ -15,18 +15,26 @@ export function useTask(chatId: string | null, tick = 0) {
   chatRef.current = chatId;
   const seq = useRef(0);
   const latest = useRef(new Map<string, number>());
+  const deleted = useRef(new Set<string>());
 
   const refresh = useCallback(async (id: string | null = chatRef.current) => {
-    if (!id) return;
+    if (!id || deleted.current.has(id)) return;
     const mine = ++seq.current;
     latest.current.set(id, mine);
     try {
       const s = await taskState(id);
-      if (!s || latest.current.get(id) !== mine || chatRef.current !== id) return;
+      if (!s || deleted.current.has(id) || latest.current.get(id) !== mine || chatRef.current !== id) return;
       setHeld({ id, state: s });
     } catch {
       // Keep what is shown.
     }
+  }, []);
+
+  /** Drops a deleted chat's state; nothing is asked or applied for it again. */
+  const forget = useCallback((id: string) => {
+    deleted.current.add(id);
+    latest.current.delete(id);
+    setHeld((h) => (h && h.id === id ? null : h));
   }, []);
 
   useEffect(() => {
@@ -63,5 +71,6 @@ export function useTask(chatId: string | null, tick = 0) {
     project: s.project,
     waiting: s.waiting,
     refresh,
+    forget,
   };
 }

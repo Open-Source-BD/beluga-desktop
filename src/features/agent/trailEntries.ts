@@ -12,6 +12,8 @@ export interface TrailEntry {
   detail?: string | null;
   /** What a running command has printed so far (the last 20,000 characters). */
   output?: string;
+  /** Unique among the live entries; set when it starts. */
+  liveId?: number;
 }
 
 /** Output kept in memory per running line. */
@@ -33,25 +35,6 @@ export function stateWord(status: TrailStatus): string | null {
   }
 }
 
-/** Calls that have a stored result, as entries. Stable while `messages` is. */
-export function resolvedEntries(messages: StoredMessage[]): Map<string, TrailEntry> {
-  const calls = new Set<string>();
-  for (const m of messages) for (const c of m.tool_calls) calls.add(c.id);
-  const out = new Map<string, TrailEntry>();
-  for (const m of messages) {
-    // A result whose call is in no assistant row (an orphan) is never shown.
-    if (m.kind !== "tool" || !m.tool_call_id || !m.tool_meta || !calls.has(m.tool_call_id)) continue;
-    out.set(m.tool_call_id, {
-      callId: m.tool_call_id,
-      name: m.tool_meta.name,
-      summary: m.tool_meta.summary,
-      status: m.tool_meta.status,
-      detail: m.tool_meta.detail,
-    });
-  }
-  return out;
-}
-
 /** A stored call with no result and no live information: only its name is known. */
 export function bareEntry(call: StoredToolCall, running: boolean): TrailEntry {
   return {
@@ -60,4 +43,99 @@ export function bareEntry(call: StoredToolCall, running: boolean): TrailEntry {
     summary: call.name,
     status: running ? "running" : "not_run",
   };
+}
+
+/** A stored call and the result stored for it, if any. */
+export interface Slot {
+  call: StoredToolCall;
+  entry: TrailEntry | null;
+  /** Stable while the call moves from the live trail into its stored row. */
+  key: string;
+  /** Id of the stored tool row that answered it. */
+  rowId: string | null;
+}
+
+export interface StoredTrail {
+  /** Slots of every assistant row that has calls. */
+  rows: Map<string, Slot[]>;
+  /** Slots of the replies after the latest user message, in order: where live calls land. */
+  task: Slot[];
+  /** Key base of the task's lines. */
+  taskKey: string;
+  /** Only calls of this assistant row can still be running. */
+  lastAssistantId: string | null;
+}
+
+/**
+ * Pairs calls with results the way the core does: a tool row answers a call only when
+ * it lies between that call's assistant row and the next row that is not a tool row;
+ * inside that stretch by id, and a repeated id pairs in order. Any other tool row is an
+ * orphan and is never shown.
+ */
+export function pairStored(messages: StoredMessage[]): StoredTrail {
+  const rows = new Map<string, Slot[]>();
+  let lastUser = -1;
+  let lastAssistantId: string | null = null;
+  messages.forEach((m, i) => {
+    if (m.kind === "message" && m.role === "user") lastUser = i;
+    if (m.kind === "message" && m.role === "assistant") lastAssistantId = m.id;
+  });
+  const taskKey = lastUser >= 0 ? messages[lastUser].id : "start";
+  const task: Slot[] = [];
+  messages.forEach((m, i) => {
+    if (m.kind !== "message" || m.role !== "assistant" || m.tool_calls.length === 0) return;
+    const answers: StoredMessage[] = [];
+    for (let j = i + 1; j < messages.length && messages[j].kind === "tool"; j++) answers.push(messages[j]);
+    const used = new Set<string>();
+    const slots = m.tool_calls.map((call, n): Slot => {
+      const row = answers.find((t) => !used.has(t.id) && t.tool_call_id === call.id && t.tool_meta);
+      if (row) used.add(row.id);
+      const meta = row?.tool_meta;
+      return {
+        call,
+        rowId: row?.id ?? null,
+        key: `${m.id}:${n}`,
+        entry: meta
+          ? { callId: call.id, name: meta.name, summary: meta.summary, status: meta.status, detail: meta.detail }
+          : null,
+      };
+    });
+    if (i > lastUser) slots.forEach((s) => { s.key = `${taskKey}:${task.length}`; task.push(s); });
+    rows.set(m.id, slots);
+  });
+  return { rows, task, taskKey, lastAssistantId };
+}
+
+/**
+ * Where the live calls land: each takes the first still unanswered call of the task with its
+ * id, in order. Calls that are not stored yet are `rest`.
+ */
+export function matchLive(trail: StoredTrail, live: TrailEntry[]) {
+  const matched = new Map<Slot, TrailEntry>();
+  const rest: TrailEntry[] = [];
+  let from = 0;
+  for (const l of live) {
+    const j = trail.task.findIndex((s, k) => k >= from && !s.entry && s.call.id === l.callId);
+    if (j < 0) rest.push(l);
+    else {
+      matched.set(trail.task[j], l);
+      from = j + 1;
+    }
+  }
+  return { matched, rest };
+}
+
+/** Live entries whose result arrived in `fresh` stored tool rows (they leave the live list). */
+export function answeredLive(trail: StoredTrail, live: TrailEntry[], freshRows: Set<string>): Set<TrailEntry> {
+  const out = new Set<TrailEntry>();
+  const slots = trail.task.filter((s) => s.rowId && freshRows.has(s.rowId));
+  let from = 0;
+  for (const l of live) {
+    const j = slots.findIndex((s, k) => k >= from && s.call.id === l.callId);
+    if (j >= 0) {
+      out.add(l);
+      from = j + 1;
+    }
+  }
+  return out;
 }

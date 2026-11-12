@@ -99,6 +99,7 @@ describe("Shell during a task", () => {
     ev("ca", { type: "plan_updated", items: [{ text: "Step", state: "pending" }] });
     ev("ca", { type: "paused", reason: "daily_limit" });
     ipc.getMessages.mockResolvedValue([row({ id: "n", kind: "note", role: "system", text: "Paused at the daily limit." })]);
+    ipc.taskState.mockResolvedValue({ ...noTask, plan: [{ text: "Step", state: "pending" }] });
     await act(async () => finishes.ca({ status: "paused", reason: "daily_limit", error: null }));
     expect(await screen.findByText("Paused at the daily limit.")).toBeInTheDocument();
     expect(await box()).toBeEnabled();
@@ -181,5 +182,21 @@ describe("Shell during a task", () => {
     await userEvent.click(line);
     expect(within(document.body).getByText("added 3 packages")).toBeInTheDocument();
     expect(screen.getAllByText("Installed.")).toHaveLength(1);
+  });
+
+  it("after the task ends the core's checklist is the truth: all done is hidden, an unfinished one stays", async () => {
+    render(<Shell />);
+    await open("Chat A");
+    await send();
+    ev("ca", { type: "plan_updated", items: [{ text: "Live item", state: "in_progress" }] });
+    expect(await screen.findByText("Live item")).toBeInTheDocument();
+    ipc.taskState.mockResolvedValue({ ...noTask, plan: [{ text: "Core item", state: "done" }] });
+    await act(async () => finishes.ca({ status: "done", reason: null, error: null }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Task checklist" })).toBeNull());
+    ipc.taskState.mockResolvedValue({ ...noTask, plan: [{ text: "Core open", state: "pending" }] });
+    await open("Chat B");
+    await open("Chat A");
+    expect(await screen.findByText("Core open")).toBeInTheDocument();
+    expect(screen.queryByText("Live item")).toBeNull();
   });
 });

@@ -45,7 +45,7 @@ describe("useChat project work", () => {
   it("tool_started shows a running entry; output appends; finished settles it with the summary", async () => {
     const { result } = await started();
     ev("a", { type: "tool_started", call_id: "c1", name: "run_command", summary: "Running `ls`" });
-    expect(result.current.live).toEqual([{ callId: "c1", name: "run_command", summary: "Running `ls`", status: "running" }]);
+    expect(result.current.live).toMatchObject([{ callId: "c1", name: "run_command", summary: "Running `ls`", status: "running" }]);
     ev("a", { type: "tool_output", call_id: "c1", text: "one\n" });
     ev("a", { type: "tool_output", call_id: "c1", text: "two\n" });
     expect(result.current.live[0].output).toBe("one\ntwo\n");
@@ -80,7 +80,7 @@ describe("useChat project work", () => {
     ev("a", { type: "tool_output", call_id: "c2", text: "partial" });
     ipc.getMessages.mockResolvedValue([
       row({ id: "u", role: "user", text: "go" }),
-      row({ id: "a1", text: "Earlier text", tool_calls: [{ id: "c1", name: "n", arguments: "{}" }, { id: "c2", name: "n", arguments: "{}" }] }),
+      row({ id: "a1", text: "", tool_calls: [{ id: "c1", name: "n", arguments: "{}" }, { id: "c2", name: "n", arguments: "{}" }] }),
       row({ id: "t1", role: "tool", kind: "tool", tool_call_id: "c1", tool_meta: { name: "n", status: "ok", summary: "s", detail: null } }),
     ]);
     ev("a", { type: "message_stored" });

@@ -163,10 +163,12 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   const task = useTask(selectedId, chat.taskTick);
   // The checklist: what the running task last sent, else the core's. It stays while items are
   // open (a paused task) and goes when the task ends with everything done.
-  const planItems = chat.plan ?? task.plan;
+  // While the task runs, its events are the truth; once it settles the core's state is.
+  const running = chat.status === "streaming";
+  const planItems = running ? (chat.plan ?? task.plan) : task.plan;
   const showPlan =
     planItems.length > 0 &&
-    (planItems.some((i) => i.state !== "done") || (chat.status === "streaming" && chat.plan !== null));
+    (planItems.some((i) => i.state !== "done") || (running && chat.plan !== null));
   // During a task the header follows its usage events; otherwise the stored totals.
   const usage = chat.status === "streaming" && chat.usage ? chat.usage : allowance.usage;
   const selected = chats.find((c) => c.id === selectedId);
@@ -579,6 +581,8 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
         onDelete={(id) =>
           deleteChat(id).then(() => {
             deleted.current.add(id);
+            chat.forget(id);
+            task.forget(id);
             discardDraft(id);
             setQueued(({ [id]: _gone, ...rest }) => rest);
             if (id === selectedId) select(null);

@@ -172,9 +172,10 @@ describe("Thread with tool rows", () => {
     expect(screen.getAllByText(/npm test/)).toHaveLength(1);
   });
 
-  it("a live line already in the stored rows is not shown twice", () => {
-    render(<Thread {...thread} status="streaming" messages={stored} live={[entry({ callId: "c1", status: "running" })]} />);
-    expect(screen.getAllByText("Read src/app.ts")).toHaveLength(1);
+  it("a live line for a stored call that has no result yet is shown once, in the stored row", () => {
+    const msgs = [row({ id: "u", role: "user", text: "q" }), row({ id: "a1", tool_calls: [call("c1")] })];
+    render(<Thread {...thread} status="streaming" messages={msgs} live={[entry({ callId: "c1", status: "running", summary: "Reading once" })]} />);
+    expect(screen.getAllByText("Reading once")).toHaveLength(1);
   });
 
   it("live: a started call shows a running line before anything is stored", () => {

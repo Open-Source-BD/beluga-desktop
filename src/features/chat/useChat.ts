@@ -14,7 +14,7 @@ import {
   type TurnResult,
   type UiError,
 } from "../../lib/ipc";
-import { OUTPUT_KEEP, type TrailEntry } from "../agent/trailEntries";
+import { answeredLive, OUTPUT_KEEP, pairStored, type TrailEntry } from "../agent/trailEntries";
 import { toUiError } from "./errors";
 
 /** "paused": a project task stopped and waits for the user; the chat is usable and nothing failed. */
@@ -45,6 +45,8 @@ export interface ChatState {
   /** Changes when the checklist, background commands or approvals may have changed. */
   taskTick: number;
 }
+
+let liveSeq = 0;
 
 const EMPTY: ChatState = {
   messages: [],
@@ -85,6 +87,8 @@ export interface UseChat extends ChatState {
   stop(): void;
   /** Loads the stored messages again (after the core removed some) and clears a stale failure. */
   reload(): Promise<void>;
+  /** Drops everything held for a deleted chat; later events and results for it are ignored. */
+  forget(chatId: string): void;
   /**
    * Shortens the selected chat. It runs like a reply (status "streaming", Stop
    * cancels it); `onOutcome` hears how it ended, so a failure is reported by
@@ -104,28 +108,42 @@ export interface UseChat extends ChatState {
   regenerate(modelId?: string | null): void;
 }
 
+const lastIndexOf = (live: TrailEntry[], callId: string) => {
+  for (let i = live.length - 1; i >= 0; i--) if (live[i].callId === callId) return i;
+  return -1;
+};
+
+/** Line ends and trailing space the core may change when it stores a reply. */
+const norm = (t: string) => t.replace(/\r\n/g, "\n");
+
 /**
- * The state after rows were stored mid-task. The reply text that is now a stored
- * row leaves the streaming text (the rest of it stays), a stored user row replaces
- * the just-typed copy, and live lines whose result is stored leave the live list.
+ * The state after rows were stored mid-task. A stored reply with text is the truth for the
+ * reply in progress: its text leaves the streaming text (anything streamed after it stays,
+ * unless that is only whitespace) and, when it cannot be found there, the streamed text is
+ * dropped rather than shown twice. A stored user row replaces the just-typed copy, and a live
+ * line leaves when the tool row of its own call (matched by position) is stored.
  */
 function withStoredRows(s: ChatState, messages: StoredMessage[]): Partial<ChatState> {
   const known = new Set(s.messages.map((m) => m.id));
   const fresh = messages.filter((m) => !known.has(m.id));
   let text = s.streamingText;
   for (const m of fresh) {
-    const stored = m.text.trim();
-    if (m.kind !== "message" || m.role !== "assistant" || !stored) continue;
-    const lead = text.trimStart();
-    if (lead.startsWith(stored)) text = lead.slice(stored.length);
+    if (m.kind !== "message" || m.role !== "assistant" || !m.text.trim()) continue;
+    const stored = norm(m.text).trimEnd();
+    const lead = norm(text).trimStart();
+    text = lead.startsWith(stored) ? lead.slice(stored.length) : "";
   }
-  const resolved = new Set<string>();
-  for (const m of messages) if (m.kind === "tool" && m.tool_call_id) resolved.add(m.tool_call_id);
+  if (!text.trim()) text = "";
+  const answered = answeredLive(
+    pairStored(messages),
+    s.live,
+    new Set(fresh.filter((m) => m.kind === "tool").map((m) => m.id)),
+  );
   return {
     messages,
     streamingText: text,
     pendingUser: fresh.some((m) => m.kind === "message" && m.role === "user") ? null : s.pendingUser,
-    live: s.live.filter((e) => !resolved.has(e.callId)),
+    live: s.live.filter((e) => !answered.has(e)),
   };
 }
 
@@ -144,6 +162,7 @@ export function useChat(
   const loadSeq = useRef<Record<string, number>>({});
   const lastModel = useRef<Record<string, string>>({});
   const turnSeq = useRef<Record<string, number>>({});
+  const deleted = useRef(new Set<string>());
   const onTurnEndRef = useRef(onTurnEnd);
   onTurnEndRef.current = onTurnEnd;
   const current = (chatId && states[chatId]) || EMPTY;
@@ -153,6 +172,7 @@ export function useChat(
   const patch = useCallback(
     (id: string, change: (s: ChatState) => Partial<ChatState>) =>
       setStates((all) => {
+        if (deleted.current.has(id)) return all;
         const s = all[id] ?? EMPTY;
         return { ...all, [id]: { ...s, ...change(s) } };
       }),
@@ -160,6 +180,7 @@ export function useChat(
   );
 
   const reload = useCallback(async (id: string): Promise<StoredMessage[] | null> => {
+    if (deleted.current.has(id)) return null;
     const seq = (loadSeq.current[id] ?? 0) + 1;
     loadSeq.current[id] = seq;
     try {
@@ -247,7 +268,7 @@ export function useChat(
           status,
           error,
         }));
-        onTurnEndRef.current?.(id, status);
+        if (!deleted.current.has(id)) onTurnEndRef.current?.(id, status);
       };
       const onEvent = (event: EngineEvent) => {
         if (settled) return;
@@ -265,19 +286,26 @@ export function useChat(
             patch(id, (s) => ({
               waiting: null,
               live: [
-                ...s.live.filter((e) => e.callId !== event.call_id),
-                { callId: event.call_id, name: event.name, summary: event.summary, status: "running" },
+                ...s.live,
+                {
+                  callId: event.call_id,
+                  name: event.name,
+                  summary: event.summary,
+                  status: "running",
+                  liveId: ++liveSeq,
+                },
               ],
             }));
             break;
           case "tool_output":
-            patch(id, (s) => ({
-              live: s.live.map((e) =>
-                e.callId === event.call_id
-                  ? { ...e, output: ((e.output ?? "") + event.text).slice(-OUTPUT_KEEP) }
-                  : e,
-              ),
-            }));
+            patch(id, (s) => {
+              const at = lastIndexOf(s.live, event.call_id);
+              return {
+                live: s.live.map((e, i) =>
+                  i === at ? { ...e, output: ((e.output ?? "") + event.text).slice(-OUTPUT_KEEP) } : e,
+                ),
+              };
+            });
             break;
           case "tool_finished":
             patch(id, (s) => {
@@ -286,14 +314,15 @@ export function useChat(
                 summary: event.summary,
                 detail: event.detail,
               } as const;
-              const known = s.live.some((e) => e.callId === event.call_id);
+              const at = lastIndexOf(s.live, event.call_id);
               return {
-                live: known
-                  ? s.live.map((e) =>
-                      // The detail replaces what streamed in.
-                      e.callId === event.call_id ? { ...e, ...done, output: undefined } : e,
-                    )
-                  : [...s.live, { callId: event.call_id, name: "", ...done }],
+                live:
+                  at >= 0
+                    ? s.live.map((e, i) =>
+                        // The detail replaces what streamed in.
+                        i === at ? { ...e, ...done, output: undefined } : e,
+                      )
+                    : [...s.live, { callId: event.call_id, name: "", liveId: ++liveSeq, ...done }],
               };
             });
             break;
@@ -348,6 +377,15 @@ export function useChat(
       stopTurn(chatId).catch(() => {});
     }
   }, [chatId]);
+
+  const forget = useCallback((id: string) => {
+    deleted.current.add(id);
+    streaming.current.delete(id);
+    delete loadSeq.current[id];
+    delete lastModel.current[id];
+    delete turnSeq.current[id];
+    setStates(({ [id]: _gone, ...rest }) => rest);
+  }, []);
 
   const reloadSelected = useCallback(async () => {
     if (!chatId || streaming.current.has(chatId)) return;
@@ -409,5 +447,5 @@ export function useChat(
         }
       : null;
 
-  return { ...current, usage, send, stop, reload: reloadSelected, retry, regenerate, compact };
+  return { ...current, usage, send, stop, reload: reloadSelected, forget, retry, regenerate, compact };
 }

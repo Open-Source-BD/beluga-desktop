@@ -1,7 +1,7 @@
-import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { StoredMessage, UiError } from "../../lib/ipc";
 import Trail from "../agent/Trail";
-import { bareEntry, resolvedEntries, type TrailEntry } from "../agent/trailEntries";
+import { bareEntry, matchLive, pairStored, stateWord, type Slot, type TrailEntry } from "../agent/trailEntries";
 import ErrorNotice from "./ErrorNotice";
 import { shouldFollow } from "./follow";
 import JumpToLatest from "./JumpToLatest";
@@ -77,23 +77,44 @@ export default function Thread({
     return seen;
   }, [messages]);
 
-  // Stored calls take their result from the stored tool rows, else from the live list
-  // (a command still running), else from their name alone. Live lines already stored leave.
-  const resolved = useMemo(() => resolvedEntries(messages), [messages]);
+  // Calls are paired with their results by position, as the core does. A call with no
+  // result yet takes the live line that started under it (a command still running); only a
+  // call of the last reply can be running, any other unanswered one was not run.
+  const stored = useMemo(() => pairStored(messages), [messages]);
   const bare = useMemo(() => {
-    const out = new Map<string, TrailEntry>();
-    for (const m of messages)
-      for (const c of m.tool_calls) if (!resolved.has(c.id)) out.set(c.id, bareEntry(c, streaming));
+    const out = new Map<Slot, TrailEntry>();
+    for (const [id, slots] of stored.rows)
+      for (const sl of slots)
+        if (!sl.entry) out.set(sl, bareEntry(sl.call, streaming && id === stored.lastAssistantId));
     return out;
-  }, [messages, resolved, streaming]);
-  const liveById = useMemo(() => new Map(live.map((e) => [e.callId, e])), [live]);
-  const liveOnly = useMemo(() => {
-    const stored = new Set<string>();
-    for (const m of messages) for (const c of m.tool_calls) stored.add(c.id);
-    return live.filter((e) => !stored.has(e.callId));
-  }, [messages, live]);
-  const entriesOf = (m: StoredMessage) =>
-    m.tool_calls.map((c) => resolved.get(c.id) ?? liveById.get(c.id) ?? bare.get(c.id)!);
+  }, [stored, streaming]);
+  const { matched, rest } = useMemo(() => matchLive(stored, live), [stored, live]);
+  const slotEntry = (sl: Slot) => sl.entry ?? matched.get(sl) ?? bare.get(sl)!;
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const toggle = useCallback(
+    (key: string) =>
+      setExpanded((cur) => {
+        const next = new Set(cur);
+        if (!next.delete(key)) next.add(key);
+        return next;
+      }),
+    [],
+  );
+  const restKeys = rest.map((_, i) => `${stored.taskKey}:${stored.task.length + i}`);
+
+  // Settled lines are announced once; running ones and their output never are.
+  const announced = useRef(new Set<number>());
+  const [said, setSaid] = useState("");
+  useEffect(() => {
+    const now: string[] = [];
+    for (const e of live) {
+      if (e.status === "running" || e.liveId === undefined || announced.current.has(e.liveId)) continue;
+      announced.current.add(e.liveId);
+      const word = stateWord(e.status);
+      now.push(word ? `${e.summary} ${word}` : e.summary);
+    }
+    if (now.length > 0) setSaid(now.join(". "));
+  }, [live]);
   const anyRunning = live.some((e) => e.status === "running");
   const canEdit = onEdit !== undefined && !streaming && pendingUser === null;
   const showInterrupted =
@@ -173,7 +194,12 @@ export default function Thread({
                   />
                 </div>
               )}
-              <Trail entries={entriesOf(m)} />
+              <Trail
+                entries={(stored.rows.get(m.id) ?? []).map(slotEntry)}
+                keys={(stored.rows.get(m.id) ?? []).map((sl) => sl.key)}
+                expanded={expanded}
+                onToggle={toggle}
+              />
             </Fragment>
           ),
         )}
@@ -183,7 +209,10 @@ export default function Thread({
             {notSent && <span className="not-sent"> Not sent.</span>}
           </div>
         )}
-        <Trail entries={liveOnly} />
+        <Trail entries={rest} keys={restKeys} expanded={expanded} onToggle={toggle} />
+        <div role="status" className="sr-only">
+          {said}
+        </div>
         <div className="reply live" aria-live="polite">
           {streaming && streamingText && <Markdown text={streamingText} />}
           {streaming && waiting !== null ? (
