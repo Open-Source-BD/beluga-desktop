@@ -27,12 +27,13 @@ struct Partial {
 
 /// Joins fragments into whole calls.
 ///
-/// Limits: a 33rd call is refused (and `overflowed()` turns true) while calls
-/// already collected keep receiving their fragments and come back whole. If
-/// the byte limit trips, any call may be missing its tail, so `finish()`
-/// returns no calls at all and `overflowed()` is true. Fragments of one call share an index;
-/// a fragment with a different id or name than the call so far starts a new
-/// call, so providers that send every call at index 0 still work.
+/// Fragments of one call share an index; a fragment with a different id or
+/// name than the call so far starts a new call, so providers that send every
+/// call at index 0 still work. A reply may hold at most 32 calls and
+/// 1,000,000 bytes of arguments. If either limit is passed, the collector
+/// stops collecting, `overflowed()` is true and `finish()` returns no calls,
+/// because a call from a reply that overflowed may be missing part of its
+/// arguments.
 #[derive(Default)]
 pub struct Collector {
     /// In the order the calls first appeared.
@@ -41,12 +42,11 @@ pub struct Collector {
     current: HashMap<u32, usize>,
     bytes: usize,
     overflowed: bool,
-    byte_limit_hit: bool,
 }
 
 impl Collector {
     pub fn push(&mut self, fragment: Fragment) {
-        if self.byte_limit_hit {
+        if self.overflowed {
             return;
         }
         let id = fragment.id.filter(|s| !s.is_empty());
@@ -83,7 +83,6 @@ impl Collector {
             slot.name = name;
         }
         if self.bytes + fragment.arguments.len() > MAX_ARGUMENT_BYTES {
-            self.byte_limit_hit = true;
             self.overflowed = true;
             return;
         }
@@ -91,17 +90,17 @@ impl Collector {
         slot.arguments.push_str(&fragment.arguments);
     }
 
-    /// True when a limit cut the reply short: the calls from `finish` are
-    /// then only those collected so far.
+    /// True when the reply passed a limit. `finish` then returns nothing, so
+    /// the caller should tell the model its reply was too large.
     pub fn overflowed(&self) -> bool {
         self.overflowed
     }
 
     /// The calls in the order they appeared, with ids unique within the
     /// reply. A call with no id gets `call_{index}`; a call with no name is
-    /// dropped. After a byte-limit trip nothing is returned.
+    /// dropped. After an overflow nothing is returned.
     pub fn finish(self) -> Vec<ToolCall> {
-        if self.byte_limit_hit {
+        if self.overflowed {
             return Vec::new();
         }
         let kept: Vec<Partial> = self
@@ -337,18 +336,6 @@ mod tests {
     }
 
     #[test]
-    fn more_than_32_calls_overflow_and_keep_the_first_32() {
-        let mut c = Collector::default();
-        for i in 0..33 {
-            c.push(part(i, Some(&format!("c{i}")), Some("n"), "{}"));
-        }
-        assert!(c.overflowed());
-        let calls = c.finish();
-        assert_eq!(calls.len(), 32);
-        assert_eq!(calls[31].id, "c31");
-    }
-
-    #[test]
     fn the_byte_limit_returns_no_calls_and_reports_overflow() {
         let mut c = Collector::default();
         c.push(part(0, Some("a"), Some("n"), "{\"a\":\"b\""));
@@ -364,19 +351,41 @@ mod tests {
     }
 
     #[test]
-    fn a_33rd_call_is_refused_while_the_32nd_still_completes() {
+    fn a_33rd_call_at_a_fresh_index_overflows_and_returns_nothing() {
+        let mut c = Collector::default();
+        for i in 0..33 {
+            c.push(part(i, Some(&format!("c{i}")), Some("n"), "{}"));
+        }
+        assert!(c.overflowed());
+        assert!(c.finish().is_empty());
+    }
+
+    #[test]
+    fn a_33rd_call_at_a_shared_index_overflows_and_returns_nothing() {
+        let mut c = Collector::default();
+        for i in 0..32 {
+            c.push(part(0, Some(&format!("c{i}")), Some("n"), "{\"a\":"));
+            c.push(part(0, None, None, "1}"));
+        }
+        assert!(!c.overflowed());
+        c.push(part(0, Some("c32"), Some("n"), "{\"b\":"));
+        c.push(part(0, None, None, "2}"));
+        assert!(c.overflowed());
+        assert!(c.finish().is_empty());
+    }
+
+    #[test]
+    fn exactly_32_calls_and_exactly_a_million_bytes_are_not_an_overflow() {
         let mut c = Collector::default();
         for i in 0..31 {
             c.push(part(i, Some(&format!("c{i}")), Some("n"), "{}"));
         }
-        c.push(part(31, Some("c31"), Some("n"), "{\"a\":"));
-        c.push(part(32, Some("c32"), Some("n"), "{}"));
-        assert!(c.overflowed());
-        c.push(part(31, None, None, "\"b\"}"));
+        let rest = "x".repeat(1_000_000 - 31 * 2);
+        c.push(part(31, Some("c31"), Some("n"), &rest));
+        assert!(!c.overflowed());
         let calls = c.finish();
         assert_eq!(calls.len(), 32);
-        assert_eq!(calls[31].id, "c31");
-        assert_eq!(calls[31].arguments, "{\"a\":\"b\"}");
+        assert_eq!(calls[31].arguments.len(), rest.len());
     }
 
     #[test]
