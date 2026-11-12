@@ -17,6 +17,8 @@ export interface Command {
   description: string;
   /** `rest` is any text typed after the command name. */
   run(ctx: CommandContext, rest: string): void;
+  /** Takes text after its name; a command without this runs only when typed alone. */
+  takesText?: boolean;
 }
 
 export const commands: Command[] = [
@@ -32,6 +34,7 @@ export const commands: Command[] = [
     name: "/compact",
     description: "Shorten this chat to save requests and cost",
     run: (c, rest) => c.compact(rest || undefined),
+    takesText: true,
   },
   { name: "/export", description: "Save this chat as a Markdown file", run: (c) => c.exportChat() },
   { name: "/settings", description: "Open Settings", run: (c) => c.openSettings() },

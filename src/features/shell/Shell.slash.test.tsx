@@ -207,6 +207,15 @@ describe("Shell slash menu", () => {
     expect(ipc.activateSkill).not.toHaveBeenCalled();
   });
 
+  it("a command that takes no text, typed with text, is sent unchanged as a message", async () => {
+    render(<Shell />);
+    await userEvent.type(await box(), "/help me fix this{Enter}");
+    await waitFor(() =>
+      expect(ipc.sendMessage).toHaveBeenCalledWith("c1", "/help me fix this", [], "test/model", expect.any(Function)),
+    );
+    expect(screen.queryByRole("dialog", { name: "Help" })).toBeNull();
+  });
+
   it("an earlier alert is cleared by the next successful send", async () => {
     render(<Shell />);
     await userEvent.type(await box(), "/compact{Enter}");

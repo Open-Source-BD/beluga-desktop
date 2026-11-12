@@ -19,11 +19,24 @@ describe("resolveSlash", () => {
       kind: "command", name: "/compact", rest: "keep the database decisions",
     });
   });
+  it("runs a command that takes no text only when it is typed alone", () => {
+    expect(resolveSlash("/help", skills)).toEqual({ kind: "command", name: "/help", rest: "" });
+    expect(resolveSlash("/NEW", skills)).toEqual({ kind: "command", name: "/new", rest: "" });
+    for (const t of ["/help me fix this", "/new chat please", "/export now", "/model\nthat one"]) {
+      expect(resolveSlash(t, skills)).toEqual({ kind: "plain" });
+    }
+  });
+  it("keeps /compact with text and alone", () => {
+    expect(resolveSlash("/compact", skills)).toEqual({ kind: "command", name: "/compact", rest: "" });
+    expect(resolveSlash("/compact the API notes", skills)).toEqual({
+      kind: "command", name: "/compact", rest: "the API notes",
+    });
+  });
   it("is case-sensitive for skill ids", () => {
     expect(resolveSlash("/My-Style", skills)).toEqual({ kind: "plain" });
   });
   it("treats anything else as plain text", () => {
-    for (const t of ["/usr/local/bin", "/etc", "/superpowers:brain", "/", " /new", "hello /new"]) {
+    for (const t of ["/usr/local/bin", "/etc", "/superpowers:brain", "/", " /new", " /help", "hello /new"]) {
       expect(resolveSlash(t, skills)).toEqual({ kind: "plain" });
     }
   });
