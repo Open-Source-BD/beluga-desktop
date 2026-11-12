@@ -195,3 +195,33 @@ The layout of storage and events; the exact system message; crate choices; how t
 ## Version
 
 0.3.0. The README's roadmap marks stage 3 released and states the safety summary in plain words.
+
+## Amendments made while building (2026-11-12)
+
+Decisions the designer made during the build that change what this document says above. Where they differ from the text above, these win. All are **(my call)** and can be overturned.
+
+**What "Always allow" covers.** The rule shown on a command card is the program plus its sub-command for a fixed set of tools that have sub-commands (`git`, `npm`, `cargo`, `go` and similar), and otherwise the program alone. A saved rule lets a command run without asking only in its simple forms: the whole command is plain characters (no quotes, `=`, `$`, backslashes or other shell syntax); every option is on a short built-in list of options known to be harmless for that rule; every other argument is a plain path inside the project that is not a secret file; install-type rules take no extra arguments (`npm install` passes, `npm install some-package` asks). For a tool that is not on the built-in list the saved rule is the exact command and matches only that exact command. Anything else still runs after its own card. This replaces "the program name plus its first sub-command when the first argument is a plain word". Reason: review showed that a rule matching by program and sub-command alone could be made to run other programs through options (`go test --exec`, `npm test --script-shell`) and that a saved `cat` would read any file on the computer.
+
+**Commands that are refused outright.** A command longer than 4,000 characters or 50 lines, or containing hidden, direction-changing or control characters other than newline and tab, is refused without a card. The card always states the command's size, wraps long lines, and keeps the approve buttons disabled until a command that does not fit its box has been scrolled to the end. A newly shown card ignores clicks for half a second.
+
+**What Stop reaches.** Stop ends the command and everything it started, with one exception on macOS and Linux: a process that deliberately moves itself into its own session (a daemon) is not reached. Windows has no such exception. Background commands end when the app quits normally; if the app is killed outright they keep running on macOS and Linux and are ended on Windows.
+
+**Secret files.** Anything inside a `.git` folder and `.git-credentials` count as secret files. The edit and write tools refuse to change a secret file at all; only reading one can be approved.
+
+**File changes.** A prepared change is applied only if the file still holds exactly what the change was computed from; otherwise it is refused and the model must read the file again. `write_file` will not replace an existing file that is larger than 1,000,000 bytes or is not text. Edits keep the file's own line endings.
+
+**Editing and the folder.** "Allow all edits in this chat" is cleared when the chat's folder is closed or changed, and can be switched off, but not on, from outside an edit card. Closing or changing the folder stops the chat's running task.
+
+**Saved rules and "all edits" together.** With "all edits" allowed and a saved rule such as `npm test`, the model can change what that command does (for example the test script in `package.json`) and then run it without a card. Git hooks and `.npmrc` cannot be changed by the tools. The README must say this plainly.
+
+**Interrupted and lost results.** A call that never started is recorded as "Not run". A call that had started when the app died, or whose result could not be stored, is recorded as "The result of this call was lost; it may have run. Check before repeating."
+
+**Background commands.** A background command ends when its own process exits, so a server must be started directly, not with `&`. Each chat keeps the output of its 8 most recently finished background commands.
+
+**Retry.** A reply from a task that used tools cannot be retried; the interface offers "Continue" (which sends a message) instead. `/compact` and editing an earlier message are refused while a task runs.
+
+**Money.** When a provider reports no cost for a paid request the app records an estimate from token counts and the model's listed prices. If today's spending cannot be read, paid requests are refused as if the limit were reached. Several chats working at once can each go one request past the limit.
+
+**Search.** `find_files` and `search` include hidden files and folders (except `.git`); a search pattern for file names with no slash matches at any depth.
+
+**The model's instructions.** The project folder's name is reduced to letters, digits, space, `-`, `_` and `.` before it is put in the system message.
