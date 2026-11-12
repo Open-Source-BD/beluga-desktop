@@ -134,6 +134,10 @@ fn detect_uncached() -> Shell {
     }
 }
 
+/// The shells' names as the model is told them (`Shell::name`) on Windows.
+pub const PWSH_NAME: &str = "PowerShell 7 (pwsh)";
+pub const WINDOWS_POWERSHELL_NAME: &str = "Windows PowerShell 5.1";
+
 /// Windows PowerShell 5.1 under the system folder: an absolute path, never a
 /// bare name that could be resolved against the current directory.
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -155,14 +159,14 @@ fn detect_uncached() -> Shell {
         return Shell {
             program,
             family: ShellFamily::PowerShell,
-            name: "PowerShell 7 (pwsh)",
+            name: PWSH_NAME,
         };
     }
     Shell {
         program: find_in_path("powershell.exe", &path)
             .unwrap_or_else(|| windows_powershell_path(std::env::var_os("SystemRoot"))),
         family: ShellFamily::PowerShell,
-        name: "Windows PowerShell 5.1",
+        name: WINDOWS_POWERSHELL_NAME,
     }
 }
 

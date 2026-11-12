@@ -6,6 +6,7 @@
 //! system, the shell and the project folder's name. No date, model, file
 //! listing or skill goes in it.
 
+use super::shell::{PWSH_NAME, WINDOWS_POWERSHELL_NAME};
 use crate::brand::APP_NAME;
 use crate::commands::chat_state::SKILL_NOTE;
 
@@ -14,12 +15,19 @@ use crate::commands::chat_state::SKILL_NOTE;
 /// a skill is active.
 const PROJECT_SKILL_NOTE: &str = "You are working in the user's project folder with these tools: read_file, list_dir, find_files, search, edit_file, write_file, run_command, update_plan, command_output and stop_command. The skills below may have been written for other tools. Where a skill says to read a file, edit a file, run a command or keep a checklist, do it with these tools (read_file, edit_file or write_file, run_command, update_plan). Helper agents and parallel workers are not available: do their steps yourself, one after another. A skill's other files can be read with read_file using the path skill:{id}/{file}, where {id} is the id after \"Skill:\" below and {file} is the file's path inside the skill.";
 
-/// What the shell's syntax needs to be told, by system.
-fn shell_syntax(os: &str) -> &'static str {
-    if os == "Windows" {
-        "The shell is PowerShell, so use PowerShell syntax: for example `Get-ChildItem`, not `ls -la`, and `$env:NAME`, not `$NAME`."
-    } else {
-        "Use POSIX shell syntax."
+/// What the shell's syntax needs to be told, by system and shell. Windows
+/// PowerShell 5.1 has no `&&` or `||`, which models write by habit.
+fn shell_syntax(os: &str, shell_name: &str) -> String {
+    if os != "Windows" {
+        return "Use POSIX shell syntax.".to_string();
+    }
+    let base = "The shell is PowerShell, so use PowerShell syntax: for example `Get-ChildItem`, not `ls -la`, and `$env:NAME`, not `$NAME`.";
+    match shell_name {
+        WINDOWS_POWERSHELL_NAME => format!(
+            "{base} This is Windows PowerShell 5.1: it has no && or ||; run commands one at a time, or use ; and check $LASTEXITCODE."
+        ),
+        PWSH_NAME => format!("{base} PowerShell 7 supports && and ||."),
+        _ => base.to_string(),
     }
 }
 
@@ -48,7 +56,7 @@ fn folder_name(s: &str) -> String {
 /// (`Shell::name`), `project_name` the folder's last component.
 pub fn system(os: &str, shell_name: &str, project_name: &str) -> String {
     let name = folder_name(project_name);
-    let syntax = shell_syntax(os);
+    let syntax = shell_syntax(os, shell_name);
     format!(
         "You are a coding assistant working inside {APP_NAME}, a desktop chat app, on the user's project. \
 You work through the tools you are given: you can read and search the project's files, change files and run commands in the project folder. \
@@ -140,6 +148,31 @@ mod tests {
             assert!(posix.contains("Use POSIX shell syntax."));
             assert!(!posix.contains("PowerShell"));
         }
+    }
+
+    #[test]
+    fn each_powershell_is_told_whether_it_has_and_and_or() {
+        const OLD: &str = "This is Windows PowerShell 5.1: it has no && or ||; run commands one at a time, or use ; and check $LASTEXITCODE.";
+        const NEW: &str = "PowerShell 7 supports && and ||.";
+        let old = system("Windows", "Windows PowerShell 5.1", "p");
+        assert!(
+            old.contains(&format!("`$env:NAME`, not `$NAME`. {OLD}\n")),
+            "{old}"
+        );
+        assert!(!old.contains(NEW));
+        let new = system("Windows", "PowerShell 7 (pwsh)", "p");
+        assert!(
+            new.contains(&format!("`$env:NAME`, not `$NAME`. {NEW}\n")),
+            "{new}"
+        );
+        assert!(!new.contains(OLD));
+        for (os, shell) in [("macOS", "bash"), ("Linux", "sh")] {
+            let posix = system(os, shell, "p");
+            assert!(!posix.contains(OLD) && !posix.contains(NEW), "{posix}");
+        }
+        // The same shell and folder give the same bytes.
+        assert_eq!(old, system("Windows", "Windows PowerShell 5.1", "p"));
+        assert_eq!(new, system("Windows", "PowerShell 7 (pwsh)", "p"));
     }
 
     #[test]
