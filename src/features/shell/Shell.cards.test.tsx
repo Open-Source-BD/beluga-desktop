@@ -487,6 +487,33 @@ describe("editing the latest message of a task", () => {
   });
 });
 
+describe("a task left unfinished by a quit or a crash", () => {
+  const LEFT = [
+    row({ id: "u1", role: "user", text: "fix it" }),
+    row({ id: "a1", tool_calls: [{ id: "c1", name: "run_command", arguments: "{}" }, { id: "c2", name: "list_dir", arguments: "{}" }] }),
+    row({ id: "t1", role: "tool", kind: "tool", tool_call_id: "c1", tool_meta: { name: "run_command", status: "ok", summary: "Ran x", detail: null } }),
+  ];
+
+  it("shows Continue when nothing runs, and Continue sends continue", async () => {
+    ipc.getMessages.mockResolvedValue(LEFT);
+    render(<Shell />);
+    await open("Chat A");
+    await userEvent.click(await screen.findByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(ipc.sendMessage).toHaveBeenCalled());
+    expect(ipc.sendMessage.mock.calls[0].slice(0, 2)).toEqual(["ca", "continue"]);
+  });
+
+  it("shows no Continue while the core still runs the task", async () => {
+    ipc.getMessages.mockResolvedValue(LEFT);
+    ipc.taskState.mockResolvedValue({ ...noTask, running: true });
+    render(<Shell />);
+    await open("Chat A");
+    await screen.findByText("Ran x");
+    await waitFor(() => expect(ipc.taskState).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+  });
+});
+
 describe("Retry on a reply", () => {
   it("is absent on a reply whose task has tool rows and present on a plain reply", async () => {
     ipc.getMessages.mockResolvedValue([

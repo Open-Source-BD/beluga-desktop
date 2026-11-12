@@ -309,3 +309,47 @@ describe("Thread jump to latest", () => {
     expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
   });
 });
+
+describe("Thread after a task that did not finish", () => {
+  const row = (over: Partial<StoredMessage>): StoredMessage => ({
+    id: "x", role: "assistant", text: "", attachments: [], interrupted: false, created_at: 1,
+    kind: "message", seq: 1, tool_calls: [], tool_call_id: null, tool_meta: null, ...over,
+  });
+  const user = row({ id: "u1", role: "user", text: "fix it" });
+  const calls = row({ id: "a1", text: "Looking.", tool_calls: [{ id: "c1", name: "run_command", arguments: "{}" }, { id: "c2", name: "list_dir", arguments: "{}" }] });
+  const result = row({ id: "t1", role: "tool", kind: "tool", tool_call_id: "c1", tool_meta: { name: "run_command", status: "ok", summary: "Ran x", detail: null } });
+  const note = row({ id: "n1", role: "system", kind: "note", text: "Paused: too many requests." });
+
+  it.each([
+    ["a reply whose calls have no results", [user, calls]],
+    ["a tool result last", [user, calls, result]],
+    ["a tool result and then a note", [user, calls, result, note]],
+  ])("offers Continue when the stored rows end inside a task (%s)", async (_, messages) => {
+    const onContinue = vi.fn();
+    render(<Thread {...base} messages={messages} onContinue={onContinue} />);
+    expect(screen.getByText("Reply interrupted.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(onContinue).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("offers nothing after a finished task, while a task runs, or while a message is on its way", () => {
+    const onContinue = vi.fn();
+    const done = [user, calls, result, row({ id: "a2", text: "Fixed." })];
+    const { rerender } = render(<Thread {...base} messages={done} onContinue={onContinue} />);
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+    rerender(<Thread {...base} messages={[user, calls, result]} onContinue={onContinue} taskRunning />);
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+    rerender(<Thread {...base} messages={[user, calls, result]} onContinue={onContinue} status="streaming" />);
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+    rerender(<Thread {...base} messages={[user, calls, result]} onContinue={onContinue} pendingUser="more" />);
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+    expect(screen.queryByText("Reply interrupted.")).toBeNull();
+  });
+
+  it("a paused task shows its own Continue once", () => {
+    render(<Thread {...base} messages={[user, calls, result, note]} status="paused" onContinue={vi.fn()} />);
+    expect(screen.getAllByRole("button", { name: "Continue" })).toHaveLength(1);
+    expect(screen.queryByText("Reply interrupted.")).toBeNull();
+  });
+});

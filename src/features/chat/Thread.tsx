@@ -33,8 +33,13 @@ interface Props {
   onRetryWithModel?: () => void;
   /** The retry after a failure or an interruption. */
   onRetry: () => void;
-  /** Sends "continue": offered on a paused task and on an interrupted one that ran tools. */
+  /**
+   * Sends "continue": offered on a paused task, on an interrupted one that ran tools, and on
+   * one whose stored rows end inside the task (the app quit or crashed while it ran).
+   */
   onContinue?: () => void;
+  /** A task runs in this chat in the core, also one this window did not start. */
+  taskRunning?: boolean;
   /** Under the Continue button of a paused task (Open Settings, cheaper models). */
   pausedExtras?: ReactNode;
   /** The core refused a retry; nothing else changed. */
@@ -64,6 +69,7 @@ export default function Thread({
   onRetryWithModel,
   onRetry,
   onContinue,
+  taskRunning = false,
   pausedExtras,
   refusal = null,
   onSignInAgain,
@@ -139,8 +145,16 @@ export default function Thread({
   }, [live, chatId]);
   const anyRunning = live.some((e) => e.status === "running");
   const canEdit = onEdit !== undefined && !streaming && pendingUser === null;
+  // The stored rows end inside a task (a result, or a reply whose calls have none): the app
+  // quit or crashed while it ran. Notes do not count. Nothing runs, so it can be continued.
+  const unfinished = useMemo(() => {
+    const rows = messages.filter((m) => m.kind !== "note");
+    const l = rows[rows.length - 1];
+    return l !== undefined && (l.kind === "tool" || (l.role === "assistant" && l.tool_calls.length > 0));
+  }, [messages]);
+  const leftUnfinished = unfinished && status === "idle" && !taskRunning && pendingUser === null;
   const showInterrupted =
-    !streaming && (status === "interrupted" || last?.interrupted === true);
+    !streaming && (status === "interrupted" || last?.interrupted === true || leftUnfinished);
 
   // After every render: stay at the bottom unless the user scrolled up.
   useLayoutEffect(() => {
@@ -248,7 +262,7 @@ export default function Thread({
         {showInterrupted && (
           <div className="notice">
             <p>Reply interrupted.</p>
-            {hasTools && onContinue ? (
+            {(hasTools || leftUnfinished) && onContinue ? (
               <button type="button" className="btn" onClick={onContinue}>
                 Continue
               </button>

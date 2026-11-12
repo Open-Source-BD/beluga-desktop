@@ -879,6 +879,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
                 onRetryWithModel={retryWithAnotherModel}
                 onRetry={() => chat.retry(modelId)}
                 onContinue={continueTask}
+                taskRunning={running}
                 pausedExtras={pausedExtras}
                 refusal={chat.refusal}
                 onSignInAgain={() => onSignInAgain?.()}
