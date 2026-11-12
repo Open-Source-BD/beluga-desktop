@@ -211,9 +211,22 @@ fn numbered(bytes: &[u8], offset: usize, limit: usize, summary: String) -> ToolO
         last = n;
     }
     if last < total {
-        out.push(format!("(lines {offset}-{last} of {total}; more remain)"));
+        out.push(format!("(lines {offset}-{last} of {total}{MORE_REMAIN}"));
     }
     ok(out.join("\n"), summary)
+}
+
+/// How the line that ends a read short of the file's end ends.
+const MORE_REMAIN: &str = "; more remain)";
+
+/// A `read_file` result returned the file's last line: its final line is not
+/// the "(lines a-b of n; more remain)" marker. File lines always start with
+/// their number, so a file's text cannot pass for the marker.
+pub fn reached_end(text: &str) -> bool {
+    !text
+        .lines()
+        .last()
+        .is_some_and(|l| l.starts_with("(lines ") && l.ends_with(MORE_REMAIN))
 }
 
 /// Which file a path led to when an approval card was built.

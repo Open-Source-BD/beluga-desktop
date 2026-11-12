@@ -405,13 +405,18 @@ async fn read_file(ctx: &Ctx<'_>, args: Value, pair: &mut Pair<'_>) -> Dispatche
     let a = args.clone();
     let first = blocking(move || {
         let out = read::read_file(&project, &library, &a, false);
-        // A read of a project file (a partial one too) lets an edit follow.
+        // A read of a project file (a partial one too) lets an edit follow;
+        // replacing the whole file needs a read that reached its last line.
         if out.status == ToolStatus::Ok
             && let Some(path) = str_arg(&a, "path")
             && !path.starts_with("skill:")
             && let Ok(found) = project.existing(path)
         {
-            lock(&log).note_read(&found.real);
+            if read::reached_end(&out.text) {
+                lock(&log).note_read(&found.real);
+            } else {
+                lock(&log).note_part_read(&found.real);
+            }
         }
         out
     })

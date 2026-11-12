@@ -61,7 +61,7 @@ A chat is a **project chat** when it has a folder open. In a project chat the mo
 | `find_files` | Finds paths by pattern, at most 200. | No |
 | `search` | Searches file contents with a regular expression, at most 100 matching lines. | No |
 | `edit_file` | Replaces exact text in a file. The file must have been read first. | Yes |
-| `write_file` | Creates a file, or replaces a whole file that was read first. | Yes |
+| `write_file` | Creates a file, or replaces a whole file that was read to its end first. | Yes |
 | `run_command` | Runs one shell command in the folder and returns its exit code and output. | Yes |
 | `update_plan` | Keeps a checklist, shown above the message box while the task runs. | No |
 | `command_output`, `stop_command` | Read the output of, or stop, a background command. | No |

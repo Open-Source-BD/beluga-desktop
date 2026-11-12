@@ -57,6 +57,15 @@ struct Stamp {
     /// Absent only for a file too big to edit; present otherwise, so a change
     /// that keeps both length and modified time is still noticed.
     hash: Option<[u8; 32]>,
+    /// The model has seen all of the file as it is now: a read returned its
+    /// last line, or the model wrote it. Needed to replace it whole.
+    whole: bool,
+}
+
+impl Stamp {
+    fn same_file(&self, other: &Stamp) -> bool {
+        self.len == other.len && self.modified == other.modified && self.hash == other.hash
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,8 +97,21 @@ fn read_limited(path: &Path) -> Option<Vec<u8>> {
 }
 
 impl ReadLog {
-    /// Records the file's current length, modified time and content hash.
+    /// Records a read that returned the file's last line: the model has seen
+    /// all of it (`note_part_read` for a read that stopped before the end).
     pub fn note_read(&mut self, real: &Path) {
+        self.record_read(real, true);
+    }
+
+    /// Records a read that stopped before the file's last line. Enough for an
+    /// edit; a whole-file replace also needs a read that reached the end. A
+    /// file already read to its end and unchanged since stays so.
+    pub fn note_part_read(&mut self, real: &Path) {
+        self.record_read(real, false);
+    }
+
+    /// Records the file's current length, modified time and content hash.
+    fn record_read(&mut self, real: &Path, whole: bool) {
         // Metadata first: a change during the read then shows as stale.
         let Ok(meta) = fs::metadata(real) else {
             self.seen.remove(real);
@@ -106,18 +128,23 @@ impl ReadLog {
         } else {
             None
         };
-        self.seen.insert(
-            real.to_path_buf(),
-            Stamp {
-                len: meta.len(),
-                modified: meta.modified().ok(),
-                hash,
-            },
-        );
+        let mut stamp = Stamp {
+            len: meta.len(),
+            modified: meta.modified().ok(),
+            hash,
+            whole,
+        };
+        // A change to the file since the last read clears the mark.
+        if let Some(before) = self.seen.get(real) {
+            stamp.whole |= before.whole && before.same_file(&stamp);
+        }
+        self.seen.insert(real.to_path_buf(), stamp);
     }
 
-    /// Records a file this module just wrote, from the bytes written.
-    fn note_written(&mut self, real: &Path, bytes: &[u8]) {
+    /// Records a file this module just wrote, from the bytes written. `whole`:
+    /// the model has seen all of the new content (it wrote all of it, or
+    /// edited a file it had read in full).
+    fn note_written(&mut self, real: &Path, bytes: &[u8], whole: bool) {
         match fs::metadata(real) {
             Ok(meta) => {
                 self.seen.insert(
@@ -126,6 +153,7 @@ impl ReadLog {
                         len: bytes.len() as u64,
                         modified: meta.modified().ok(),
                         hash: Some(sha(bytes)),
+                        whole,
                     },
                 );
             }
@@ -157,6 +185,16 @@ impl ReadLog {
     /// True when the file is as it was when last read or written here.
     pub fn fresh(&self, real: &Path) -> bool {
         self.state(real) == ReadState::Fresh
+    }
+
+    /// `Err(message)` unless the file is fresh and was read to its end.
+    fn require_whole(&self, real: &Path, shown: &str) -> Result<(), String> {
+        self.require_fresh(real, shown)?;
+        if self.seen.get(real).is_some_and(|st| st.whole) {
+            Ok(())
+        } else {
+            Err(format!("Read all of {shown} before replacing it."))
+        }
     }
 
     /// `Err(message)` unless the file is fresh.
@@ -585,7 +623,8 @@ pub fn plan_write(project: &Project, log: &ReadLog, args: &Value) -> Result<Chan
         base = Base::Missing;
     } else {
         let shown = &target.shown;
-        log.require_fresh(&target.real, shown)
+        // Replacing a whole file needs a read that reached its end.
+        log.require_whole(&target.real, shown)
             .map_err(|e| refusal(e, kind))?;
         let unshowable = || {
             refusal(
@@ -773,10 +812,12 @@ pub fn apply(change: &Change, log: &mut ReadLog) -> ToolOutcome {
     if let Err(e) = base_holds(change, real) {
         return bad(e);
     }
+    // Checked against the base above: the file is still what the model saw.
+    let was_whole = log.seen.get(real).is_some_and(|st| st.whole);
     if let Err(e) = write_temp_and_place(change, real) {
         return bad(e);
     }
-    log.note_written(real, &change.new_bytes);
+    log.note_written(real, &change.new_bytes, change.created || was_whole);
 
     let mut detail = String::new();
     for l in &change.removed {
@@ -963,6 +1004,55 @@ mod tests {
         assert!(err_text(edit(&p, &l, "a.txt", "abc", "abc")).contains("same"));
         let r = plan_edit(&p, &l, &json!({"path":"a.txt","old_text":"abc"}));
         assert!(err_text(r).contains("new_text"));
+    }
+
+    fn write(p: &Project, l: &ReadLog, path: &str, content: &str) -> Result<Change, ToolOutcome> {
+        plan_write(p, l, &json!({"path": path, "content": content}))
+    }
+
+    #[test]
+    fn replacing_a_file_needs_a_read_that_reached_its_end_and_an_edit_does_not() {
+        let (d, p, mut l) = setup();
+        fs::write(d.path().join("a.txt"), "one\ntwo\nthree\n").unwrap();
+        let real = p.existing("a.txt").unwrap().real;
+        l.note_part_read(&real);
+        assert_eq!(
+            err_text(write(&p, &l, "a.txt", "new\n")),
+            "Read all of a.txt before replacing it."
+        );
+        // A partial read is enough for an edit.
+        assert!(edit(&p, &l, "a.txt", "one", "ONE").is_ok());
+        l.note_read(&real);
+        assert!(write(&p, &l, "a.txt", "new\n").is_ok());
+        // A later partial read of the unchanged file keeps the mark.
+        l.note_part_read(&real);
+        assert!(write(&p, &l, "a.txt", "new\n").is_ok());
+        // A change to the file clears it.
+        fs::write(d.path().join("a.txt"), "one\ntwo\nthree\nfour\n").unwrap();
+        l.note_part_read(&real);
+        assert_eq!(
+            err_text(write(&p, &l, "a.txt", "new\n")),
+            "Read all of a.txt before replacing it."
+        );
+    }
+
+    #[test]
+    fn a_file_the_model_wrote_whole_or_edited_after_a_full_read_can_be_replaced() {
+        let (d, p, mut l) = setup();
+        let c = write(&p, &l, "b.txt", "made\n").unwrap();
+        assert_eq!(apply(&c, &mut l).status, ToolStatus::Ok);
+        assert!(write(&p, &l, "b.txt", "again\n").is_ok());
+        seed(&d, &p, &mut l, "c.txt", b"one\ntwo\n");
+        do_edit(&d, &p, &mut l, "c.txt", "one", "ONE");
+        assert!(write(&p, &l, "c.txt", "x\n").is_ok());
+        // An edit after a partial read does not make the file read in full.
+        fs::write(d.path().join("e.txt"), "one\ntwo\n").unwrap();
+        l.note_part_read(&p.existing("e.txt").unwrap().real);
+        do_edit(&d, &p, &mut l, "e.txt", "one", "ONE");
+        assert_eq!(
+            err_text(write(&p, &l, "e.txt", "x\n")),
+            "Read all of e.txt before replacing it."
+        );
     }
 
     #[test]

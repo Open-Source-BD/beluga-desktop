@@ -83,7 +83,7 @@ fn build() -> Value {
         tool(
             "write_file",
             "Create a file, or replace a whole file, with the given content. Missing parent \
-             folders are created. To replace an existing file you must have read it first. \
+             folders are created. To replace an existing file you must first have read it to its end. \
              The user may be asked to approve this first, and may decline. Prefer edit_file \
              for small changes.",
             json!({

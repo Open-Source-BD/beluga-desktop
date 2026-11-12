@@ -233,3 +233,5 @@ Decisions the designer made during the build that change what this document says
 **A `.git` folder is not a project.** A folder that is, or is inside, a `.git` folder (any component of its real path, in any case) cannot be opened as a chat's folder: "A .git folder cannot be opened as a project." Otherwise the secret rule, which reads the path below the project folder, would not see it.
 
 **Exporting a project chat.** An exported chat with tool calls starts, under its title, with "Tool results are summarised; their contents are not included." Each reply lists its calls as indented lines, one per call, with the result's stored summary and state; no result text is written (it can hold whole files, an approved secret file among them). Notes are exported as before, and a chat without tool calls exports exactly as before.
+
+**Replacing a whole file.** `write_file` replaces an existing file only after a `read_file` of it returned its last line (or the model wrote the file itself) and the file has not changed since; otherwise: "Read all of {path} before replacing it." A partial read is still enough for `edit_file`.

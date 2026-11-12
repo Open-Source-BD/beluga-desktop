@@ -403,6 +403,43 @@ async fn edit_decline_leaves_the_file_and_returns_the_declined_text() {
 }
 
 #[tokio::test]
+async fn write_file_replaces_only_a_file_read_to_its_end() {
+    let fx = Fx::new();
+    fx.write("a.txt", "one\ntwo\nthree\n");
+    let d = fx
+        .call("read_file", json!({"path": "a.txt", "limit": 2}))
+        .await;
+    assert_eq!(d.outcome.status, ToolStatus::Ok, "{}", d.outcome.text);
+    let d = fx
+        .call("write_file", json!({"path": "a.txt", "content": "new\n"}))
+        .await;
+    assert_eq!(d.outcome.status, ToolStatus::Error);
+    assert_eq!(d.outcome.text, "Read all of a.txt before replacing it.");
+    assert!(fx.cards().is_empty());
+    // An edit needs only the partial read: its card is shown.
+    let (d, _) = fx
+        .answered(
+            "edit_file",
+            edit_args("a.txt", "one", "ONE"),
+            Answer::Decline { note: None },
+        )
+        .await;
+    declined(&d);
+    // A read that returns the last line marks the file read in full.
+    fx.call("read_file", json!({"path": "a.txt", "offset": 3}))
+        .await;
+    let (d, card) = fx
+        .answered(
+            "write_file",
+            json!({"path": "a.txt", "content": "new\n"}),
+            Answer::Decline { note: None },
+        )
+        .await;
+    declined(&d);
+    assert!(matches!(card, Approval::Edit { created: false, .. }));
+}
+
+#[tokio::test]
 async fn the_edit_card_carries_the_real_path_created_flag_and_changed_lines() {
     let fx = Fx::new();
     fx.write("src/app.ts", "let a = 1;\nlet b = 2;\n");
