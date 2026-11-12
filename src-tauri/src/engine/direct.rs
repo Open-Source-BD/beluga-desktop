@@ -121,7 +121,11 @@ impl DirectEngine {
                     prompt_tokens,
                     ..
                 })) => {
-                    ran.out.cost_usd = Some(ran.out.cost_usd.unwrap_or(0.0) + cost_usd);
+                    // Only a reported cost counts as one; without it the
+                    // caller records an estimate.
+                    if let Some(cost_usd) = cost_usd {
+                        ran.out.cost_usd = Some(ran.out.cost_usd.unwrap_or(0.0) + cost_usd);
+                    }
                     ran.out.prompt_tokens = Some(u32::try_from(prompt_tokens).unwrap_or(u32::MAX));
                 }
                 Some(Ok(Delta::ToolCallPart {
@@ -608,6 +612,27 @@ mod tests {
         .await;
         assert_eq!(out.cost_usd, None);
         assert_eq!(out.prompt_tokens, None);
+    }
+
+    #[tokio::test]
+    async fn run_step_with_usage_but_no_cost_reports_no_cost() {
+        for usage in [
+            "{\"prompt_tokens\":12,\"completion_tokens\":5}",
+            "{\"cost\":null,\"prompt_tokens\":12,\"completion_tokens\":5}",
+        ] {
+            let body = format!(
+                "data: {{\"choices\":[{{\"delta\":{{\"content\":\"x\"}}}}]}}\n\ndata: {{\"choices\":[],\"usage\":{usage}}}\n\ndata: [DONE]\n\n"
+            );
+            let server = serve(sse(&body)).await;
+            let (_, out) = step(
+                &base(&server),
+                store(Some("sk-k")),
+                CancellationToken::new(),
+            )
+            .await;
+            assert_eq!(out.cost_usd, None, "{usage}");
+            assert_eq!(out.prompt_tokens, Some(12), "{usage}");
+        }
     }
 
     #[tokio::test]

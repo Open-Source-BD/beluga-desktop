@@ -3478,3 +3478,80 @@ async fn changing_or_closing_a_chats_folder_takes_back_all_edits() {
         .unwrap();
     assert!(!h.state.store.edits_allowed(&id).unwrap());
 }
+
+// ---------------------------------------------------------------------------
+// A usage chunk without a cost
+// ---------------------------------------------------------------------------
+
+/// "abcdefgh" with usage that has token counts and no cost.
+const UNPRICED_REPLY: &str = "data: {\"choices\":[{\"delta\":{\"content\":\"abcdefgh\"}}]}\n\n\
+data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1000,\"completion_tokens\":2}}\n\n\
+data: [DONE]\n\n";
+
+/// A harness on `server` with paid models `m/paid-tools` (accepts tools)
+/// and `m/paid-plain`, at $1 a million prompt tokens and $2 completion.
+fn paid_harness(server: &MockServer) -> Harness {
+    let h = signed_in(&server.uri());
+    let paid = |id: &str, tools: bool| ModelInfo {
+        id: id.into(),
+        name: id.into(),
+        prompt_usd_per_mtok: 1.0,
+        completion_usd_per_mtok: 2.0,
+        is_free: false,
+        supports_tools: tools,
+        accepts_images: true,
+        context_length: 100_000,
+    };
+    ModelCache::save(
+        &h.state.model_cache_file(),
+        &[paid("m/paid-tools", true), paid("m/paid-plain", false)],
+    )
+    .unwrap();
+    h
+}
+
+#[tokio::test]
+async fn a_paid_task_whose_usage_has_tokens_but_no_cost_records_an_estimate() {
+    let server = MockServer::start().await;
+    mock(
+        &server,
+        "POST",
+        "/api/v1/chat/completions",
+        sse(UNPRICED_REPLY),
+    )
+    .await;
+    let h = paid_harness(&server);
+    let project = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(project.path())
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let chat = chats::create_chat(&h.state, "m/paid-tools").unwrap();
+    h.state.store.approve_folder(&root).unwrap();
+    h.state.store.set_folder(&chat.id, Some(&root)).unwrap();
+    let (r, _) = send(&h, &chat.id, "go", "m/paid-tools", vec![]).await;
+    assert_eq!(r.unwrap().status, TurnStatus::Done);
+    // A project request went out (it carries the tools).
+    assert!(last_body(&server).await.get("tools").is_some());
+    // 1,000 prompt tokens at $1 a million, and 8 characters (2 tokens) at $2.
+    let cost = chats::chat_usage(&h.state, &chat.id).unwrap().cost_usd;
+    assert!((cost - 0.001_004).abs() < 1e-12, "{cost}");
+}
+
+#[tokio::test]
+async fn a_paid_plain_reply_whose_usage_has_tokens_but_no_cost_records_an_estimate() {
+    let server = MockServer::start().await;
+    mock(
+        &server,
+        "POST",
+        "/api/v1/chat/completions",
+        sse(UNPRICED_REPLY),
+    )
+    .await;
+    let h = paid_harness(&server);
+    let chat = chats::create_chat(&h.state, "m/paid-plain").unwrap();
+    let (r, _) = send(&h, &chat.id, "go", "m/paid-plain", vec![]).await;
+    assert_eq!(r.unwrap().status, TurnStatus::Done);
+    let cost = chats::chat_usage(&h.state, &chat.id).unwrap().cost_usd;
+    assert!((cost - 0.001_004).abs() < 1e-12, "{cost}");
+}

@@ -39,7 +39,9 @@ pub struct WireMessage {
 pub enum Delta {
     Text(String),
     Usage {
-        cost_usd: f64,
+        /// `None` when the chunk has no cost (absent or `null`); a reported
+        /// `0` stays `Some(0.0)`.
+        cost_usd: Option<f64>,
         prompt_tokens: u64,
         completion_tokens: u64,
     },
@@ -266,7 +268,8 @@ fn handle_data(data: &str, out: &mut VecDeque<Result<Delta, ApiError>>) {
     }
     if let Some(usage) = chunk.get("usage").filter(|u| u.is_object()) {
         out.push_back(Ok(Delta::Usage {
-            cost_usd: usage["cost"].as_f64().unwrap_or(0.0),
+            // Absent or null: the provider did not say, which is not $0.
+            cost_usd: usage["cost"].as_f64(),
             prompt_tokens: usage["prompt_tokens"].as_u64().unwrap_or(0),
             completion_tokens: usage["completion_tokens"].as_u64().unwrap_or(0),
         }));
@@ -333,13 +336,61 @@ mod tests {
                 text("Hel"),
                 text("lo"),
                 Ok(Delta::Usage {
-                    cost_usd: 0.0,
+                    cost_usd: Some(0.0),
                     prompt_tokens: 10,
                     completion_tokens: 2
                 }),
                 Ok(Delta::Done),
             ]
         );
+    }
+
+    /// The usage of a stream whose usage chunk is `usage`.
+    async fn usage_of(usage: &str) -> Delta {
+        let body = format!("data: {{\"choices\":[],\"usage\":{usage}}}\n\ndata: [DONE]\n\n");
+        collect_from(&body).await.remove(0).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_usage_chunk_without_a_cost_reports_no_cost() {
+        for usage in [
+            "{\"prompt_tokens\":7,\"completion_tokens\":3}",
+            "{\"cost\":null,\"prompt_tokens\":7,\"completion_tokens\":3}",
+        ] {
+            assert_eq!(
+                usage_of(usage).await,
+                Delta::Usage {
+                    cost_usd: None,
+                    prompt_tokens: 7,
+                    completion_tokens: 3
+                },
+                "{usage}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_reported_cost_of_zero_or_more_is_kept() {
+        for (usage, cost) in [
+            (
+                "{\"cost\":0,\"prompt_tokens\":7,\"completion_tokens\":3}",
+                0.0,
+            ),
+            (
+                "{\"cost\":0.0042,\"prompt_tokens\":7,\"completion_tokens\":3}",
+                0.0042,
+            ),
+        ] {
+            assert_eq!(
+                usage_of(usage).await,
+                Delta::Usage {
+                    cost_usd: Some(cost),
+                    prompt_tokens: 7,
+                    completion_tokens: 3
+                },
+                "{usage}"
+            );
+        }
     }
 
     #[tokio::test]
