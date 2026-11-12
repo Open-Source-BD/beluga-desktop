@@ -105,4 +105,10 @@ impl Store {
         )?;
         Ok(())
     }
+
+    /// Runs raw SQL, so a test can make a later query fail.
+    #[cfg(test)]
+    pub(crate) fn exec_for_test(&self, sql: &str) -> Result<()> {
+        self.conn().execute_batch(sql)
+    }
 }

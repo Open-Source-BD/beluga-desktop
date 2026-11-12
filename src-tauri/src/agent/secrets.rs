@@ -27,7 +27,10 @@ pub fn is_secret(shown: &str) -> bool {
         || name.starts_with("id_rsa")
         || name.starts_with("id_ed25519")
         || name.starts_with("credentials")
-        || matches!(name.as_str(), ".npmrc" | ".netrc" | ".pypirc")
+        || matches!(
+            name.as_str(),
+            ".npmrc" | ".netrc" | ".pypirc" | ".git-credentials"
+        )
 }
 
 #[cfg(test)]
@@ -56,6 +59,13 @@ mod tests {
         ] {
             assert!(is_secret(p), "{p} should be secret");
         }
+    }
+
+    #[test]
+    fn git_credentials_is_secret_and_gitconfig_is_not() {
+        assert!(is_secret(".git-credentials"));
+        assert!(is_secret("home/.GIT-CREDENTIALS"));
+        assert!(!is_secret(".gitconfig"));
     }
 
     #[test]

@@ -3355,3 +3355,58 @@ async fn a_scripted_engine_can_replace_the_real_one() {
         .collect();
     assert_eq!(stored, ["Hi", "scripted reply"]);
 }
+
+// ---- a chat's waiting card and read log follow the chat and its folder ----
+
+/// Starts waiting on a card in chat `id`; the returned handle yields the answer.
+async fn waiting_card(h: &Harness, id: &str) -> tokio::task::JoinHandle<crate::agent::Answer> {
+    let state = h.state.clone();
+    let chat = id.to_string();
+    let task = tokio::spawn(async move {
+        let card = crate::agent::Approval::Secret {
+            id: String::new(),
+            path: ".env".into(),
+        };
+        let cancel = tokio_util::sync::CancellationToken::new();
+        state.approvals.ask(&chat, card, &|_| {}, &cancel).await
+    });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while h.state.approvals.waiting(id).is_none() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    task
+}
+
+#[tokio::test]
+async fn deleting_a_chat_declines_its_waiting_card_and_forgets_its_reads() {
+    let h = signed_out("http://unused");
+    let (id, _dir) = folder_chat(&h);
+    let log = h.state.read_logs.for_chat(&id);
+    let task = waiting_card(&h, &id).await;
+    chats::delete_chat(&h.state, &id).await.unwrap();
+    let answer = tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .expect("the card is still waiting")
+        .unwrap();
+    assert_eq!(answer, crate::agent::Answer::Decline { note: None });
+    assert!(h.state.approvals.waiting(&id).is_none());
+    assert!(!Arc::ptr_eq(&log, &h.state.read_logs.for_chat(&id)));
+}
+
+#[tokio::test]
+async fn changing_a_chats_folder_declines_its_waiting_card_and_forgets_its_reads() {
+    let h = signed_out("http://unused");
+    let (id, _dir) = folder_chat(&h);
+    let log = h.state.read_logs.for_chat(&id);
+    let task = waiting_card(&h, &id).await;
+    folder::set_chat_folder(&h.state, &id, None).await.unwrap();
+    let answer = tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .expect("the card is still waiting")
+        .unwrap();
+    assert_eq!(answer, crate::agent::Answer::Decline { note: None });
+    assert!(!Arc::ptr_eq(&log, &h.state.read_logs.for_chat(&id)));
+}

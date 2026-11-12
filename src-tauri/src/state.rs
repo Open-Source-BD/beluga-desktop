@@ -1,7 +1,9 @@
 //! Shared app state behind the Tauri commands. Deliberately has no `Debug`
 //! impl: nothing here may ever format the key.
 
+use crate::agent::approval::Approvals;
 use crate::agent::background::Background;
+use crate::agent::dispatch::ReadLogs;
 use crate::dialogs::Dialogs;
 use crate::engine::{DirectEngine, Engine};
 use crate::secrets::{FileStore, KeyStore, KeychainStore, SecretError, StorageKind};
@@ -243,7 +245,7 @@ pub struct AppState {
     pub engine: Arc<dyn Engine>,
     pub data_dir: PathBuf,
     /// Every installed skill: bundled, installed and the user's own.
-    pub library: Library,
+    pub library: Arc<Library>,
     /// For GitHub only; see `HttpClients::github`.
     pub github_http: reqwest::Client,
     pub github: GithubBases,
@@ -254,6 +256,10 @@ pub struct AppState {
     pub events: Arc<dyn EventSink>,
     /// The chats' long-running commands (dev servers and the like).
     pub background: Background,
+    /// The approval card waiting in each chat.
+    pub approvals: Approvals,
+    /// The files each chat's model has read, for edits.
+    pub read_logs: ReadLogs,
     /// Opens the system folder and save dialogs.
     pub dialogs: Arc<dyn Dialogs>,
     pub turns: Mutex<HashMap<String, RunningTurn>>,
@@ -345,13 +351,15 @@ impl AppState {
             keys,
             store,
             engine,
-            library: Library::load(&builtin_skills, &data_dir.join(SKILLS_DIR)),
+            library: Arc::new(Library::load(&builtin_skills, &data_dir.join(SKILLS_DIR))),
             github_http: http.github,
             github: GithubBases::production(),
             staged_add: Mutex::new(None),
             skills_write: Mutex::new(()),
             data_dir,
             background: Background::new(events.clone()),
+            approvals: Approvals::new(),
+            read_logs: ReadLogs::default(),
             events,
             dialogs,
             turns: Mutex::new(HashMap::new()),

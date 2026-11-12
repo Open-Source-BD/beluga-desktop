@@ -60,11 +60,14 @@ pub async fn set_chat_folder(
         .map_err(local)
 }
 
-/// Stops the chat's background commands when its folder is about to become
-/// `new` and that is not the folder it has now.
+/// Stops the chat's background commands, declines its waiting approval card
+/// and forgets what its model read when its folder is about to become `new`
+/// and that is not the folder it has now.
 async fn release_old_folder(s: &AppState, chat_id: &str, new: Option<&str>) -> Result<(), UiError> {
     let current = s.store.folder(chat_id).map_err(local)?;
     if current.as_deref() != new {
+        s.approvals.drop_chat(chat_id);
+        s.read_logs.forget(chat_id);
         s.background.stop_chat(chat_id).await;
     }
     Ok(())

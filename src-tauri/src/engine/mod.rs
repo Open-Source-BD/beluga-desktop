@@ -6,7 +6,8 @@ pub mod scripted;
 
 pub use direct::DirectEngine;
 
-use crate::agent::{ToolCall, ToolStatus};
+use crate::agent::plan::PlanItem;
+use crate::agent::{Approval, ToolCall, ToolStatus};
 use crate::openrouter::error::ApiError;
 use crate::openrouter::stream::WireMessage;
 use async_trait::async_trait;
@@ -144,7 +145,7 @@ pub enum EngineEvent {
         id: String,
     },
     PlanUpdated {
-        items: serde_json::Value,
+        items: Vec<PlanItem>,
     },
     /// A rate limit is being waited out.
     Waiting {
@@ -156,9 +157,6 @@ pub enum EngineEvent {
     BackgroundChanged,
     MessageStored,
 }
-
-/// An approval card's contents. Opaque until the approval gate defines it.
-pub type Approval = serde_json::Value;
 
 /// One request to the model, with tools if the caller offers any.
 #[derive(Debug, Clone, PartialEq)]
@@ -317,7 +315,10 @@ mod tests {
             ),
             (
                 EngineEvent::ApprovalNeeded {
-                    approval: json!({"kind":"secret","id":"a1","path":".env"}),
+                    approval: crate::agent::Approval::Secret {
+                        id: "a1".into(),
+                        path: ".env".into(),
+                    },
                 },
                 json!({"type":"approval_needed","approval":{"kind":"secret","id":"a1","path":".env"}}),
             ),
@@ -327,9 +328,12 @@ mod tests {
             ),
             (
                 EngineEvent::PlanUpdated {
-                    items: json!([{"text":"x"}]),
+                    items: vec![crate::agent::plan::PlanItem {
+                        text: "x".into(),
+                        state: crate::agent::plan::PlanState::InProgress,
+                    }],
                 },
-                json!({"type":"plan_updated","items":[{"text":"x"}]}),
+                json!({"type":"plan_updated","items":[{"text":"x","state":"in_progress"}]}),
             ),
             (
                 EngineEvent::Waiting { seconds: 12 },
