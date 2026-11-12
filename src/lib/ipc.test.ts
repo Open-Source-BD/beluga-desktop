@@ -142,6 +142,58 @@ describe("ipc", () => {
     ["cancelAdd", () => ipc.cancelAdd("t1"), "cancel_add", { token: "t1" }],
     ["removeSkill", () => ipc.removeSkill("mine"), "remove_skill", { id: "mine" }],
     [
+      "answerApproval",
+      () => ipc.answerApproval("c", "a1", { decision: "once" }),
+      "answer_approval",
+      { chatId: "c", approvalId: "a1", answer: { decision: "once" } },
+    ],
+    [
+      "answerApproval decline with a note",
+      () => ipc.answerApproval("c", "a1", { decision: "decline", note: "No" }),
+      "answer_approval",
+      { chatId: "c", approvalId: "a1", answer: { decision: "decline", note: "No" } },
+    ],
+    ["waitingApproval", () => ipc.waitingApproval("c"), "waiting_approval", { chatId: "c" }],
+    ["taskState", () => ipc.taskState("c"), "task_state", { chatId: "c" }],
+    [
+      "setEditsAllowed",
+      () => ipc.setEditsAllowed("c", true),
+      "set_edits_allowed",
+      { chatId: "c", on: true },
+    ],
+    [
+      "backgroundOutput",
+      () => ipc.backgroundOutput("c", "bg1"),
+      "background_output",
+      { chatId: "c", id: "bg1" },
+    ],
+    [
+      "stopBackground",
+      () => ipc.stopBackground("c", "bg1"),
+      "stop_background",
+      { chatId: "c", id: "bg1" },
+    ],
+    ["projectRules", () => ipc.projectRules(), "project_rules", undefined],
+    [
+      "removeProjectRule",
+      () => ipc.removeProjectRule("/work/proj", "git status"),
+      "remove_project_rule",
+      { folder: "/work/proj", rule: "git status" },
+    ],
+    ["spendLimit", () => ipc.spendLimit(), "spend_limit", undefined],
+    [
+      "setSpendLimit",
+      () => ipc.setSpendLimit(2.5),
+      "set_spend_limit",
+      { limitUsd: 2.5 },
+    ],
+    [
+      "setSpendLimit clears with null",
+      () => ipc.setSpendLimit(null),
+      "set_spend_limit",
+      { limitUsd: null },
+    ],
+    [
       "openAuthUrl",
       () => ipc.openAuthUrl("https://openrouter.ai/auth"),
       "plugin:opener|open_url",
@@ -264,6 +316,14 @@ describe("ipc", () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
+  it("onBackgroundChanged listens to background-changed and hands over the chat id", async () => {
+    const handler = vi.fn();
+    await ipc.onBackgroundChanged(handler);
+    expect(listen).toHaveBeenCalledWith("background-changed", expect.any(Function));
+    listen.mock.calls[0][1]({ payload: "chat-1" });
+    expect(handler).toHaveBeenCalledWith("chat-1");
+  });
+
   it("getMessages returns stored messages with their kind and seq", async () => {
     const note: ipc.StoredMessage = {
       id: "n1", role: "system", text: "Note", attachments: [],
@@ -306,9 +366,282 @@ describe("ipc", () => {
         { id: "p:s", name: "s", too_long: false, acts_on_computer: true, unavailable: true },
       ],
       folder: null,
+      project: false,
       compacted: false,
     };
     invoke.mockResolvedValueOnce(state);
     await expect(ipc.chatState("c", "m/a")).resolves.toEqual(state);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The Rust side's JSON samples against the TypeScript types
+// ---------------------------------------------------------------------------
+//
+// `src-tauri/tests/fixtures/ipc/*.json` holds one value per variant of every
+// shape the interface receives or sends, written by the Rust test
+// `the_ipc_fixtures_are_up_to_date`. The validators below are hand-written and
+// typed against `ipc.ts` (a field missing from a spec is a compile error; a
+// field the sample has and the spec lacks fails the test), so neither side can
+// drift silently.
+
+type Check = (v: unknown) => boolean;
+type Spec<T> = { [K in keyof T]-?: Check };
+
+const str: Check = (v) => typeof v === "string";
+const num: Check = (v) => typeof v === "number" && Number.isFinite(v);
+const int: Check = (v) => Number.isInteger(v);
+const bool: Check = (v) => typeof v === "boolean";
+const nul: Check = (v) => v === null;
+const or =
+  (...cs: Check[]): Check =>
+  (v) =>
+    cs.some((c) => c(v));
+const list =
+  (c: Check): Check =>
+  (v) =>
+    Array.isArray(v) && v.every(c);
+const oneOf =
+  (...vals: string[]): Check =>
+  (v) =>
+    typeof v === "string" && vals.includes(v);
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** An object with exactly the keys of `spec`, each passing its check. */
+function obj<T>(spec: Spec<T>): Check {
+  const keys = Object.keys(spec).sort();
+  return (v) =>
+    isRecord(v) &&
+    JSON.stringify(Object.keys(v).sort()) === JSON.stringify(keys) &&
+    keys.every((k) => (spec as Record<string, Check>)[k](v[k]));
+}
+
+/** A union tagged by `tag`: one spec per variant (the variants of `T`, all of them). */
+function tagged<T extends Record<K, string>, K extends string>(
+  tag: K,
+  specs: { [V in T[K]]: Spec<Extract<T, Record<K, V>>> },
+): { check: Check; tags: string[] } {
+  const tags = Object.keys(specs).sort();
+  return {
+    tags,
+    check: (v) =>
+      isRecord(v) &&
+      typeof v[tag] === "string" &&
+      tags.includes(v[tag] as string) &&
+      obj((specs as Record<string, Spec<unknown>>)[v[tag] as string])(v),
+  };
+}
+
+const toolStatuses: Record<ipc.ToolStatus, true> = { ok: true, error: true, declined: true, not_run: true };
+const uiErrorKinds: Record<ipc.UiErrorKind, true> = {
+  unauthorized: true,
+  rate_limited: true,
+  no_credit: true,
+  model_unavailable: true,
+  context_too_long: true,
+  network: true,
+  keychain_unavailable: true,
+  daily_limit: true,
+  other: true,
+};
+const pauseReasons: Record<ipc.PauseReason, true> = {
+  keep_going_declined: true,
+  no_free_requests: true,
+  daily_limit: true,
+  chat_full: true,
+  going_in_circles: true,
+  rate_limited: true,
+};
+const planStates: Record<ipc.PlanState, true> = { pending: true, in_progress: true, done: true };
+const status = oneOf(...Object.keys(toolStatuses));
+
+const uiError = obj<ipc.UiError>({
+  kind: oneOf(...Object.keys(uiErrorKinds)),
+  message: str,
+  retryable: bool,
+});
+const planItem = obj<ipc.PlanItem>({ text: str, state: oneOf(...Object.keys(planStates)) });
+const bgInfo = obj<ipc.BgInfo>({
+  id: str,
+  command: str,
+  running: bool,
+  exit_code: or(int, nul),
+  started_at: int,
+});
+const approval = tagged<ipc.Approval, "kind">("kind", {
+  command: {
+    kind: str,
+    id: str,
+    command: str,
+    folder: str,
+    rule: or(str, nul),
+    outside: bool,
+    first_in_project: bool,
+    background: bool,
+  },
+  edit: {
+    kind: str,
+    id: str,
+    path: str,
+    created: bool,
+    removed: list(str),
+    added: list(str),
+    removed_total: int,
+    added_total: int,
+    total_lines: int,
+  },
+  secret: { kind: str, id: str, path: str },
+  keep_going: {
+    kind: str,
+    id: str,
+    requests: int,
+    free_left: or(int, nul),
+    spent_today_usd: or(num, nul),
+  },
+});
+const answer = tagged<ipc.Answer, "decision">("decision", {
+  once: { decision: str },
+  always: { decision: str },
+  all_edits: { decision: str },
+  decline: { decision: str, note: or(str, nul) },
+  message: { decision: str, text: str },
+  keep_going: { decision: str },
+  stop_here: { decision: str },
+});
+const engineEvent = tagged<ipc.EngineEvent, "type">("type", {
+  text_delta: { type: str, text: str },
+  usage: { type: str, requests: int, cost_usd: num },
+  done: { type: str },
+  interrupted: { type: str, reason: str },
+  failed: { type: str, error: uiError },
+  tool_started: { type: str, call_id: str, name: str, summary: str },
+  tool_output: { type: str, call_id: str, text: str },
+  tool_finished: { type: str, call_id: str, status, summary: str, detail: or(str, nul) },
+  approval_needed: { type: str, approval: approval.check },
+  approval_cleared: { type: str, id: str },
+  plan_updated: { type: str, items: list(planItem) },
+  waiting: { type: str, seconds: int },
+  paused: { type: str, reason: oneOf(...Object.keys(pauseReasons)) },
+  background_changed: { type: str },
+  message_stored: { type: str },
+});
+const toolMeta = obj<ipc.ToolMeta>({ name: str, status, summary: str, detail: or(str, nul) });
+const storedMessage = obj<ipc.StoredMessage>({
+  id: str,
+  role: oneOf("user", "assistant", "system", "tool"),
+  text: str,
+  attachments: list(obj<ipc.StoredAttachment>({ name: str, mime: str, data_base64: str })),
+  interrupted: bool,
+  created_at: int,
+  kind: oneOf("message", "note", "tool"),
+  seq: int,
+  tool_calls: list(obj<ipc.StoredToolCall>({ id: str, name: str, arguments: str })),
+  tool_call_id: or(str, nul),
+  tool_meta: or(toolMeta, nul),
+});
+const turnResult = obj<ipc.TurnResult>({
+  status: oneOf("done", "interrupted", "failed", "paused"),
+  reason: or(str, nul),
+  error: or(uiError, nul),
+});
+const taskState = obj<ipc.TaskState>({
+  plan: list(planItem),
+  edits_allowed: bool,
+  background: list(bgInfo),
+  project: bool,
+  waiting: or(approval.check, nul),
+});
+const chatState = obj<ipc.ChatState>({
+  active_skills: list(
+    obj<ipc.ActiveSkill>({ id: str, name: str, too_long: bool, acts_on_computer: bool, unavailable: bool }),
+  ),
+  folder: or(str, nul),
+  project: bool,
+  compacted: bool,
+});
+const spendLimit = obj<ipc.SpendLimit>({ limit_usd: or(num, nul), spent_today_usd: num });
+const projectRules = obj<ipc.ProjectRules>({ folder: str, rules: list(str) });
+
+const raw = import.meta.glob("../../src-tauri/tests/fixtures/ipc/*.json", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
+const fixtures = Object.fromEntries(
+  Object.entries(raw).map(([path, text]) => [path.split("/").pop() as string, text]),
+);
+const sample = (name: string): unknown[] => {
+  expect(Object.keys(fixtures), `${name} is missing`).toContain(name);
+  const value: unknown = JSON.parse(fixtures[name]);
+  expect(Array.isArray(value)).toBe(true);
+  return value as unknown[];
+};
+
+describe("the Rust JSON samples", () => {
+  const files: [string, Check, string[] | null][] = [
+    ["approval.json", approval.check, approval.tags],
+    ["answer.json", answer.check, answer.tags],
+    ["engine_event.json", engineEvent.check, engineEvent.tags],
+    ["task_state.json", taskState, null],
+    ["turn_result.json", turnResult, null],
+    ["ui_error.json", uiError, null],
+    ["bg_info.json", bgInfo, null],
+    ["stored_message.json", storedMessage, null],
+    ["chat_state.json", chatState, null],
+    ["spend_limit.json", spendLimit, null],
+    ["project_rules.json", projectRules, null],
+  ];
+
+  it.each(files)("%s matches the TypeScript types", (name, check) => {
+    const samples = sample(name);
+    expect(samples.length).toBeGreaterThan(0);
+    samples.forEach((v, i) => expect(check(v), `${name}[${i}]: ${JSON.stringify(v)}`).toBe(true));
+  });
+
+  it.each(files.filter(([, , tags]) => tags))(
+    "%s has a sample of every variant the types declare",
+    (name, _check, tags) => {
+      const key = name === "answer.json" ? "decision" : name === "approval.json" ? "kind" : "type";
+      const seen = new Set(sample(name).map((v) => (v as Record<string, string>)[key]));
+      expect([...seen].sort()).toEqual(tags);
+    },
+  );
+
+  it("covers every status of TurnResult and every kind of rows", () => {
+    expect(sample("turn_result.json").map((v) => (v as ipc.TurnResult).status).sort()).toEqual([
+      "done",
+      "failed",
+      "interrupted",
+      "paused",
+    ]);
+    const rows = sample("stored_message.json") as ipc.StoredMessage[];
+    expect(new Set(rows.map((m) => m.kind))).toEqual(new Set(["message", "note", "tool"]));
+    expect(rows.some((m) => m.tool_calls.length > 0)).toBe(true);
+    expect(rows.some((m) => m.tool_meta?.status === "declined")).toBe(true);
+  });
+
+  it("an Answer sample goes back to the core as it came", async () => {
+    invoke.mockResolvedValue(undefined);
+    for (const a of sample("answer.json") as ipc.Answer[]) {
+      await ipc.answerApproval("c", "a1", a);
+      expect(invoke).toHaveBeenLastCalledWith("answer_approval", { chatId: "c", approvalId: "a1", answer: a });
+    }
+  });
+
+  it("the sample files use LF line endings", () => {
+    for (const [name, text] of Object.entries(fixtures)) {
+      expect(text.includes("\r"), name).toBe(false);
+      expect(text.endsWith("\n"), name).toBe(true);
+    }
+  });
+
+  it("the validators refuse a field that is missing, extra or of the wrong type", () => {
+    expect(approval.check({ kind: "secret", id: "a", path: ".env" })).toBe(true);
+    expect(approval.check({ kind: "secret", id: "a" })).toBe(false);
+    expect(approval.check({ kind: "secret", id: "a", path: ".env", extra: 1 })).toBe(false);
+    expect(approval.check({ kind: "secret", id: 1, path: ".env" })).toBe(false);
+    expect(approval.check({ kind: "other", id: "a" })).toBe(false);
+    expect(answer.check({ decision: "decline" })).toBe(false);
   });
 });

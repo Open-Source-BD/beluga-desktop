@@ -1,0 +1,12 @@
+[
+  {
+    "kind": "other",
+    "message": "Something went wrong.",
+    "retryable": false
+  },
+  {
+    "kind": "daily_limit",
+    "message": "You have reached today's spending limit of $1.00.",
+    "retryable": false
+  }
+]

@@ -70,11 +70,33 @@ describe("useChat", () => {
     await waitFor(() => expect(ipc.getMessages).toHaveBeenCalled());
     for (const status of ["paused", "something_new"]) {
       act(() => result.current.send("hi", [], "m1"));
-      act(() => emit({ type: "paused", reason: "going_in_circles" } as unknown as EngineEvent));
+      act(() => emit({ type: "paused", reason: "going_in_circles" }));
       await act(async () => finish({ status, reason: "going_in_circles", error: null } as TurnResult));
       expect(result.current.status).toBe("idle");
       expect(result.current.error).toBeNull();
     }
+  });
+
+  it("the project-work events are ignored while streaming and a paused result settles as idle", async () => {
+    const { result } = renderHook(() => useChat("a"));
+    await waitFor(() => expect(ipc.getMessages).toHaveBeenCalled());
+    act(() => result.current.send("hi", [], "m1"));
+    const events: EngineEvent[] = [
+      { type: "tool_started", call_id: "c1", name: "read_file", summary: "Reading a.txt" },
+      { type: "tool_output", call_id: "c1", text: "x" },
+      { type: "tool_finished", call_id: "c1", status: "ok", summary: "Read a.txt", detail: null },
+      { type: "plan_updated", items: [{ text: "p", state: "pending" }] },
+      { type: "waiting", seconds: 3 },
+      { type: "background_changed" },
+      { type: "message_stored" },
+      { type: "paused", reason: "daily_limit" },
+    ];
+    for (const e of events) act(() => emit(e));
+    expect(result.current.status).toBe("streaming");
+    expect(result.current.streamingText).toBe("");
+    await act(async () => finish({ status: "paused", reason: "daily_limit", error: null }));
+    expect(result.current.status).toBe("idle");
+    expect(result.current.error).toBeNull();
   });
 
   it("failed sets the error and keeps the user's message", async () => {

@@ -1,0 +1,29 @@
+[
+  {
+    "decision": "once"
+  },
+  {
+    "decision": "always"
+  },
+  {
+    "decision": "all_edits"
+  },
+  {
+    "decision": "decline",
+    "note": null
+  },
+  {
+    "decision": "decline",
+    "note": "Not that file"
+  },
+  {
+    "decision": "message",
+    "text": "Do this instead"
+  },
+  {
+    "decision": "keep_going"
+  },
+  {
+    "decision": "stop_here"
+  }
+]

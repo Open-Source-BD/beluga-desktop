@@ -204,7 +204,7 @@ fn refused_by_user(answer: Answer, what: &str) -> Dispatched {
 
 /// The folder as shown and as the key for its rules: the real path without
 /// a Windows `\\?\` prefix.
-fn folder_text(root: &Path) -> String {
+pub(crate) fn folder_text(root: &Path) -> String {
     let s = root.to_string_lossy();
     match s.strip_prefix(r"\\?\") {
         Some(rest) if !rest.starts_with(r"UNC\") => rest.to_string(),

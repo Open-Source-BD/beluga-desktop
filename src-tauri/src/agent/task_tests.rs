@@ -1673,17 +1673,20 @@ async fn compaction_and_take_back_during_a_project_task_change_nothing() {
 }
 
 #[tokio::test]
-async fn a_retry_during_a_running_task_waits_for_it_and_continues() {
+async fn a_retry_during_a_running_task_waits_for_it_and_is_refused_once_it_stored_tool_rows() {
     let f = fx(vec![card_then_reads(), say("continued")]);
     let retry = async {
         f.wait_for(card_waits).await;
         let emit = f.emitter();
-        turn::retry_turn(&f.state, &f.chat, TOOLS_MODEL, false, &emit)
-            .await
-            .unwrap()
+        turn::retry_turn(&f.state, &f.chat, TOOLS_MODEL, false, &emit).await
     };
     let (_, second) = tokio::join!(f.send("write"), retry);
-    assert_eq!(second.status, TurnStatus::Done);
+    // The running task stored its not-run results while it was taken over,
+    // so the retry would replay tool work: it is refused.
+    assert_eq!(
+        second.unwrap_err().message,
+        "A task that changed things cannot be retried. Send a message to continue."
+    );
     assert_eq!(
         f.shape(),
         [
@@ -1691,10 +1694,12 @@ async fn a_retry_during_a_running_task_waits_for_it_and_continues() {
             "assistant[write_file,read_file,list_dir]",
             "tool:not_run",
             "tool:not_run",
-            "tool:not_run",
-            "assistant"
+            "tool:not_run"
         ]
     );
+    assert_rows_paired(&f);
+    // A message continues it.
+    assert_eq!(f.send("continue").await.status, TurnStatus::Done);
     assert_rows_paired(&f);
 }
 
@@ -2682,3 +2687,6 @@ async fn a_free_rate_limit_with_requests_left_is_still_waited_out() {
     assert_eq!(r.status, TurnStatus::Done, "{r:?}");
     assert_eq!(*f.outside.waits.lock().unwrap(), [2]);
 }
+
+#[path = "interface_tests.rs"]
+mod interface;

@@ -49,6 +49,8 @@ pub struct ActiveSkill {
 pub struct ChatState {
     pub active_skills: Vec<ActiveSkill>,
     pub folder: Option<String>,
+    /// The chat has a folder and it still exists.
+    pub project: bool,
     pub compacted: bool,
 }
 
@@ -182,6 +184,7 @@ fn state(s: &AppState, chat_id: &str, model_id: &str) -> Result<ChatState, UiErr
     Ok(ChatState {
         active_skills,
         folder: s.store.folder(chat_id).map_err(local)?,
+        project: super::agent::has_project(s, chat_id)?,
         compacted: s.store.summary(chat_id).map_err(local)?.is_some(),
     })
 }

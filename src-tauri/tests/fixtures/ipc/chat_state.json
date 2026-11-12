@@ -1,0 +1,16 @@
+[
+  {
+    "active_skills": [
+      {
+        "id": "p:a",
+        "name": "a",
+        "too_long": false,
+        "acts_on_computer": true,
+        "unavailable": false
+      }
+    ],
+    "folder": "/work/proj",
+    "project": true,
+    "compacted": false
+  }
+]

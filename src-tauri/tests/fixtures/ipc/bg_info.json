@@ -1,0 +1,16 @@
+[
+  {
+    "id": "bg1",
+    "command": "npm run dev",
+    "running": true,
+    "exit_code": null,
+    "started_at": 1700000000
+  },
+  {
+    "id": "bg2",
+    "command": "cargo build",
+    "running": false,
+    "exit_code": 0,
+    "started_at": 1700000100
+  }
+]

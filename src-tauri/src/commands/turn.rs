@@ -434,6 +434,25 @@ impl Drop for Registered<'_> {
 }
 
 const NOTHING_TO_RETRY: &str = "There is nothing to retry in this chat.";
+const NOT_RETRIABLE: &str =
+    "A task that changed things cannot be retried. Send a message to continue.";
+
+/// A retry would replay the latest task, and a task that stored tool rows
+/// (its reads, edits and commands) must not be replayed: it is continued with
+/// a message. The latest task is everything after the last user message.
+fn refuse_after_tool_task(messages: &[StoredMessage]) -> Result<(), UiError> {
+    let task = match messages
+        .iter()
+        .rposition(|m| m.kind == "message" && m.role == "user")
+    {
+        Some(at) => &messages[at + 1..],
+        None => messages,
+    };
+    if task.iter().any(|m| m.kind == "tool") {
+        return Err(UiError::other(NOT_RETRIABLE));
+    }
+    Ok(())
+}
 
 /// In a project chat, the reply a retry removes first, if any. A reply that
 /// made calls is never removed; a task that stopped after a call (its last
@@ -441,6 +460,7 @@ const NOTHING_TO_RETRY: &str = "There is nothing to retry in this chat.";
 /// retry.
 fn project_retry(s: &AppState, chat_id: &str, regenerate: bool) -> Result<Option<String>, UiError> {
     let messages = s.store.sendable_messages(chat_id).map_err(local)?;
+    refuse_after_tool_task(&messages)?;
     let replaced = messages.last().filter(|m| {
         m.role == "assistant" && m.tool_calls.is_empty() && (m.interrupted || regenerate)
     });
@@ -666,6 +686,7 @@ pub async fn retry_turn(
 /// when there is nothing to retry.
 fn plain_retry(s: &AppState, chat_id: &str, regenerate: bool) -> Result<Option<String>, UiError> {
     let messages = s.store.sendable_messages(chat_id).map_err(local)?;
+    refuse_after_tool_task(&messages)?;
     let replaced = messages
         .last()
         .filter(|m| m.role == "assistant" && (m.interrupted || regenerate));

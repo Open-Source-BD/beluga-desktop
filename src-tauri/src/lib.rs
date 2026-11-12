@@ -84,6 +84,16 @@ pub fn run() {
             h::confirm_add,
             h::cancel_add,
             h::remove_skill,
+            h::answer_approval,
+            h::waiting_approval,
+            h::task_state,
+            h::set_edits_allowed,
+            h::background_output,
+            h::stop_background,
+            h::project_rules,
+            h::remove_project_rule,
+            h::spend_limit,
+            h::set_spend_limit,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

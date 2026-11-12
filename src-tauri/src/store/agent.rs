@@ -77,6 +77,26 @@ impl Store {
         stmt.query_map([folder], |r| r.get(0))?.collect()
     }
 
+    /// Every folder with saved rules, by folder text, each with its rules
+    /// sorted by text. Read from the rules table itself, so a folder whose
+    /// chats are gone or changed still lists.
+    pub fn all_rules(&self) -> Result<Vec<(String, Vec<String>)>> {
+        let conn = self.conn();
+        let mut stmt =
+            conn.prepare("SELECT folder, rule FROM command_rules ORDER BY folder, rule")?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut out: Vec<(String, Vec<String>)> = Vec::new();
+        for (folder, rule) in rows {
+            match out.last_mut() {
+                Some((last, rules)) if *last == folder => rules.push(rule),
+                _ => out.push((folder, vec![rule])),
+            }
+        }
+        Ok(out)
+    }
+
     /// Saves a rule for a folder; saving it again changes nothing.
     pub fn add_rule(&self, folder: &str, rule: &str) -> Result<()> {
         self.conn().execute(

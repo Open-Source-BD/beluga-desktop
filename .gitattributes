@@ -6,3 +6,7 @@
 
 # Vendored skill packs are copied byte-for-byte; never rewrite line endings.
 src-tauri/resources/skills/** -text -eol
+
+# Generated JSON samples of the Rust types, checked by the TypeScript tests:
+# the same bytes (LF endings) on every system.
+src-tauri/tests/fixtures/ipc/*.json text eol=lf

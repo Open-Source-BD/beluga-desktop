@@ -2,6 +2,7 @@
 //! so it can be tested without a Tauri runtime; the `#[tauri::command]`
 //! functions are thin wrappers.
 
+pub mod agent;
 pub mod auth;
 pub mod chat_state;
 pub mod chats;

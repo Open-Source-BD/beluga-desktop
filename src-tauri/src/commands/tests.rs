@@ -1,7 +1,8 @@
 use super::auth::{self, StorageChoice};
 use super::install::{self, AddSource};
 use super::turn::{TurnResult, TurnStatus};
-use super::{chat_state, chats, compact, export, folder, models, turn};
+use super::{agent, chat_state, chats, compact, export, folder, models, turn};
+use crate::agent::Answer;
 use crate::engine::{EngineEvent, UiError};
 use crate::openrouter::models::{ModelCache, ModelInfo};
 use crate::secrets::{KeyStore, SecretError, SessionStore, StorageKind};
@@ -1020,6 +1021,22 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
     record(to(&chat_state::activate_skill(&h.state, &id, "p:a", "m/a")));
     record(to(&chat_state::deactivate_skill(&h.state, &id, "p:a")));
     record(to(&chat_state::chat_fullness(&h.state, &id, "m/a", 10)));
+    // The commands for project work.
+    record(to(&agent::task_state(&h.state, &id)));
+    record(to(&agent::waiting_approval(&h.state, &id)));
+    record(to(&agent::set_edits_allowed(&h.state, &id, true)));
+    record(to(&agent::answer_approval(
+        &h.state,
+        &id,
+        "a1",
+        Answer::Once,
+    )));
+    record(to(&agent::background_output(&h.state, &id, "b1")));
+    record(to(&agent::stop_background(&h.state, &id, "b1").await));
+    record(to(&agent::project_rules(&h.state)));
+    record(to(&agent::remove_project_rule(&h.state, "/p", "ls")));
+    record(to(&agent::set_spend_limit(&h.state, Some(2.0))));
+    record(to(&agent::spend_limit(&h.state)));
     // The folder commands, with a folder set and not.
     record(to(&folder::folder_files(&h.state, &id, "")));
     record(to(&folder::attach_folder_file(&h.state, &id, "a.txt")));
@@ -2144,7 +2161,7 @@ fn chat_state_reports_skills_folder_and_compaction() {
     let empty = chat_state::chat_state(s, &chat.id, BIG).unwrap();
     assert_eq!(
         to(&empty),
-        json!({"active_skills": [], "folder": null, "compacted": false})
+        json!({"active_skills": [], "folder": null, "project": false, "compacted": false})
     );
     chat_state::activate_skill(s, &chat.id, "p:acts", BIG).unwrap();
     s.store.set_folder(&chat.id, Some("/tmp/work")).unwrap();
@@ -2158,9 +2175,16 @@ fn chat_state_reports_skills_folder_and_compaction() {
                 "acts_on_computer": true, "unavailable": false
             }],
             "folder": "/tmp/work",
+            "project": false,
             "compacted": true
         })
     );
+    // A folder that exists is a project.
+    let dir = tempfile::tempdir().unwrap();
+    s.store
+        .set_folder(&chat.id, Some(dir.path().to_str().unwrap()))
+        .unwrap();
+    assert!(chat_state::chat_state(s, &chat.id, BIG).unwrap().project);
 }
 
 #[tokio::test]

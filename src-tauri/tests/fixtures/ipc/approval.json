@@ -1,0 +1,57 @@
+[
+  {
+    "kind": "command",
+    "id": "a1",
+    "command": "cargo test",
+    "folder": "/work/proj",
+    "rule": "cargo test",
+    "outside": false,
+    "first_in_project": true,
+    "background": false
+  },
+  {
+    "kind": "command",
+    "id": "a2",
+    "command": "npm run dev",
+    "folder": "/work/proj",
+    "rule": null,
+    "outside": true,
+    "first_in_project": false,
+    "background": true
+  },
+  {
+    "kind": "edit",
+    "id": "a3",
+    "path": "src/main.rs",
+    "created": false,
+    "removed": [
+      "old line"
+    ],
+    "added": [
+      "new line",
+      "another"
+    ],
+    "removed_total": 1,
+    "added_total": 2,
+    "total_lines": 120
+  },
+  {
+    "kind": "secret",
+    "id": "a4",
+    "path": ".env"
+  },
+  {
+    "kind": "keep_going",
+    "id": "a5",
+    "requests": 25,
+    "free_left": null,
+    "spent_today_usd": 0.42
+  },
+  {
+    "kind": "keep_going",
+    "id": "a6",
+    "requests": 25,
+    "free_left": 12,
+    "spent_today_usd": null
+  }
+]

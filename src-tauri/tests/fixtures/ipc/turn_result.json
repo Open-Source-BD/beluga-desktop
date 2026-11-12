@@ -1,0 +1,26 @@
+[
+  {
+    "status": "done",
+    "reason": null,
+    "error": null
+  },
+  {
+    "status": "interrupted",
+    "reason": "stopped",
+    "error": null
+  },
+  {
+    "status": "failed",
+    "reason": null,
+    "error": {
+      "kind": "other",
+      "message": "It failed.",
+      "retryable": false
+    }
+  },
+  {
+    "status": "paused",
+    "reason": "daily_limit",
+    "error": null
+  }
+]

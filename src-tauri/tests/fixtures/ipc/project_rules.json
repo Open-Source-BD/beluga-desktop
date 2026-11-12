@@ -1,0 +1,9 @@
+[
+  {
+    "folder": "/work/proj",
+    "rules": [
+      "cargo test",
+      "git status"
+    ]
+  }
+]

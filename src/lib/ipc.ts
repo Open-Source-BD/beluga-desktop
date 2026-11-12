@@ -37,6 +37,7 @@ export type UiErrorKind =
   | "context_too_long"
   | "network"
   | "keychain_unavailable"
+  | "daily_limit"
   | "other";
 
 /** The rejection value of every command that can fail. */
@@ -92,9 +93,12 @@ export interface StoredToolCall {
   arguments: string;
 }
 
+/** How a tool call ended. */
+export type ToolStatus = "ok" | "error" | "declined" | "not_run";
+
 export interface ToolMeta {
   name: string;
-  status: "ok" | "error" | "declined" | "not_run";
+  status: ToolStatus;
   summary: string;
   detail: string | null;
 }
@@ -118,13 +122,115 @@ export interface ChatUsage {
   cost_usd: number;
 }
 
-/** `reason` is "stopped" when the user stopped the reply, otherwise a UiError kind. */
+export type PlanState = "pending" | "in_progress" | "done";
+
+/** One line of the task's checklist. */
+export interface PlanItem {
+  text: string;
+  state: PlanState;
+}
+
+/** A background command of a chat. Finished ones stay listed (the 8 newest). */
+export interface BgInfo {
+  id: string;
+  /** The command text as given. */
+  command: string;
+  running: boolean;
+  exit_code: number | null;
+  /** Unix time, seconds. */
+  started_at: number;
+}
+
+/**
+ * An approval card. The core builds every field; the interface only shows
+ * them and answers with an `Answer` the card offers.
+ */
+export type Approval =
+  | {
+      kind: "command";
+      id: string;
+      /** The complete command, exactly as it will run. */
+      command: string;
+      /** The project folder it runs in. */
+      folder: string;
+      /** The rule "Always allow" would save; null offers no rule. */
+      rule: string | null;
+      /** The text refers to a place outside the project. */
+      outside: boolean;
+      /** No command has been allowed in this folder before. */
+      first_in_project: boolean;
+      background: boolean;
+    }
+  | {
+      kind: "edit";
+      id: string;
+      /** The real path relative to the project folder. */
+      path: string;
+      created: boolean;
+      removed: string[];
+      added: string[];
+      /** The true counts behind the (possibly cut) lists. */
+      removed_total: number;
+      added_total: number;
+      total_lines: number;
+    }
+  | { kind: "secret"; id: string; path: string }
+  | {
+      kind: "keep_going";
+      id: string;
+      requests: number;
+      /** Free requests left today, for a free model. */
+      free_left: number | null;
+      /** Today's spend in dollars, for a paid model. */
+      spent_today_usd: number | null;
+    };
+
+/** The user's answer to a card; each card offers only some of them. */
+export type Answer =
+  | { decision: "once" }
+  | { decision: "always" }
+  | { decision: "all_edits" }
+  | { decision: "decline"; note: string | null }
+  | { decision: "message"; text: string }
+  | { decision: "keep_going" }
+  | { decision: "stop_here" };
+
+/** Why a project task paused and waits for the user. */
+export type PauseReason =
+  | "keep_going_declined"
+  | "no_free_requests"
+  | "daily_limit"
+  | "chat_full"
+  | "going_in_circles"
+  | "rate_limited";
+
+/**
+ * `reason` of "interrupted" is "stopped" when the user stopped the reply,
+ * "folder_missing" when the project folder went away, otherwise a UiError kind.
+ */
 export type EngineEvent =
   | { type: "text_delta"; text: string }
   | { type: "usage"; requests: number; cost_usd: number }
   | { type: "done" }
-  | { type: "interrupted"; reason: "stopped" | UiErrorKind }
-  | { type: "failed"; error: UiError };
+  | { type: "interrupted"; reason: "stopped" | "folder_missing" | UiErrorKind }
+  | { type: "failed"; error: UiError }
+  | { type: "tool_started"; call_id: string; name: string; summary: string }
+  | { type: "tool_output"; call_id: string; text: string }
+  | {
+      type: "tool_finished";
+      call_id: string;
+      status: ToolStatus;
+      summary: string;
+      detail: string | null;
+    }
+  | { type: "approval_needed"; approval: Approval }
+  | { type: "approval_cleared"; id: string }
+  | { type: "plan_updated"; items: PlanItem[] }
+  /** A rate limit is being waited out. */
+  | { type: "waiting"; seconds: number }
+  | { type: "paused"; reason: PauseReason }
+  | { type: "background_changed" }
+  | { type: "message_stored" };
 
 /**
  * How a turn that ran ended. The command resolves with it only after the
@@ -140,6 +246,8 @@ export interface TurnResult {
 
 export const AUTH_FINISHED = "auth://finished";
 export const AUTH_REVOKED = "auth://revoked";
+/** Emitted when a chat's background commands change; the payload is the chat id. */
+export const BACKGROUND_CHANGED = "background-changed";
 
 export const authStatus = () => invoke<AuthStatus>("auth_status");
 
@@ -401,6 +509,8 @@ export interface ChatState {
   /** In activation order. */
   active_skills: ActiveSkill[];
   folder: string | null;
+  /** The chat has a folder and it still exists. */
+  project: boolean;
   compacted: boolean;
 }
 
@@ -463,6 +573,70 @@ export const folderFiles = (chatId: string, query: string) =>
 export const attachFolderFile = (chatId: string, path: string) =>
   invoke<AttachmentInput>("attach_folder_file", { chatId, path });
 
+// --- Project work ---------------------------------------------------------
+
+/** Everything needed to draw a chat's task again after a reload. */
+export interface TaskState {
+  plan: PlanItem[];
+  /** "All edits in this chat" is on. */
+  edits_allowed: boolean;
+  background: BgInfo[];
+  /** The chat has a folder and it still exists. */
+  project: boolean;
+  /** The card the core is waiting on in this chat, if any. */
+  waiting: Approval | null;
+}
+
+/** Saved command rules of one folder; `folder` is the key to hand back to `removeProjectRule`. */
+export interface ProjectRules {
+  folder: string;
+  rules: string[];
+}
+
+/** `limit_usd` is null when there is no limit. */
+export interface SpendLimit {
+  limit_usd: number | null;
+  spent_today_usd: number;
+}
+
+/**
+ * Answers the card the core is waiting on in the chat. Rejects when `approvalId`
+ * is not that card, the card does not offer the answer, or the chat is gone.
+ */
+export const answerApproval = (chatId: string, approvalId: string, answer: Answer) =>
+  invoke<void>("answer_approval", { chatId, approvalId, answer });
+
+/** The card waiting in the chat, to draw it again; null when none. */
+export const waitingApproval = (chatId: string) =>
+  invoke<Approval | null>("waiting_approval", { chatId });
+
+export const taskState = (chatId: string) => invoke<TaskState>("task_state", { chatId });
+
+/** Turns "all edits in this chat" on or off. */
+export const setEditsAllowed = (chatId: string, on: boolean) =>
+  invoke<void>("set_edits_allowed", { chatId, on });
+
+/** All the output kept for the user of a background command (up to 200,000 characters). */
+export const backgroundOutput = (chatId: string, id: string) =>
+  invoke<string>("background_output", { chatId, id });
+
+/** Stops a background command of the chat and everything it started. */
+export const stopBackground = (chatId: string, id: string) =>
+  invoke<void>("stop_background", { chatId, id });
+
+/** Every folder with saved command rules. */
+export const projectRules = () => invoke<ProjectRules[]>("project_rules");
+
+/** Forgets one saved rule; the next matching command asks again. `folder` as `projectRules` returned it. */
+export const removeProjectRule = (folder: string, rule: string) =>
+  invoke<void>("remove_project_rule", { folder, rule });
+
+export const spendLimit = () => invoke<SpendLimit>("spend_limit");
+
+/** null removes the limit; anything under 0.10 is refused. */
+export const setSpendLimit = (limitUsd: number | null) =>
+  invoke<void>("set_spend_limit", { limitUsd });
+
 /** Opens an OpenRouter page in the browser (allowed only for https://openrouter.ai/*). */
 export const openAuthUrl = (url: string) =>
   invoke<void>("plugin:opener|open_url", { url });
@@ -480,3 +654,6 @@ export const onAuthFinished = (
 
 export const onAuthRevoked = (handler: () => void): Promise<UnlistenFn> =>
   listen<null>(AUTH_REVOKED, () => handler());
+
+export const onBackgroundChanged = (handler: (chatId: string) => void): Promise<UnlistenFn> =>
+  listen<string>(BACKGROUND_CHANGED, (e) => handler(e.payload));

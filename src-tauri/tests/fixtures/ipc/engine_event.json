@@ -1,0 +1,79 @@
+[
+  {
+    "type": "text_delta",
+    "text": "t"
+  },
+  {
+    "type": "usage",
+    "requests": 1,
+    "cost_usd": 0.5
+  },
+  {
+    "type": "done"
+  },
+  {
+    "type": "interrupted",
+    "reason": "stopped"
+  },
+  {
+    "type": "failed",
+    "error": {
+      "kind": "other",
+      "message": "x",
+      "retryable": false
+    }
+  },
+  {
+    "type": "tool_started",
+    "call_id": "c",
+    "name": "n",
+    "summary": "s"
+  },
+  {
+    "type": "tool_output",
+    "call_id": "c",
+    "text": "o"
+  },
+  {
+    "type": "tool_finished",
+    "call_id": "c",
+    "status": "ok",
+    "summary": "s",
+    "detail": null
+  },
+  {
+    "type": "approval_needed",
+    "approval": {
+      "kind": "secret",
+      "id": "a",
+      "path": ".env"
+    }
+  },
+  {
+    "type": "approval_cleared",
+    "id": "a"
+  },
+  {
+    "type": "plan_updated",
+    "items": [
+      {
+        "text": "p",
+        "state": "done"
+      }
+    ]
+  },
+  {
+    "type": "waiting",
+    "seconds": 1
+  },
+  {
+    "type": "paused",
+    "reason": "daily_limit"
+  },
+  {
+    "type": "background_changed"
+  },
+  {
+    "type": "message_stored"
+  }
+]

@@ -2,6 +2,7 @@
 //! Argument names arrive from the web view in camelCase (`chatId`), as
 //! Tauri converts them by default.
 
+use super::agent::{ProjectRules, SpendLimit, TaskState};
 use super::auth::{AuthStatus, AuthUrl, StorageChoice};
 use super::chat_state::{ChatState, Fullness};
 use super::chats::{ChatUsage, PeekedMessage, TakenMessage};
@@ -9,8 +10,10 @@ use super::install::{AddPreview, AddSource};
 use super::skills::{LicenseFile, SkillsStatus};
 use super::turn::{AttachmentInput, TurnResult};
 use super::{
-    auth, blocking, chat_state, chats, compact, export, folder, install, models, skills, turn,
+    agent, auth, blocking, chat_state, chats, compact, export, folder, install, models, skills,
+    turn,
 };
+use crate::agent::{Answer, Approval};
 use crate::auth::callback::PRODUCTION_TIMEOUT;
 use crate::engine::{EngineEvent, UiError};
 use crate::folder::FileList;
@@ -354,4 +357,67 @@ pub async fn cancel_add(state: S<'_>, token: String) -> Result<(), UiError> {
 pub async fn remove_skill(state: S<'_>, id: String) -> Result<(), UiError> {
     let s = state.inner().clone();
     blocking(move || install::remove_skill(&s, &id)).await
+}
+
+#[tauri::command]
+pub async fn answer_approval(
+    state: S<'_>,
+    chat_id: String,
+    approval_id: String,
+    answer: Answer,
+) -> Result<(), UiError> {
+    agent::answer_approval(&state, &chat_id, &approval_id, answer)
+}
+
+#[tauri::command]
+pub async fn waiting_approval(state: S<'_>, chat_id: String) -> Result<Option<Approval>, UiError> {
+    agent::waiting_approval(&state, &chat_id)
+}
+
+#[tauri::command]
+pub async fn task_state(state: S<'_>, chat_id: String) -> Result<TaskState, UiError> {
+    agent::task_state(&state, &chat_id)
+}
+
+#[tauri::command]
+pub async fn set_edits_allowed(state: S<'_>, chat_id: String, on: bool) -> Result<(), UiError> {
+    agent::set_edits_allowed(&state, &chat_id, on)
+}
+
+#[tauri::command]
+pub async fn background_output(
+    state: S<'_>,
+    chat_id: String,
+    id: String,
+) -> Result<String, UiError> {
+    agent::background_output(&state, &chat_id, &id)
+}
+
+#[tauri::command]
+pub async fn stop_background(state: S<'_>, chat_id: String, id: String) -> Result<(), UiError> {
+    agent::stop_background(&state, &chat_id, &id).await
+}
+
+#[tauri::command]
+pub async fn project_rules(state: S<'_>) -> Result<Vec<ProjectRules>, UiError> {
+    agent::project_rules(&state)
+}
+
+#[tauri::command]
+pub async fn remove_project_rule(
+    state: S<'_>,
+    folder: String,
+    rule: String,
+) -> Result<(), UiError> {
+    agent::remove_project_rule(&state, &folder, &rule)
+}
+
+#[tauri::command]
+pub async fn spend_limit(state: S<'_>) -> Result<SpendLimit, UiError> {
+    agent::spend_limit(&state)
+}
+
+#[tauri::command]
+pub async fn set_spend_limit(state: S<'_>, limit_usd: Option<f64>) -> Result<(), UiError> {
+    agent::set_spend_limit(&state, limit_usd)
 }
