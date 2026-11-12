@@ -210,6 +210,16 @@ describe("ipc", () => {
     expect(args).toMatchObject({ chatId: "c", modelId: "m/b", regenerate: true });
   });
 
+  it("peekUserMessage passes chat and message ids and returns text and attachments", async () => {
+    const peeked: ipc.PeekedMessage = {
+      text: "hi",
+      attachments: [{ name: "a.txt", mime: "text/plain", data_base64: "aGk=" }],
+    };
+    invoke.mockResolvedValueOnce(peeked);
+    await expect(ipc.peekUserMessage("c", "m1")).resolves.toEqual(peeked);
+    expect(invoke.mock.calls).toEqual([["peek_user_message", { chatId: "c", messageId: "m1" }]]);
+  });
+
   it("takeUserMessage and rowsAfter pass chat and message ids", async () => {
     const taken: ipc.TakenMessage = {
       text: "hi",

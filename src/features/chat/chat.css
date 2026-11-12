@@ -317,6 +317,21 @@
 .fullness-hint {
   margin-left: 8px;
 }
+.editing-cancel {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 5px;
+  color: var(--deep);
+  font-size: 13px;
+}
+.editing-cancel:hover {
+  background: var(--line);
+}
+.editing-cancel:focus-visible {
+  outline: 2px solid var(--sonar);
+  outline-offset: 1px;
+}
 .queued-error {
   flex-basis: 100%;
   margin: 0;

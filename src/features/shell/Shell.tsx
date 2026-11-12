@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
-import Composer, { type ComposerControl, type SendIntent } from "../chat/Composer";
+import Composer, { type BoxContents, type ComposerControl, type SendIntent } from "../chat/Composer";
 import EmptyChat from "../chat/EmptyChat";
 import ConfirmEdit from "../chat/ConfirmEdit";
 import ErrorNotice from "../chat/ErrorNotice";
@@ -9,7 +9,7 @@ import { useFullness } from "../chat/useFullness";
 import { toUiError } from "../chat/errors";
 import { useChatCreation } from "../chat/useChatCreation";
 import { dragHasFiles } from "../../app/dropGuard";
-import { discardDraft } from "../chat/drafts";
+import { clearDraft, discardDraft, saveDraft } from "../chat/drafts";
 import ModelPicker from "../models/ModelPicker";
 import { chooseModel } from "../models/defaultModel";
 import { readLastModel, useModels } from "../models/useModels";
@@ -34,6 +34,7 @@ import {
   activateSkill,
   deleteChat,
   listChats,
+  peekUserMessage,
   renameChat,
   skillFile,
   rowsAfter,
@@ -81,6 +82,14 @@ interface Queue {
   error?: string;
 }
 
+/** A user message being edited in the box; nothing is removed until it is sent. */
+interface Editing {
+  chatId: string;
+  messageId: string;
+  /** What the box held before the edit, put back when it ends. */
+  aside: BoxContents;
+}
+
 interface Props {
   onSignInAgain?: () => void;
   /** Opens the Skills screen. */
@@ -104,6 +113,14 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   const queuedRef = useRef(queued);
   queuedRef.current = queued;
   const [confirmEdit, setConfirmEdit] = useState<{ message: StoredMessage; count: number } | null>(null);
+  const [editing, setEditingState] = useState<Editing | null>(null);
+  const editingRef = useRef<Editing | null>(null);
+  const setEditing = (next: Editing | null) => {
+    editingRef.current = next;
+    setEditingState(next);
+  };
+  const selectedRef = useRef(selectedId);
+  selectedRef.current = selectedId;
   const [turn, setTurn] = useState(0);
   const [draftChars, setDraftChars] = useState(0);
   const flushing = useRef(new Set<string>());
@@ -159,6 +176,8 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
       }
     }
     if (!modelId || creating) return;
+    const edit = editingRef.current;
+    if (edit && edit.chatId === selectedId) return sendEdit(edit, modelId, text, attachments, intent);
     if (selectedId && chat.status === "streaming") {
       // A reply is running: hold this one (replacing any earlier) until it is done.
       setQueued((all) => ({
@@ -225,25 +244,77 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
       .finally(() => flushing.current.delete(id));
   };
 
-  /** Brings a user message back into the box and removes it, and what followed, from the chat. */
-  const takeForEdit = async (message: StoredMessage) => {
-    if (!selectedId) return;
+  /**
+   * Sends an edit: removes the edited message and everything after it, then sends
+   * through the normal path. A failed removal sends nothing; a refused send leaves
+   * the text in the box as an ordinary message. Resolves to what the box held
+   * before the edit, which goes back in it.
+   */
+  const sendEdit = async (
+    edit: Editing,
+    model: string,
+    text: string,
+    attachments: AttachmentInput[],
+    intent: SendIntent | undefined,
+  ): Promise<BoxContents> => {
+    if (text.trim() === "" && attachments.length === 0) throw new Error("Nothing to send.");
     try {
-      const taken = await takeUserMessage(selectedId, message.id);
-      const lead = activeSkills.skills.find((s) => taken.text.startsWith(`/${s.id} `));
-      const text = lead ? taken.text.slice(lead.id.length + 2) : taken.text;
-      await chat.reload();
-      setTurn((n) => n + 1);
-      control.current?.setText(text);
-      taken.attachments.forEach((a) => control.current?.addAttachment(a));
+      await takeUserMessage(edit.chatId, edit.messageId);
+    } catch (e) {
+      actions.showAlert(toUiError(e).message);
+      throw e;
+    }
+    setEditing(null);
+    await chat.reload();
+    setTurn((n) => n + 1);
+    if (!(await deliver(edit.chatId, model, text, attachments, intent, actions.showAlert))) {
+      throw new Error("The chat is busy.");
+    }
+    actions.clearAlert();
+    return edit.aside;
+  };
+
+  /** Puts a user message in the box for editing; nothing is removed until it is sent. */
+  const startEdit = async (message: StoredMessage) => {
+    if (!selectedId) return;
+    const chatId = selectedId;
+    try {
+      const m = await peekUserMessage(chatId, message.id);
+      if (selectedRef.current !== chatId) return;
+      const lead = activeSkills.skills.find((s) => m.text.startsWith(`/${s.id} `));
+      const text = lead ? m.text.slice(lead.id.length + 2) : m.text;
+      const held = editingRef.current;
+      // What the box held before the first edit is kept, not the text of an earlier edit.
+      const aside =
+        held && held.chatId === chatId
+          ? held.aside
+          : (control.current?.contents() ?? { text: "", attachments: [] });
+      setEditing({ chatId, messageId: message.id, aside });
+      control.current?.replace(text, m.attachments);
     } catch (e) {
       actions.showAlert(toUiError(e).message);
     }
   };
+  /** Ends an edit without sending: the box and the chat's draft get back what they held. */
+  const cancelEdit = () => {
+    const edit = editingRef.current;
+    if (!edit) return;
+    setEditing(null);
+    control.current?.replace(edit.aside.text, edit.aside.attachments);
+    if (edit.aside.text === "") clearDraft(edit.chatId);
+    else saveDraft(edit.chatId, edit.aside.text);
+  };
+  // A reply started some other way (Retry, /compact) ends the edit.
+  useEffect(() => {
+    if (chat.status === "streaming") cancelEdit();
+    // `cancelEdit` reads only refs and setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chat.status]);
+
   const editMessage = async (message: StoredMessage) => {
     if (!selectedId || chat.status === "streaming") return;
     const latest = chat.messages.filter((m) => m.kind === "message" && m.role === "user").pop();
-    if (latest?.id === message.id) return takeForEdit(message);
+    if (latest?.id === message.id) return startEdit(message);
     try {
       setConfirmEdit({ message, count: await rowsAfter(selectedId, message.id) });
     } catch (e) {
@@ -252,6 +323,8 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   };
 
   const select = (id: string | null) => {
+    // An edit belongs to its chat and never carries to another.
+    if (id !== selectedId) cancelEdit();
     setConfirmEdit(null);
     setShowSettings(false);
     setShowSkills(false);
@@ -411,6 +484,14 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     {blocked && models && <LowAllowance models={models} onPick={chooseFromPicker} />}
     {actions.panels}
     <ActiveSkills skills={activeSkills.skills} onRemove={activeSkills.remove} />
+    {editing && editing.chatId === selectedId && (
+      <div className="queued editing" data-testid="editing">
+        <span className="queued-text">Editing a message</span>
+        <button type="button" className="editing-cancel" onClick={cancelEdit}>
+          Cancel
+        </button>
+      </div>
+    )}
     {queuedHere && selectedId && (
       <Queued
         text={queuedHere.shown}
@@ -423,6 +504,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
       draftId={selectedId}
       sendWithModifier={sendWithModifier}
       onEmptyUp={editLatest}
+      onEscape={editing ? cancelEdit : undefined}
       menu={menus.menu}
       fieldAria={menus.fieldAria}
       onKeyIntercept={menus.onKeyIntercept}
@@ -563,7 +645,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
               onConfirm={() => {
                 const { message } = confirmEdit;
                 setConfirmEdit(null);
-                void takeForEdit(message);
+                void startEdit(message);
               }}
             />
           )}

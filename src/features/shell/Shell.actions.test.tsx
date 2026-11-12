@@ -33,6 +33,7 @@ const ipc = vi.hoisted(() => ({
   deactivateSkill: vi.fn(),
   compactChat: vi.fn(),
   takeUserMessage: vi.fn(),
+  peekUserMessage: vi.fn(),
   rowsAfter: vi.fn(),
   chatFullness: vi.fn(),
 }));
@@ -84,6 +85,7 @@ beforeEach(() => {
   ipc.rowsAfter.mockResolvedValue(2);
   ipc.retryTurn.mockResolvedValue(done);
   ipc.takeUserMessage.mockResolvedValue({ text: "second q", attachments: [], removed: 2 });
+  ipc.peekUserMessage.mockResolvedValue({ text: "second q", attachments: [] });
 });
 
 describe("Shell retry", () => {
@@ -124,20 +126,23 @@ describe("Shell retry", () => {
 });
 
 describe("Shell keys and habits", () => {
-  it("Up arrow in the empty box edits the latest user message", async () => {
+  it("Up arrow in the empty box edits the latest user message without deleting anything", async () => {
     render(<Shell />);
     await openChat();
-    ipc.getMessages.mockResolvedValue(THREAD.slice(0, 2));
     await userEvent.type(await box(), "{ArrowUp}");
-    await waitFor(() => expect(ipc.takeUserMessage).toHaveBeenCalledWith("c1", "u2"));
+    await waitFor(() => expect(ipc.peekUserMessage).toHaveBeenCalledWith("c1", "u2"));
     expect(ipc.rowsAfter).not.toHaveBeenCalled();
     await waitFor(async () => expect(await box()).toHaveValue("second q"));
+    expect(screen.getByText("Editing a message")).toBeInTheDocument();
+    expect(ipc.takeUserMessage).not.toHaveBeenCalled();
+    expect(screen.getByText("second a")).toBeInTheDocument();
   });
 
   it("Up arrow with text in the box does not edit", async () => {
     render(<Shell />);
     await openChat();
     await userEvent.type(await box(), "abc{ArrowUp}");
+    expect(ipc.peekUserMessage).not.toHaveBeenCalled();
     expect(ipc.takeUserMessage).not.toHaveBeenCalled();
   });
 
@@ -148,6 +153,7 @@ describe("Shell keys and habits", () => {
     await userEvent.type(await box(), "go{Enter}");
     await screen.findByRole("button", { name: "Stop" });
     await userEvent.type(await box(), "{ArrowUp}");
+    expect(ipc.peekUserMessage).not.toHaveBeenCalled();
     expect(ipc.takeUserMessage).not.toHaveBeenCalled();
   });
 

@@ -31,6 +31,12 @@ export interface SendIntent {
   skill?: string;
 }
 
+/** What the box holds: its text and attachment chips. */
+export interface BoxContents {
+  text: string;
+  attachments: AttachmentInput[];
+}
+
 /** What menus use to edit the box and send from it; the Composer still owns the text. */
 export interface ComposerControl {
   /** Replaces the text, with the caret at `caret` (default: the end). */
@@ -45,11 +51,16 @@ export interface ComposerControl {
   addFiles(files: File[]): Promise<void>;
   /** Puts the caret in the box. */
   focus(): void;
+  /** What the box holds now. */
+  contents(): BoxContents;
+  /** Replaces the text and the chips (no limits are checked), with the caret at the end. */
+  replace(text: string, attachments: AttachmentInput[]): void;
 }
 
 interface Props {
   /**
-   * The draft is cleared once this returns or its promise resolves. If the
+   * The draft is cleared once this returns or its promise resolves; if it
+   * resolves to contents, the box holds those instead of nothing. If the
    * promise rejects, the text and attachments stay in the box; showing the
    * error is the handler's job.
    */
@@ -57,7 +68,7 @@ interface Props {
     text: string,
     attachments: AttachmentInput[],
     intent?: SendIntent,
-  ) => void | Promise<void>;
+  ) => void | BoxContents | Promise<void | BoxContents>;
   /** Told the text and caret after every edit or caret move, for menus that follow the box. */
   onTextChange?: (text: string, caret: number) => void;
   /** Sees a key first; returning true means it was handled and the box ignores it. */
@@ -72,6 +83,8 @@ interface Props {
   sendWithModifier?: boolean;
   /** Up arrow in an empty box. */
   onEmptyUp?: () => void;
+  /** Esc when no reply is running (and no menu took the key). */
+  onEscape?: () => void;
   /** Rendered just above the box (a popover menu), anchored to it. */
   menu?: ReactNode;
   /** Extra attributes for the text field (combobox wiring for a menu). */
@@ -99,6 +112,7 @@ export default function Composer({
   draftId,
   sendWithModifier = false,
   onEmptyUp,
+  onEscape,
   menu,
   fieldAria,
   onStop,
@@ -111,6 +125,8 @@ export default function Composer({
 }: Props) {
   const [text, setText] = useState("");
   const [files, setFiles] = useState<AttachmentInput[]>([]);
+  const filesRef = useRef(files);
+  filesRef.current = files;
   const [refusals, setRefusals] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
@@ -192,19 +208,22 @@ export default function Composer({
     const body = override ?? text;
     if (!canSendText(body)) return;
     setSending(true);
+    let after: BoxContents | void;
     try {
-      await (intent ? onSend(body.trim(), files, intent) : onSend(body.trim(), files));
+      after = await (intent ? onSend(body.trim(), files, intent) : onSend(body.trim(), files));
     } catch {
       // Not accepted: keep the draft so nothing typed or attached is lost.
       return;
     } finally {
       setSending(false);
     }
+    const next = after ?? { text: "", attachments: [] };
     if (draftTimer.current !== null) clearTimeout(draftTimer.current);
     draftTimer.current = null;
-    if (draftKey.current !== undefined) clearDraft(draftKey.current);
-    change("", 0);
-    setFiles([]);
+    if (draftKey.current !== undefined) persist(draftKey.current, next.text);
+    caretAt.current = next.text.length;
+    change(next.text, next.text.length);
+    setFiles(next.attachments);
     setRefusals([]);
   };
 
@@ -293,6 +312,14 @@ export default function Composer({
     refuse: (message) => setRefusals([message]),
     addFiles,
     focus: () => field.current?.focus(),
+    contents: () => ({ text: latest.current, attachments: filesRef.current }),
+    replace(next, attachments) {
+      caretAt.current = next.length;
+      change(next, next.length);
+      filesRef.current = attachments;
+      setFiles(attachments);
+      setRefusals([]);
+    },
   }));
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -300,9 +327,10 @@ export default function Composer({
       e.preventDefault();
       return;
     }
-    if (e.key === "Escape" && streaming && !e.nativeEvent.isComposing) {
+    if (e.key === "Escape" && !e.nativeEvent.isComposing && (streaming || onEscape)) {
       e.preventDefault();
-      onStop?.();
+      if (streaming) onStop?.();
+      else onEscape?.();
       return;
     }
     if (

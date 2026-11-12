@@ -231,3 +231,53 @@ describe("Composer drafts", () => {
   });
 });
 
+
+describe("Composer editing support", () => {
+  const A = { name: "a.txt", mime: "text/plain", data_base64: "eA==" };
+  const B = { name: "b.txt", mime: "text/plain", data_base64: "eQ==" };
+
+  it("contents reads the box and replace sets text and chips exactly", async () => {
+    const ref = createRef<ComposerControl>();
+    render(<Composer onSend={vi.fn()} controlRef={ref} />);
+    await userEvent.type(box(), "half");
+    act(() => {
+      ref.current!.addAttachment(A);
+    });
+    expect(ref.current!.contents()).toEqual({ text: "half", attachments: [A] });
+    act(() => ref.current!.replace("edit me", [B]));
+    expect(box()).toHaveValue("edit me");
+    expect(screen.queryByText("a.txt")).toBeNull();
+    expect(screen.getByText("b.txt")).toBeInTheDocument();
+    expect(ref.current!.contents()).toEqual({ text: "edit me", attachments: [B] });
+  });
+
+  it("Esc calls onEscape when no reply is running", async () => {
+    const onEscape = vi.fn();
+    const onStop = vi.fn();
+    render(<Composer onSend={vi.fn()} onEscape={onEscape} onStop={onStop} />);
+    await userEvent.type(box(), "x{Escape}");
+    expect(onEscape).toHaveBeenCalledTimes(1);
+    expect(onStop).not.toHaveBeenCalled();
+  });
+
+  it("Esc stops a running reply instead of calling onEscape, and an open menu sees it first", async () => {
+    const onEscape = vi.fn();
+    const onStop = vi.fn();
+    const { rerender } = render(<Composer onSend={vi.fn()} onEscape={onEscape} onStop={onStop} streaming />);
+    await userEvent.type(box(), "{Escape}");
+    expect(onStop).toHaveBeenCalledTimes(1);
+    rerender(<Composer onSend={vi.fn()} onEscape={onEscape} onStop={onStop} onKeyIntercept={() => true} />);
+    await userEvent.type(box(), "{Escape}");
+    expect(onEscape).not.toHaveBeenCalled();
+  });
+
+  it("a send that resolves to contents leaves those in the box and in the draft", async () => {
+    const ref = createRef<ComposerControl>();
+    const onSend = vi.fn(async () => ({ text: "kept aside", attachments: [A] }));
+    render(<Composer onSend={onSend} controlRef={ref} draftId="c1" />);
+    await userEvent.type(box(), "the edit{Enter}");
+    await waitFor(() => expect(box()).toHaveValue("kept aside"));
+    expect(screen.getByText("a.txt")).toBeInTheDocument();
+    expect(localStorage.getItem("draft:c1")).toBe("kept aside");
+  });
+});

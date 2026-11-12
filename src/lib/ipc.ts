@@ -210,6 +210,16 @@ export interface TakenMessage {
   removed: number;
 }
 
+/** A user message read back for editing; nothing is removed. */
+export interface PeekedMessage {
+  text: string;
+  attachments: AttachmentInput[];
+}
+
+/** The user message's text and attachments, for the message box. Deletes nothing. */
+export const peekUserMessage = (chatId: string, messageId: string) =>
+  invoke<PeekedMessage>("peek_user_message", { chatId, messageId });
+
 /** Deletes the user message and everything after it, returning it for the message box. */
 export const takeUserMessage = (chatId: string, messageId: string) =>
   invoke<TakenMessage>("take_user_message", { chatId, messageId });

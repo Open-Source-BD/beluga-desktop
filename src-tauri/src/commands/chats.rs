@@ -19,6 +19,13 @@ pub struct TakenMessage {
     pub removed: u32,
 }
 
+/// A user message read for editing; nothing is removed until the edit is sent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PeekedMessage {
+    pub text: String,
+    pub attachments: Vec<AttachmentInput>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ChatUsage {
     pub requests: u32,
@@ -85,6 +92,19 @@ fn user_message(
 /// How many rows taking `message_id` back would remove after it.
 pub fn rows_after(s: &AppState, chat_id: &str, message_id: &str) -> Result<u32, UiError> {
     user_message(s, chat_id, message_id).map(|(_, after)| after)
+}
+
+/// The user message's text and attachments, for the message box. Deletes nothing.
+pub fn peek_user_message(
+    s: &AppState,
+    chat_id: &str,
+    message_id: &str,
+) -> Result<PeekedMessage, UiError> {
+    let (message, _) = user_message(s, chat_id, message_id)?;
+    Ok(PeekedMessage {
+        text: message.text,
+        attachments: message.attachments.into_iter().map(Into::into).collect(),
+    })
 }
 
 /// Deletes the user message and everything after it, returning its text and

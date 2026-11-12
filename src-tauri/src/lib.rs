@@ -55,6 +55,7 @@ pub fn run() {
             h::send_message,
             h::retry_turn,
             h::take_user_message,
+            h::peek_user_message,
             h::rows_after,
             h::compact_chat,
             h::export_chat_with_dialog,

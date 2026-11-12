@@ -4,7 +4,7 @@
 
 use super::auth::{AuthStatus, AuthUrl, StorageChoice};
 use super::chat_state::{ChatState, Fullness};
-use super::chats::{ChatUsage, TakenMessage};
+use super::chats::{ChatUsage, PeekedMessage, TakenMessage};
 use super::install::{AddPreview, AddSource};
 use super::skills::{LicenseFile, SkillsStatus};
 use super::turn::{AttachmentInput, TurnResult};
@@ -156,6 +156,15 @@ pub async fn take_user_message(
     message_id: String,
 ) -> Result<TakenMessage, UiError> {
     chats::take_user_message(&state, &chat_id, &message_id)
+}
+
+#[tauri::command]
+pub async fn peek_user_message(
+    state: S<'_>,
+    chat_id: String,
+    message_id: String,
+) -> Result<PeekedMessage, UiError> {
+    chats::peek_user_message(&state, &chat_id, &message_id)
 }
 
 #[tauri::command]

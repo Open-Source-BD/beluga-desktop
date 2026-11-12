@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PackView, SkillView, StoredMessage, TurnResult } from "../../lib/ipc";
@@ -25,7 +25,9 @@ const ipc = vi.hoisted(() => ({
   deactivateSkill: vi.fn(),
   compactChat: vi.fn(),
   takeUserMessage: vi.fn(),
+  peekUserMessage: vi.fn(),
   rowsAfter: vi.fn(),
+  retryTurn: vi.fn(),
   chatFullness: vi.fn(),
 }));
 vi.mock("../../lib/ipc", () => ipc);
@@ -81,26 +83,30 @@ beforeEach(() => {
   ipc.stop.mockResolvedValue(undefined);
   ipc.rowsAfter.mockResolvedValue(2);
   ipc.takeUserMessage.mockResolvedValue({ text: "second q", attachments: [], removed: 2 });
+  ipc.peekUserMessage.mockResolvedValue({ text: "second q", attachments: [] });
+  ipc.activateSkill.mockResolvedValue(EMPTY_STATE);
 });
 
 describe("Shell edit and resend", () => {
-  it("editing the latest user message acts at once: takes it, reloads, restores text and chips", async () => {
-    ipc.takeUserMessage.mockResolvedValue({
+  const editing = () => screen.queryByText("Editing a message");
+  const cancelEdit = () => userEvent.click(within(screen.getByTestId("editing")).getByRole("button", { name: "Cancel" }));
+
+  it("editing the latest user message acts at once: deletes nothing, restores text and chips", async () => {
+    ipc.peekUserMessage.mockResolvedValue({
       text: "second q",
       attachments: [{ name: "a.txt", mime: "text/plain", data_base64: "eA==" }],
-      removed: 2,
     });
     render(<Shell />);
     await openChat();
-    ipc.getMessages.mockResolvedValue(THREAD.slice(0, 2));
     const pencils = screen.getAllByRole("button", { name: "Edit message" });
     await userEvent.click(pencils[1]);
-    await waitFor(() => expect(ipc.takeUserMessage).toHaveBeenCalledWith("c1", "u2"));
+    await waitFor(() => expect(ipc.peekUserMessage).toHaveBeenCalledWith("c1", "u2"));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(await box()).toHaveValue("second q");
     expect(within(screen.getByLabelText("Attachments")).getByText("a.txt")).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByText("second a")).toBeNull());
-    expect(screen.getByText("first a")).toBeInTheDocument();
+    expect(editing()).toBeInTheDocument();
+    expect(ipc.takeUserMessage).not.toHaveBeenCalled();
+    expect(screen.getByText("second a")).toBeInTheDocument();
   });
 
   it("an earlier message asks first, with the count; Cancel changes nothing", async () => {
@@ -111,19 +117,167 @@ describe("Shell edit and resend", () => {
     expect(ipc.rowsAfter).toHaveBeenCalledWith("c1", "u1");
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+    expect(ipc.peekUserMessage).not.toHaveBeenCalled();
     expect(ipc.takeUserMessage).not.toHaveBeenCalled();
     expect(await box()).toHaveValue("");
+    expect(editing()).toBeNull();
   });
 
-  it("Edit and remove takes the message", async () => {
-    ipc.takeUserMessage.mockResolvedValue({ text: "first q", attachments: [], removed: 2 });
+  it("Edit and remove puts the message in the box and deletes nothing yet", async () => {
+    ipc.peekUserMessage.mockResolvedValue({ text: "first q", attachments: [] });
     render(<Shell />);
     await openChat();
     await userEvent.click(screen.getAllByRole("button", { name: "Edit message" })[0]);
     await userEvent.click(await screen.findByRole("button", { name: "Edit and remove" }));
-    await waitFor(() => expect(ipc.takeUserMessage).toHaveBeenCalledWith("c1", "u1"));
+    await waitFor(() => expect(ipc.peekUserMessage).toHaveBeenCalledWith("c1", "u1"));
     await waitFor(async () => expect(await box()).toHaveValue("first q"));
     expect(screen.queryByRole("dialog")).toBeNull();
+    expect(ipc.takeUserMessage).not.toHaveBeenCalled();
+    expect(screen.getByText("second a")).toBeInTheDocument();
+  });
+
+  it("sending the edit removes the message and what followed, then sends the new text", async () => {
+    ipc.takeUserMessage.mockResolvedValue({ text: "second q", attachments: [], removed: 1 });
+    ipc.sendMessage.mockReturnValue(new Promise(() => {}));
+    render(<Shell />);
+    await openChat();
+    await userEvent.click(screen.getAllByRole("button", { name: "Edit message" })[1]);
+    await waitFor(async () => expect(await box()).toHaveValue("second q"));
+    ipc.getMessages.mockResolvedValue(THREAD.slice(0, 2));
+    await userEvent.type(await box(), " again{Enter}");
+    await waitFor(() => expect(ipc.sendMessage).toHaveBeenCalledTimes(1));
+    expect(ipc.takeUserMessage).toHaveBeenCalledWith("c1", "u2");
+    expect(ipc.takeUserMessage.mock.invocationCallOrder[0]).toBeLessThan(ipc.sendMessage.mock.invocationCallOrder[0]);
+    expect(ipc.sendMessage.mock.calls[0].slice(0, 2)).toEqual(["c1", "second q again"]);
+    expect(editing()).toBeNull();
+  });
+
+  it("an edit sent with a /skill-id activates the skill like a normal send", async () => {
+    ipc.sendMessage.mockReturnValue(new Promise(() => {}));
+    render(<Shell />);
+    await openChat();
+    await userEvent.click(screen.getAllByRole("button", { name: "Edit message" })[1]);
+    await waitFor(async () => expect(await box()).toHaveValue("second q"));
+    const field = await box();
+    await userEvent.clear(field);
+    await userEvent.type(field, "/pk:skill look");
+    fireEvent.submit(field.closest("form")!);
+    await waitFor(() => expect(ipc.sendMessage).toHaveBeenCalledTimes(1));
+    expect(ipc.takeUserMessage).toHaveBeenCalledWith("c1", "u2");
+    expect(ipc.activateSkill).toHaveBeenCalledWith("c1", "pk:skill", "test/model");
+    expect(ipc.sendMessage.mock.calls[0][1]).toBe("look");
+  });
+
+  it("Cancel puts back what the box held, keeps it as the draft and changes nothing", async () => {
+    localStorage.clear();
+    render(<Shell />);
+    await openChat();
+    await userEvent.type(await box(), "half done");
+    await userEvent.click(screen.getAllByRole("button", { name: "Edit message" })[1]);
+    await waitFor(async () => expect(await box()).toHaveValue("second q"));
+    await cancelEdit();
+    expect(await box()).toHaveValue("half done");
+    expect(editing()).toBeNull();
+    expect(localStorage.getItem("draft:c1")).toBe("half done");
+    expect(ipc.takeUserMessage).not.toHaveBeenCalled();
+    expect(screen.getByText("second a")).toBeInTheDocument();
+  });
+
+  it("Esc cancels the edit", async () => {
+    render(<Shell />);
+    await openChat();
+    await userEvent.click(screen.getAllByRole("button", { name: "Edit message" })[1]);
+    await waitFor(async () => expect(await box()).toHaveValue("second q"));
+    await userEvent.type(await box(), "{Escape}");
+    expect(await box()).toHaveValue("");
+    expect(editing()).toBeNull();
+    expect(ipc.stop).not.toHaveBeenCalled();
+  });
+
+  it("after the edit is sent, the box gets back what it held before", async () => {
+    ipc.sendMessage.mockReturnValue(new Promise(() => {}));
+    render(<Shell />);
+    await openChat();
+    await userEvent.type(await box(), "half done");
+    await userEvent.click(screen.getAllByRole("button", { name: "Edit message" })[1]);
+    await waitFor(async () => expect(await box()).toHaveValue("second q"));
+    await userEvent.type(await box(), "{Enter}");
+    await waitFor(() => expect(ipc.sendMessage).toHaveBeenCalledTimes(1));
+    expect(ipc.sendMessage.mock.calls[0][1]).toBe("second q");
+    await waitFor(async () => expect(await box()).toHaveValue("half done"));
+  });
+
+  it("a failed removal sends nothing, keeps the text and shows why", async () => {
+    ipc.takeUserMessage.mockRejectedValue({ kind: "other", message: "That message cannot be edited.", retryable: false });
+    render(<Shell />);
+    await openChat();
+    await userEvent.click(screen.getAllByRole("button", { name: "Edit message" })[1]);
+    await waitFor(async () => expect(await box()).toHaveValue("second q"));
+    await userEvent.type(await box(), "!{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("That message cannot be edited.");
+    expect(ipc.sendMessage).not.toHaveBeenCalled();
+    expect(await box()).toHaveValue("second q!");
+  });
+
+  it("a send refused after the removal keeps the text in the box as an ordinary message", async () => {
+    ipc.activateSkill.mockRejectedValue({ kind: "other", message: "That skill is off.", retryable: false });
+    render(<Shell />);
+    await openChat();
+    await userEvent.click(screen.getAllByRole("button", { name: "Edit message" })[1]);
+    await waitFor(async () => expect(await box()).toHaveValue("second q"));
+    const field = await box();
+    await userEvent.clear(field);
+    await userEvent.type(field, "/pk:skill look");
+    fireEvent.submit(field.closest("form")!);
+    expect(await screen.findByRole("alert")).toHaveTextContent("That skill is off.");
+    expect(ipc.takeUserMessage).toHaveBeenCalledWith("c1", "u2");
+    expect(ipc.sendMessage).not.toHaveBeenCalled();
+    expect(await box()).toHaveValue("/pk:skill look");
+    expect(editing()).toBeNull();
+  });
+
+  it("an emptied box cannot send the edit, so nothing is removed", async () => {
+    render(<Shell />);
+    await openChat();
+    await userEvent.click(screen.getAllByRole("button", { name: "Edit message" })[1]);
+    await waitFor(async () => expect(await box()).toHaveValue("second q"));
+    await userEvent.clear(await box());
+    await userEvent.type(await box(), "{Enter}");
+    expect(ipc.takeUserMessage).not.toHaveBeenCalled();
+    expect(ipc.sendMessage).not.toHaveBeenCalled();
+    expect(editing()).toBeInTheDocument();
+  });
+
+  it("switching chats drops the edit; the chat keeps what the box held before as its draft", async () => {
+    localStorage.clear();
+    ipc.listChats.mockResolvedValue([CHAT, { id: "c2", title: "Other chat", model_id: "test/model", updated_at: 0 }]);
+    render(<Shell />);
+    await openChat();
+    await userEvent.type(await box(), "half done");
+    await userEvent.click(screen.getAllByRole("button", { name: "Edit message" })[1]);
+    await waitFor(async () => expect(await box()).toHaveValue("second q"));
+    await userEvent.click(screen.getByText("Other chat"));
+    await waitFor(() => expect(editing()).toBeNull());
+    expect(localStorage.getItem("draft:c1")).toBe("half done");
+    await userEvent.click(screen.getByText("Login page"));
+    await waitFor(async () => expect(await box()).toHaveValue("half done"));
+    expect(editing()).toBeNull();
+    expect(ipc.takeUserMessage).not.toHaveBeenCalled();
+  });
+
+  it("a reply started another way drops the edit", async () => {
+    ipc.retryTurn.mockReturnValue(new Promise(() => {}));
+    render(<Shell />);
+    await openChat();
+    await userEvent.click(screen.getAllByRole("button", { name: "Edit message" })[0]);
+    await userEvent.click(await screen.findByRole("button", { name: "Edit and remove" }));
+    await waitFor(() => expect(editing()).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Retry" }));
+    await screen.findByRole("button", { name: "Stop" });
+    await waitFor(() => expect(editing()).toBeNull());
+    expect(await box()).toHaveValue("");
+    expect(ipc.takeUserMessage).not.toHaveBeenCalled();
   });
 
   it("strips a leading /skill-id for an active skill from the restored text", async () => {
@@ -131,7 +285,7 @@ describe("Shell edit and resend", () => {
       ...EMPTY_STATE,
       active_skills: [{ id: "pk:skill", name: "skill", too_long: false, acts_on_computer: false, unavailable: false }],
     });
-    ipc.takeUserMessage.mockResolvedValue({ text: "/pk:skill do the thing", attachments: [], removed: 2 });
+    ipc.peekUserMessage.mockResolvedValue({ text: "/pk:skill do the thing", attachments: [] });
     render(<Shell />);
     await openChat();
     await screen.findByText("skill");
@@ -140,7 +294,7 @@ describe("Shell edit and resend", () => {
   });
 
   it("a leading /skill-id that is not active stays", async () => {
-    ipc.takeUserMessage.mockResolvedValue({ text: "/pk:skill do the thing", attachments: [], removed: 2 });
+    ipc.peekUserMessage.mockResolvedValue({ text: "/pk:skill do the thing", attachments: [] });
     render(<Shell />);
     await openChat();
     await userEvent.click(screen.getAllByRole("button", { name: "Edit message" })[1]);

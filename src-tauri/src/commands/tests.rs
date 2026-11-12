@@ -1060,6 +1060,7 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
     .await));
     let first = chats::get_messages(&h.state, &id).unwrap()[0].id.clone();
     record(to(&chats::rows_after(&h.state, &id, &first)));
+    record(to(&chats::peek_user_message(&h.state, &id, &first)));
     record(to(&chats::take_user_message(&h.state, &id, &first)));
     turn::stop(&h.state, &id);
     record(to(&auth::sign_out(&h.state)));
@@ -1070,8 +1071,8 @@ async fn no_command_return_value_or_event_payload_contains_the_key() {
         record(json!([name, payload]));
     }
 
-    // 33 command results plus at least one event.
-    assert!(outputs.len() >= 34, "{}", outputs.len());
+    // 34 command results plus at least one event.
+    assert!(outputs.len() >= 35, "{}", outputs.len());
     for out in &outputs {
         assert!(!out.contains(KEY), "key leaked in {out}");
     }
@@ -2342,6 +2343,81 @@ fn take_is_refused_while_a_turn_runs_and_for_anything_but_a_user_message_of_that
     );
     assert_eq!(texts(&h, &chat.id), before);
     assert_eq!(texts(&h, &elsewhere.id), ["Elsewhere"]);
+}
+
+#[test]
+fn peek_returns_the_message_and_deletes_nothing() {
+    let h = signed_in("http://unused.invalid");
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    let store = &h.state.store;
+    store
+        .append_message(&chat.id, "user", "First", &[], false)
+        .unwrap();
+    let two = att("two.png", "image/png", &[1, 2, 3]);
+    let second = store
+        .append_message(&chat.id, "user", "Second", &[two.clone().into()], false)
+        .unwrap();
+    store
+        .append_message(&chat.id, "assistant", "Reply 2", &[], false)
+        .unwrap();
+    let before = texts(&h, &chat.id);
+
+    let peeked = chats::peek_user_message(&h.state, &chat.id, &second.id).unwrap();
+    assert_eq!(
+        peeked,
+        chats::PeekedMessage {
+            text: "Second".into(),
+            attachments: vec![two],
+        }
+    );
+    // The shape the message box reads.
+    assert_eq!(
+        to(&peeked),
+        json!({
+            "text": "Second",
+            "attachments": [{"name": "two.png", "mime": "image/png", "data_base64": b64(&[1, 2, 3])}],
+        })
+    );
+    assert_eq!(texts(&h, &chat.id), before);
+}
+
+#[test]
+fn peek_is_refused_for_anything_but_a_user_message_of_that_chat_and_works_during_a_turn() {
+    let h = signed_in("http://unused.invalid");
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    let elsewhere = chats::create_chat(&h.state, "m/a").unwrap();
+    let rows = seed(
+        &h,
+        &chat.id,
+        &[
+            ("user", "Hi"),
+            ("assistant", "Hello"),
+            ("note", "Using p:a"),
+        ],
+    );
+    let theirs = seed(&h, &elsewhere.id, &[("user", "Elsewhere")]);
+    let cannot = Err(other("That message cannot be edited."));
+    for id in [&rows[1].id, &rows[2].id, &theirs[0].id, &"nope".to_string()] {
+        assert_eq!(chats::peek_user_message(&h.state, &chat.id, id), cannot);
+    }
+    assert_eq!(
+        chats::peek_user_message(&h.state, "nope", &rows[0].id),
+        Err(other(NO_CHAT))
+    );
+    // Reading changes nothing, so a running reply does not stop it.
+    h.state.turns().insert(
+        chat.id.clone(),
+        RunningTurn {
+            id: 99,
+            cancel: CancellationToken::new(),
+        },
+    );
+    assert_eq!(
+        chats::peek_user_message(&h.state, &chat.id, &rows[0].id).map(|p| p.text),
+        Ok("Hi".to_string())
+    );
+    h.state.turns().remove(&chat.id);
+    assert_eq!(texts(&h, &chat.id).len(), 3);
 }
 
 #[test]
