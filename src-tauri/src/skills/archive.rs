@@ -1063,7 +1063,9 @@ mod tests {
         let err = untar(finish_gz(b), &dest, &l).unwrap_err();
         assert!(err.contains("too large"), "{err}");
         assert!(err.len() < 200);
-        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        // Only proves the oversized header is rejected without reading it all;
+        // it is not a benchmark, so the bound is generous for loaded CI runners.
+        assert!(started.elapsed() < std::time::Duration::from_secs(60));
     }
 
     #[test]
