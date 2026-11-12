@@ -1,4 +1,4 @@
-import { isValidElement, type ReactNode } from "react";
+import { isValidElement, memo, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import CodeBlock from "./CodeBlock";
@@ -34,7 +34,7 @@ const components: Components = {
   },
 };
 
-export default function Markdown({ text }: { text: string }) {
+function Markdown({ text }: { text: string }) {
   return (
     <div className="md">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
@@ -43,3 +43,6 @@ export default function Markdown({ text }: { text: string }) {
     </div>
   );
 }
+
+// Settled replies do not render again while another part of the thread streams.
+export default memo(Markdown);

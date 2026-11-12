@@ -118,3 +118,9 @@ export const SkillsIcon = ({ size = 14 }: IconProps) => (
     <path d="M17 14v6M14 17h6" />
   </Stroke>
 );
+
+export const ChevronIcon = ({ size = 12 }: IconProps) => (
+  <Stroke size={size} strokeWidth={2.4}>
+    <path d="m9 6 6 6-6 6" />
+  </Stroke>
+);

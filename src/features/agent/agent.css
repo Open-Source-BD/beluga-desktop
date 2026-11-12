@@ -1,0 +1,115 @@
+/* The trail: a quiet indented line per tool call, opening to its detail. */
+.trail {
+  list-style: none;
+  margin: -8px 0 0 4px;
+  padding: 0 0 0 14px;
+  border-left: 2px solid var(--line);
+  display: grid;
+  gap: 3px;
+  color: var(--mid);
+  font-size: 13px;
+}
+.trail-line {
+  overflow-wrap: anywhere;
+}
+.trail-line.plain {
+  padding: 1px 0;
+}
+.trail-btn {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  padding: 1px 4px 1px 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.trail-btn:hover {
+  color: var(--deep);
+}
+.trail-btn:focus-visible {
+  outline: 2px solid var(--sonar);
+  outline-offset: 1px;
+}
+.trail-chev {
+  display: inline-flex;
+  flex: none;
+  transition: transform 0.12s;
+}
+.trail-chev[data-open="true"] {
+  transform: rotate(90deg);
+}
+.trail-state {
+  font-size: 12px;
+  font-weight: 600;
+}
+.trail-state[data-state="error"] {
+  color: var(--ask-ink);
+}
+.trail-detail {
+  margin: 4px 0 4px 17px;
+  padding: 8px 10px;
+  max-height: 280px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--floe);
+  color: var(--text2);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The checklist, pinned above the message box. */
+.plan {
+  width: min(680px, 100% - 48px);
+  margin: 0 auto 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--white);
+  font-size: 13px;
+  color: var(--text2);
+}
+.plan ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+}
+.plan li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.plan-mark {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--mid);
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+.plan li[data-state="in_progress"] .plan-mark {
+  border-color: var(--sonar);
+  background: radial-gradient(circle, var(--sonar) 40%, transparent 45%);
+}
+.plan li[data-state="done"] .plan-mark {
+  border-color: var(--sonar);
+  background: var(--sonar);
+}
+.plan li[data-state="done"] .plan-text {
+  color: var(--mid);
+  text-decoration: line-through;
+}
+.plan li[data-state="in_progress"] .plan-text {
+  color: var(--deep);
+  font-weight: 600;
+}

@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  chatUsage,
   compactChat,
   getMessages,
   retryTurn,
   sendMessage,
   stop as stopTurn,
   type AttachmentInput,
+  type ChatUsage,
   type EngineEvent,
+  type PlanItem,
   type StoredMessage,
   type TurnResult,
   type UiError,
 } from "../../lib/ipc";
+import { OUTPUT_KEEP, type TrailEntry } from "../agent/trailEntries";
 import { toUiError } from "./errors";
 
-export type ChatStatus = "idle" | "streaming" | "failed" | "interrupted";
+/** "paused": a project task stopped and waits for the user; the chat is usable and nothing failed. */
+export type ChatStatus = "idle" | "streaming" | "failed" | "interrupted" | "paused";
 
 export interface ChatState {
   messages: StoredMessage[];
@@ -24,6 +29,21 @@ export interface ChatState {
   error: UiError | null;
   /** The send was rejected before the core stored anything: `pendingUser` was not sent. */
   unsent: { attachments: AttachmentInput[] } | null;
+  /** Why the task paused (a `PauseReason`), while `status` is "paused". */
+  pausedReason: string | null;
+  /** Tool calls of the running task, from events; stored ones leave when their result is stored. */
+  live: TrailEntry[];
+  /** Seconds of a rate-limit wait being served. */
+  waiting: number | null;
+  /** The checklist as the running task last sent it; null until it sends one. */
+  plan: PlanItem[] | null;
+  /** The task's running request and cost totals, and the chat's totals when it began. */
+  taskUsage: ChatUsage | null;
+  usageBase: ChatUsage | null;
+  /** Rows stored during the task (each `message_stored`). */
+  storedCount: number;
+  /** Changes when the checklist, background commands or approvals may have changed. */
+  taskTick: number;
 }
 
 const EMPTY: ChatState = {
@@ -33,6 +53,14 @@ const EMPTY: ChatState = {
   status: "idle",
   error: null,
   unsent: null,
+  pausedReason: null,
+  live: [],
+  waiting: null,
+  plan: null,
+  taskUsage: null,
+  usageBase: null,
+  storedCount: 0,
+  taskTick: 0,
 };
 
 /** How a /compact ended: the core's result, or the rejection when it never ran. */
@@ -42,6 +70,8 @@ export interface CompactOutcome {
 }
 
 export interface UseChat extends ChatState {
+  /** The chat's request count and cost including the running task; null when unknown. */
+  usage: ChatUsage | null;
   /**
    * Sends to `targetChatId` (default: the selected chat). Ignored while that chat is
    * streaming; the result says whether it was accepted.
@@ -75,6 +105,31 @@ export interface UseChat extends ChatState {
 }
 
 /**
+ * The state after rows were stored mid-task. The reply text that is now a stored
+ * row leaves the streaming text (the rest of it stays), a stored user row replaces
+ * the just-typed copy, and live lines whose result is stored leave the live list.
+ */
+function withStoredRows(s: ChatState, messages: StoredMessage[]): Partial<ChatState> {
+  const known = new Set(s.messages.map((m) => m.id));
+  const fresh = messages.filter((m) => !known.has(m.id));
+  let text = s.streamingText;
+  for (const m of fresh) {
+    const stored = m.text.trim();
+    if (m.kind !== "message" || m.role !== "assistant" || !stored) continue;
+    const lead = text.trimStart();
+    if (lead.startsWith(stored)) text = lead.slice(stored.length);
+  }
+  const resolved = new Set<string>();
+  for (const m of messages) if (m.kind === "tool" && m.tool_call_id) resolved.add(m.tool_call_id);
+  return {
+    messages,
+    streamingText: text,
+    pendingUser: fresh.some((m) => m.kind === "message" && m.role === "user") ? null : s.pendingUser,
+    live: s.live.filter((e) => !resolved.has(e.callId)),
+  };
+}
+
+/**
  * State is kept per chat, so a reply that is still streaming when the user
  * switches chats keeps updating its own thread and never leaks into the
  * visible one. The core stores the messages; this hook reloads them when a
@@ -88,6 +143,7 @@ export function useChat(
   const streaming = useRef(new Set<string>());
   const loadSeq = useRef<Record<string, number>>({});
   const lastModel = useRef<Record<string, string>>({});
+  const turnSeq = useRef<Record<string, number>>({});
   const onTurnEndRef = useRef(onTurnEnd);
   onTurnEndRef.current = onTurnEnd;
   const current = (chatId && states[chatId]) || EMPTY;
@@ -138,13 +194,32 @@ export function useChat(
       if (streaming.current.has(id)) return false;
       streaming.current.add(id);
       lastModel.current[id] = modelId;
+      const turn = (turnSeq.current[id] ?? 0) + 1;
+      turnSeq.current[id] = turn;
       patch(id, () => ({
         streamingText: "",
         pendingUser: pending?.text ?? null,
         status: "streaming",
         error: null,
         unsent: null,
+        pausedReason: null,
+        live: [],
+        waiting: null,
+        plan: null,
+        taskUsage: null,
+        usageBase: null,
       }));
+      // The task's usage events carry its own totals: remember the chat's as they stand now.
+      try {
+        chatUsage(id).then(
+          (u) => {
+            if (u && turnSeq.current[id] === turn) patch(id, () => ({ usageBase: u }));
+          },
+          () => {},
+        );
+      } catch {
+        // No base: the header keeps showing the stored totals.
+      }
 
       // The command's promise is the only end-of-turn signal: it settles after
       // the core has stored the reply. Channel events only carry reply text.
@@ -153,6 +228,7 @@ export function useChat(
         status: ChatStatus,
         error: UiError | null,
         notSent = false,
+        pausedReason: string | null = null,
       ) => {
         settled = true;
         const messages = await reload(id);
@@ -160,6 +236,11 @@ export function useChat(
         patch(id, (s) => ({
           messages: messages ?? s.messages,
           streamingText: "",
+          pausedReason,
+          waiting: null,
+          // The stored rows now hold every call; if they could not be read, keep the live lines.
+          live: messages ? [] : s.live,
+          taskTick: s.taskTick + 1,
           // A rejected send stored nothing: keep the text so it can be retried.
           pendingUser: notSent || !messages ? s.pendingUser : null,
           unsent: notSent && pending ? { attachments: pending.attachments } : null,
@@ -169,14 +250,79 @@ export function useChat(
         onTurnEndRef.current?.(id, status);
       };
       const onEvent = (event: EngineEvent) => {
-        if (settled || event.type !== "text_delta") return;
-        patch(id, (s) => ({ streamingText: s.streamingText + event.text }));
+        if (settled) return;
+        switch (event.type) {
+          case "text_delta":
+            patch(id, (s) => ({ streamingText: s.streamingText + event.text, waiting: null }));
+            break;
+          case "usage":
+            patch(id, () => ({
+              taskUsage: { requests: event.requests, cost_usd: event.cost_usd },
+              waiting: null,
+            }));
+            break;
+          case "tool_started":
+            patch(id, (s) => ({
+              waiting: null,
+              live: [
+                ...s.live.filter((e) => e.callId !== event.call_id),
+                { callId: event.call_id, name: event.name, summary: event.summary, status: "running" },
+              ],
+            }));
+            break;
+          case "tool_output":
+            patch(id, (s) => ({
+              live: s.live.map((e) =>
+                e.callId === event.call_id
+                  ? { ...e, output: ((e.output ?? "") + event.text).slice(-OUTPUT_KEEP) }
+                  : e,
+              ),
+            }));
+            break;
+          case "tool_finished":
+            patch(id, (s) => {
+              const done = {
+                status: event.status,
+                summary: event.summary,
+                detail: event.detail,
+              } as const;
+              const known = s.live.some((e) => e.callId === event.call_id);
+              return {
+                live: known
+                  ? s.live.map((e) =>
+                      // The detail replaces what streamed in.
+                      e.callId === event.call_id ? { ...e, ...done, output: undefined } : e,
+                    )
+                  : [...s.live, { callId: event.call_id, name: "", ...done }],
+              };
+            });
+            break;
+          case "plan_updated":
+            patch(id, (s) => ({ plan: event.items, taskTick: s.taskTick + 1 }));
+            break;
+          case "background_changed":
+          case "approval_cleared":
+            patch(id, (s) => ({ taskTick: s.taskTick + 1 }));
+            break;
+          case "waiting":
+            patch(id, () => ({ waiting: event.seconds }));
+            break;
+          case "message_stored":
+            patch(id, (s) => ({ storedCount: s.storedCount + 1 }));
+            void reload(id).then((messages) => {
+              if (messages && !settled) patch(id, (s) => withStoredRows(s, messages));
+            });
+            break;
+          default:
+            break;
+        }
       };
       run(onEvent).then(
         (r) => {
           if (r.status === "failed") {
             return settle("failed", r.error ?? toUiError(null));
           }
+          if (r.status === "paused") return settle("paused", null, false, r.reason);
           return settle(r.status === "interrupted" ? "interrupted" : "idle", null);
         },
         (e: unknown) => settle("failed", toUiError(e), true),
@@ -255,5 +401,13 @@ export function useChat(
     [chatId, start],
   );
 
-  return { ...current, send, stop, reload: reloadSelected, retry, regenerate, compact };
+  const usage =
+    current.usageBase && current.taskUsage
+      ? {
+          requests: current.usageBase.requests + current.taskUsage.requests,
+          cost_usd: current.usageBase.cost_usd + current.taskUsage.cost_usd,
+        }
+      : null;
+
+  return { ...current, usage, send, stop, reload: reloadSelected, retry, regenerate, compact };
 }

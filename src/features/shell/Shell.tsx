@@ -5,6 +5,8 @@ import ConfirmEdit from "../chat/ConfirmEdit";
 import ErrorNotice from "../chat/ErrorNotice";
 import Fullness from "../chat/Fullness";
 import Queued from "../chat/Queued";
+import PlanList from "../agent/PlanList";
+import { useTask } from "../agent/useTask";
 import { useFullness } from "../chat/useFullness";
 import { toUiError } from "../chat/errors";
 import { useChatCreation } from "../chat/useChatCreation";
@@ -48,6 +50,7 @@ import { readSendWithModifier } from "../settings/sendKey";
 import Sidebar from "./Sidebar";
 import "./shell.css";
 import "../chat/chat.css";
+import "../agent/agent.css";
 
 /** Suggested first messages for an empty chat; each only fills the box with its skill. */
 const STARTERS = [
@@ -157,6 +160,15 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     refreshChats,
   });
   const chat = useChat(selectedId, onTurnEnd);
+  const task = useTask(selectedId, chat.taskTick);
+  // The checklist: what the running task last sent, else the core's. It stays while items are
+  // open (a paused task) and goes when the task ends with everything done.
+  const planItems = chat.plan ?? task.plan;
+  const showPlan =
+    planItems.length > 0 &&
+    (planItems.some((i) => i.state !== "done") || (chat.status === "streaming" && chat.plan !== null));
+  // During a task the header follows its usage events; otherwise the stored totals.
+  const usage = chat.status === "streaming" && chat.usage ? chat.usage : allowance.usage;
   const selected = chats.find((c) => c.id === selectedId);
   const hasMessages = chat.messages.length > 0 || chat.pendingUser !== null;
 
@@ -468,6 +480,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     activeSkills.skills.map((s) => s.id).join(","),
     turn,
     draftChars,
+    chat.storedCount,
   );
   const queuedHere = selectedId ? queued[selectedId] : undefined;
 
@@ -499,6 +512,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   const composer = (
     <>
     {blocked && models && <LowAllowance models={models} onPick={chooseFromPicker} />}
+    {selectedId && showPlan && <PlanList items={planItems} />}
     {actions.panels}
     <ActiveSkills skills={activeSkills.skills} onRemove={activeSkills.remove} />
     {editing && editing.chatId === selectedId && (
@@ -616,9 +630,9 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
             <span className="ttl">{selected?.title ?? "New chat"}</span>
             {selectedId && fullness !== null && <Fullness percent={fullness} />}
             <div className="usage" data-slot="usage">
-              {selectedId && allowance.usage && (
+              {selectedId && usage && (
                 <>
-                  {`This chat: ${formatChatUsage(allowance.usage)}`}
+                  {`This chat: ${formatChatUsage(usage)}`}
                 </>
               )}
             </div>
@@ -645,6 +659,8 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
                 streamingText={chat.streamingText}
                 status={chat.status}
                 error={chat.error}
+                live={chat.live}
+                waiting={chat.waiting}
                 notSent={chat.unsent !== null}
                 onEdit={(m) => void editMessage(m)}
                 onRetryReply={() => chat.regenerate(modelId)}

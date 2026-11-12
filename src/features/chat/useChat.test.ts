@@ -65,19 +65,19 @@ describe("useChat", () => {
     expect(result.current.messages.map((m) => m.text)).toEqual(["hi", "Hello"]);
   });
 
-  it("a paused or unknown result settles as idle without an error", async () => {
+  it("a paused result settles as paused and an unknown one as idle, neither with an error", async () => {
     const { result } = renderHook(() => useChat("a"));
     await waitFor(() => expect(ipc.getMessages).toHaveBeenCalled());
     for (const status of ["paused", "something_new"]) {
       act(() => result.current.send("hi", [], "m1"));
       act(() => emit({ type: "paused", reason: "going_in_circles" }));
       await act(async () => finish({ status, reason: "going_in_circles", error: null } as TurnResult));
-      expect(result.current.status).toBe("idle");
+      expect(result.current.status).toBe(status === "paused" ? "paused" : "idle");
       expect(result.current.error).toBeNull();
     }
   });
 
-  it("the project-work events are ignored while streaming and a paused result settles as idle", async () => {
+  it("the project-work events leave the reply text alone and a paused result settles as paused", async () => {
     const { result } = renderHook(() => useChat("a"));
     await waitFor(() => expect(ipc.getMessages).toHaveBeenCalled());
     act(() => result.current.send("hi", [], "m1"));
@@ -95,7 +95,7 @@ describe("useChat", () => {
     expect(result.current.status).toBe("streaming");
     expect(result.current.streamingText).toBe("");
     await act(async () => finish({ status: "paused", reason: "daily_limit", error: null }));
-    expect(result.current.status).toBe("idle");
+    expect(result.current.status).toBe("paused");
     expect(result.current.error).toBeNull();
   });
 
