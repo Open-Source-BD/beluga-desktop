@@ -1,9 +1,15 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PackView, SkillView, StoredMessage, TurnResult } from "../../lib/ipc";
 import { model } from "../models/fixtures";
+import { useDropGuard } from "../../app/dropGuard";
 import Shell from "./Shell";
+
+function Guarded() {
+  useDropGuard();
+  return <Shell />;
+}
 
 const ipc = vi.hoisted(() => ({
   listModels: vi.fn(),
@@ -12,6 +18,7 @@ const ipc = vi.hoisted(() => ({
   createChat: vi.fn(),
   renameChat: vi.fn(),
   deleteChat: vi.fn(),
+  extraPacks: vi.fn(),
   sendMessage: vi.fn(),
   retryTurn: vi.fn(),
   stop: vi.fn(),
@@ -266,5 +273,125 @@ describe("Shell starter actions", () => {
     render(<Shell />);
     await openChat();
     expect(screen.queryByRole("button", { name: /Find and fix a bug/ })).toBeNull();
+  });
+});
+
+/** Row actions show while focus is inside the row. */
+const deleteFromSidebar = async (title: string) => {
+  const row = screen.getAllByRole("button", { name: title }).find((b) => b.classList.contains("row-main"));
+  await userEvent.click(row as HTMLElement);
+  await userEvent.click(await screen.findByRole("button", { name: `Delete ${title}` }));
+  await userEvent.click(await screen.findByRole("button", { name: "Delete chat" }));
+};
+
+describe("Shell deleting a chat", () => {
+  const OTHER_CHAT = { id: "c2", title: "Other chat", model_id: "test/model", updated_at: 0 };
+
+  it("removes the draft of a chat that is not selected", async () => {
+    ipc.listChats.mockResolvedValue([CHAT, OTHER_CHAT]);
+    ipc.deleteChat.mockResolvedValue(undefined);
+    localStorage.setItem("draft:c2", "old words");
+    render(<Shell />);
+    await openChat();
+    await deleteFromSidebar("Other chat");
+    await waitFor(() => expect(ipc.deleteChat).toHaveBeenCalledWith("c2"));
+    await waitFor(() => expect(localStorage.getItem("draft:c2")).toBeNull());
+  });
+
+  it("removes the draft of the selected chat even with unsaved text in the box", async () => {
+    ipc.deleteChat.mockResolvedValue(undefined);
+    render(<Shell />);
+    await openChat();
+    await userEvent.type(await box(), "typed just now");
+    await deleteFromSidebar("Login page");
+    await screen.findByRole("heading", { name: "What are we building?" });
+    await new Promise((r) => setTimeout(r, 400));
+    expect(localStorage.getItem("draft:c1")).toBeNull();
+  });
+});
+
+describe("Shell Cmd/Ctrl+N", () => {
+  const hello = () => screen.findByRole("heading", { name: "What are we building?" });
+  const press = (init: KeyboardEventInit) => fireEvent.keyDown(document.body, init);
+
+  it("uses the layout's own N (Dvorak puts N elsewhere) and ignores another letter on the KeyN position", async () => {
+    render(<Shell />);
+    await openChat();
+    press({ key: "b", code: "KeyN", ctrlKey: true });
+    expect(screen.queryByRole("heading", { name: "What are we building?" })).toBeNull();
+    press({ key: "n", code: "KeyL", metaKey: true });
+    await hello();
+  });
+
+  it("falls back to the KeyN position when the layout gives a non-Latin letter", async () => {
+    render(<Shell />);
+    await openChat();
+    press({ key: "т", code: "KeyN", ctrlKey: true });
+    await hello();
+  });
+
+  it("ignores Shift, Alt, composition and a bare N", async () => {
+    render(<Shell />);
+    await openChat();
+    press({ key: "n", ctrlKey: true, shiftKey: true });
+    press({ key: "n", ctrlKey: true, altKey: true });
+    press({ key: "n", ctrlKey: true, isComposing: true });
+    press({ key: "n" });
+    expect(screen.queryByRole("heading", { name: "What are we building?" })).toBeNull();
+  });
+
+  it("does nothing while a dialog is open", async () => {
+    render(<Shell />);
+    await openChat();
+    await userEvent.click(screen.getAllByRole("button", { name: "Edit message" })[0]);
+    await screen.findByRole("dialog");
+    press({ key: "n", ctrlKey: true });
+    expect(screen.queryByRole("heading", { name: "What are we building?" })).toBeNull();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("subscribes once, not on every render", async () => {
+    const add = vi.spyOn(window, "addEventListener");
+    render(<Shell />);
+    await openChat();
+    await userEvent.type(await box(), "abc");
+    expect(add.mock.calls.filter(([t]) => t === "keydown")).toHaveLength(1);
+    add.mockRestore();
+  });
+});
+
+describe("Shell drops outside the conversation", () => {
+  const dropOn = (el: Element) => {
+    const e = createEvent.drop(el, { dataTransfer: { types: ["Files"], files: [new File(["a"], "a.txt", { type: "text/plain" })] } });
+    fireEvent(el, e);
+    return e.defaultPrevented;
+  };
+
+  it("a drop on the sidebar is prevented and attaches nothing", async () => {
+    render(<Guarded />);
+    await openChat();
+    expect(dropOn(document.querySelector(".side") as Element)).toBe(true);
+    expect(screen.queryByLabelText("Attachments")).toBeNull();
+  });
+
+  it("a drop on the Skills screen is prevented and attaches nothing", async () => {
+    ipc.extraPacks.mockResolvedValue([]);
+    render(<Guarded />);
+    await openChat();
+    await userEvent.click(screen.getByRole("button", { name: /Skills/ }));
+    const screenEl = document.querySelector(".main") as HTMLElement;
+    expect(dropOn(screenEl)).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: /Back/ }));
+    expect(screen.queryByLabelText("Attachments")).toBeNull();
+  });
+
+  it("a drop on the conversation while a dialog is open attaches nothing", async () => {
+    render(<Guarded />);
+    await openChat();
+    await userEvent.click(screen.getAllByRole("button", { name: "Edit message" })[0]);
+    await screen.findByRole("dialog");
+    expect(dropOn(screen.getByRole("dialog"))).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByLabelText("Attachments")).toBeNull();
   });
 });

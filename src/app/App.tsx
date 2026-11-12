@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import Shell from "../features/shell/Shell";
 import SignIn from "../features/signin/SignIn";
+import { useDropGuard } from "./dropGuard";
 import { authStatus, onAuthRevoked } from "../lib/ipc";
 
 const REVOKED_NOTICE =
   "OpenRouter no longer accepts this key. Sign in again to continue. Your chats are still here.";
 
 export default function App() {
+  useDropGuard();
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [notice, setNotice] = useState<string | undefined>();
 

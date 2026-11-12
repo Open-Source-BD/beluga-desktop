@@ -78,4 +78,15 @@ describe("App", () => {
       ),
     ).toBeInTheDocument();
   });
+
+  it("stops the browser opening a file dropped on the sign-in screen", async () => {
+    ipc.authStatus.mockResolvedValue({ signed_in: false, storage: "keychain" });
+    render(<App />);
+    await screen.findByText(/sign in/i);
+    for (const type of ["dragover", "drop"]) {
+      const e = new Event(type, { bubbles: true, cancelable: true });
+      document.body.dispatchEvent(e);
+      expect(e.defaultPrevented).toBe(true);
+    }
+  });
 });

@@ -12,7 +12,11 @@ export function loadDraft(chatId: string | null): string {
   }
 }
 
+// Chats that were deleted: a late save (a pending timer flushed as the box unmounts) must not bring a draft back.
+const discarded = new Set<string>();
+
 export function saveDraft(chatId: string | null, text: string): void {
+  if (chatId !== null && discarded.has(chatId)) return;
   try {
     localStorage.setItem(key(chatId), text);
   } catch {
@@ -26,4 +30,10 @@ export function clearDraft(chatId: string | null): void {
   } catch {
     // Nothing to do.
   }
+}
+
+/** Removes a deleted chat's draft and refuses any later save for it. */
+export function discardDraft(chatId: string): void {
+  discarded.add(chatId);
+  clearDraft(chatId);
 }

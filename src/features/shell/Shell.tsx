@@ -8,6 +8,7 @@ import Queued from "../chat/Queued";
 import { useFullness } from "../chat/useFullness";
 import { toUiError } from "../chat/errors";
 import { useChatCreation } from "../chat/useChatCreation";
+import { discardDraft } from "../chat/drafts";
 import ModelPicker from "../models/ModelPicker";
 import { chooseModel } from "../models/defaultModel";
 import { readLastModel, useModels } from "../models/useModels";
@@ -285,22 +286,28 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     if (latest) void editMessage(latest);
   };
 
-  // Cmd/Ctrl+N starts a new chat.
+  // Cmd/Ctrl+N starts a new chat. The key is the one the layout produces when that is a
+  // Latin letter (Dvorak keeps its own N); on other layouts the physical N position stands in.
+  const selectRef = useRef(select);
+  selectRef.current = select;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "n") {
-        e.preventDefault();
-        select(null);
-      }
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.isComposing) return;
+      const isN = /^[a-z]$/i.test(e.key) ? e.key.toLowerCase() === "n" : e.code === "KeyN";
+      if (!isN || document.querySelector('[role="dialog"]')) return;
+      e.preventDefault();
+      selectRef.current(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  });
+  }, []);
 
   const dragHasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
+  // A dialog open over the conversation takes no drops.
+  const modalOpen = (e: DragEvent) => e.currentTarget.querySelector('[role="dialog"]') !== null;
   const drag = {
     onDragOver: (e: DragEvent) => {
-      if (!dragHasFiles(e)) return;
+      if (!dragHasFiles(e) || modalOpen(e)) return;
       e.preventDefault();
       setDropping(true);
     },
@@ -311,6 +318,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
       if (!dragHasFiles(e)) return;
       e.preventDefault();
       setDropping(false);
+      if (modalOpen(e)) return;
       void control.current?.addFiles(Array.from(e.dataTransfer.files));
     },
   };
@@ -457,6 +465,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
         onDelete={(id) =>
           deleteChat(id).then(() => {
             deleted.current.add(id);
+            discardDraft(id);
             setQueued(({ [id]: _gone, ...rest }) => rest);
             if (id === selectedId) select(null);
             refreshChats();

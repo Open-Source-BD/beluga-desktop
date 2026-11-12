@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clearDraft, loadDraft, saveDraft } from "./drafts";
+import { clearDraft, discardDraft, loadDraft, saveDraft } from "./drafts";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -37,5 +37,13 @@ describe("drafts", () => {
     expect(loadDraft("c1")).toBe("");
     expect(() => saveDraft("c1", "x")).not.toThrow();
     expect(() => clearDraft("c1")).not.toThrow();
+  });
+
+  it("a discarded draft is removed and never saved again", () => {
+    saveDraft("gone", "text");
+    discardDraft("gone");
+    expect(localStorage.getItem("draft:gone")).toBeNull();
+    saveDraft("gone", "late flush");
+    expect(localStorage.getItem("draft:gone")).toBeNull();
   });
 });
