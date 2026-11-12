@@ -144,11 +144,17 @@ pub async fn chat_stream(
         .map_err(|e| ApiError::Network(e.to_string()))?;
     let status = resp.status();
     if !status.is_success() {
+        let retry_after = resp
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
         let body = resp
             .text()
             .await
             .map_err(|e| ApiError::Network(e.to_string()))?;
-        return Err(ApiError::from_response(status.as_u16(), &body));
+        return Err(ApiError::from_response(status.as_u16(), &body)
+            .with_retry_after(retry_after.as_deref()));
     }
     Ok(decode(resp.bytes_stream()))
 }

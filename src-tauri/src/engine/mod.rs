@@ -1,9 +1,12 @@
 //! The single boundary between the app and whatever runs a chat turn.
 
 mod direct;
+#[cfg(test)]
+pub mod scripted;
 
 pub use direct::DirectEngine;
 
+use crate::agent::{ToolCall, ToolStatus};
 use crate::openrouter::error::ApiError;
 use crate::openrouter::stream::WireMessage;
 use async_trait::async_trait;
@@ -105,11 +108,86 @@ impl From<ApiError> for UiError {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EngineEvent {
-    TextDelta { text: String },
-    Usage { requests: u32, cost_usd: f64 },
+    TextDelta {
+        text: String,
+    },
+    Usage {
+        requests: u32,
+        cost_usd: f64,
+    },
     Done,
-    Interrupted { reason: String },
-    Failed { error: UiError },
+    Interrupted {
+        reason: String,
+    },
+    Failed {
+        error: UiError,
+    },
+    ToolStarted {
+        call_id: String,
+        name: String,
+        summary: String,
+    },
+    ToolOutput {
+        call_id: String,
+        text: String,
+    },
+    ToolFinished {
+        call_id: String,
+        status: ToolStatus,
+        summary: String,
+        detail: Option<String>,
+    },
+    ApprovalNeeded {
+        approval: Approval,
+    },
+    ApprovalCleared {
+        id: String,
+    },
+    PlanUpdated {
+        items: serde_json::Value,
+    },
+    /// A rate limit is being waited out.
+    Waiting {
+        seconds: u64,
+    },
+    Paused {
+        reason: String,
+    },
+    BackgroundChanged,
+    MessageStored,
+}
+
+/// An approval card's contents. Opaque until the approval gate defines it.
+pub type Approval = serde_json::Value;
+
+/// One request to the model, with tools if the caller offers any.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StepRequest {
+    pub model_id: String,
+    pub messages: Vec<WireMessage>,
+    pub tools: Option<serde_json::Value>,
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StepError {
+    pub ui: UiError,
+    /// What the server's `Retry-After` asked for, in seconds.
+    pub retry_after_secs: Option<u64>,
+}
+
+/// What one request produced. When `error` is set, `text` is whatever arrived
+/// first. A cancelled step has `error: None`; the caller checks the token.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StepOutcome {
+    pub text: String,
+    pub tool_calls: Vec<ToolCall>,
+    pub cost_usd: Option<f64>,
+    pub prompt_tokens: Option<u32>,
+    pub error: Option<StepError>,
+    /// The reply held too many calls or too much argument text, so it
+    /// returned no calls; the caller should say so to the model.
+    pub overflowed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -129,12 +207,65 @@ pub struct TurnOutcome {
 
 #[async_trait]
 pub trait Engine: Send + Sync {
+    /// One streamed request. Emits only `TextDelta`, never `Done` or `Failed`;
+    /// the caller decides how the task ends.
+    async fn run_step(
+        &self,
+        request: StepRequest,
+        emit: &(dyn Fn(EngineEvent) + Send + Sync),
+        cancel: CancellationToken,
+    ) -> StepOutcome;
+
+    /// A whole plain chat turn: one step without tools, then the terminal
+    /// event.
     async fn run_turn(
         &self,
         req: TurnRequest,
         emit: &(dyn Fn(EngineEvent) + Send + Sync),
         cancel: CancellationToken,
-    ) -> TurnOutcome;
+    ) -> TurnOutcome {
+        let step = StepRequest {
+            model_id: req.model_id,
+            messages: req.messages,
+            tools: None,
+            session_id: String::new(),
+        };
+        let out = self.run_step(step, emit, cancel.clone()).await;
+        finish_turn(out, 1, cancel.is_cancelled(), emit)
+    }
+}
+
+/// Turn a finished step into a turn's outcome and its terminal event.
+pub(crate) fn finish_turn(
+    step: StepOutcome,
+    requests: u32,
+    cancelled: bool,
+    emit: &(dyn Fn(EngineEvent) + Send + Sync),
+) -> TurnOutcome {
+    let mut out = TurnOutcome {
+        text: step.text,
+        requests,
+        cost_usd: step.cost_usd.unwrap_or(0.0),
+        interrupted: false,
+    };
+    if let Some(cost_usd) = step.cost_usd {
+        emit(EngineEvent::Usage { requests, cost_usd });
+    }
+    match step.error {
+        _ if cancelled => {
+            out.interrupted = true;
+            emit(EngineEvent::Interrupted {
+                reason: "stopped".to_string(),
+            });
+        }
+        Some(e) if out.text.is_empty() => emit(EngineEvent::Failed { error: e.ui }),
+        Some(e) => {
+            out.interrupted = true;
+            emit(EngineEvent::Interrupted { reason: e.ui.kind });
+        }
+        None => emit(EngineEvent::Done),
+    }
+    out
 }
 
 #[cfg(test)]
@@ -153,5 +284,71 @@ mod tests {
         assert_eq!(e.kind, "keychain_unavailable");
         assert_eq!(e.message, "Your key could not be saved in the keychain.");
         assert!(!e.retryable);
+    }
+
+    #[test]
+    fn new_events_serialise_with_their_tags_and_fields() {
+        use crate::agent::ToolStatus;
+        use serde_json::json;
+        let cases: Vec<(EngineEvent, serde_json::Value)> = vec![
+            (
+                EngineEvent::ToolStarted {
+                    call_id: "c1".into(),
+                    name: "read_file".into(),
+                    summary: "Reading a.txt".into(),
+                },
+                json!({"type":"tool_started","call_id":"c1","name":"read_file","summary":"Reading a.txt"}),
+            ),
+            (
+                EngineEvent::ToolOutput {
+                    call_id: "c1".into(),
+                    text: "hi".into(),
+                },
+                json!({"type":"tool_output","call_id":"c1","text":"hi"}),
+            ),
+            (
+                EngineEvent::ToolFinished {
+                    call_id: "c1".into(),
+                    status: ToolStatus::NotRun,
+                    summary: "Read a.txt".into(),
+                    detail: Some("d".into()),
+                },
+                json!({"type":"tool_finished","call_id":"c1","status":"not_run","summary":"Read a.txt","detail":"d"}),
+            ),
+            (
+                EngineEvent::ApprovalNeeded {
+                    approval: json!({"kind":"secret","id":"a1","path":".env"}),
+                },
+                json!({"type":"approval_needed","approval":{"kind":"secret","id":"a1","path":".env"}}),
+            ),
+            (
+                EngineEvent::ApprovalCleared { id: "a1".into() },
+                json!({"type":"approval_cleared","id":"a1"}),
+            ),
+            (
+                EngineEvent::PlanUpdated {
+                    items: json!([{"text":"x"}]),
+                },
+                json!({"type":"plan_updated","items":[{"text":"x"}]}),
+            ),
+            (
+                EngineEvent::Waiting { seconds: 12 },
+                json!({"type":"waiting","seconds":12}),
+            ),
+            (
+                EngineEvent::Paused {
+                    reason: "daily_limit".into(),
+                },
+                json!({"type":"paused","reason":"daily_limit"}),
+            ),
+            (
+                EngineEvent::BackgroundChanged,
+                json!({"type":"background_changed"}),
+            ),
+            (EngineEvent::MessageStored, json!({"type":"message_stored"})),
+        ];
+        for (event, expected) in cases {
+            assert_eq!(serde_json::to_value(&event).unwrap(), expected, "{event:?}");
+        }
     }
 }

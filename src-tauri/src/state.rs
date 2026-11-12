@@ -274,12 +274,65 @@ impl AppState {
         events: Arc<dyn EventSink>,
         dialogs: Arc<dyn Dialogs>,
     ) -> Self {
+        Self::build(
+            http,
+            origin,
+            key_store,
+            store,
+            data_dir,
+            builtin_skills,
+            events,
+            dialogs,
+            |http, origin, keys| {
+                Arc::new(DirectEngine::new(
+                    http.stream.clone(),
+                    api_base(origin),
+                    keys,
+                ))
+            },
+        )
+    }
+
+    /// Like `new`, but runs chats on the given engine. For tests.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_engine(
+        http: HttpClients,
+        origin: String,
+        key_store: Arc<dyn KeyStore>,
+        store: Store,
+        data_dir: PathBuf,
+        builtin_skills: PathBuf,
+        events: Arc<dyn EventSink>,
+        dialogs: Arc<dyn Dialogs>,
+        engine: Arc<dyn Engine>,
+    ) -> Self {
+        Self::build(
+            http,
+            origin,
+            key_store,
+            store,
+            data_dir,
+            builtin_skills,
+            events,
+            dialogs,
+            |_, _, _| engine,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build(
+        http: HttpClients,
+        origin: String,
+        key_store: Arc<dyn KeyStore>,
+        store: Store,
+        data_dir: PathBuf,
+        builtin_skills: PathBuf,
+        events: Arc<dyn EventSink>,
+        dialogs: Arc<dyn Dialogs>,
+        make_engine: impl FnOnce(&HttpClients, &str, Arc<SharedKeyStore>) -> Arc<dyn Engine>,
+    ) -> Self {
         let keys = Arc::new(SharedKeyStore::new(key_store));
-        let engine = Arc::new(DirectEngine::new(
-            http.stream.clone(),
-            api_base(&origin),
-            keys.clone(),
-        ));
+        let engine = make_engine(&http, &origin, keys.clone());
         // Staged data from an earlier run is never resumed.
         staging::clean(&data_dir.join(SKILLS_DIR));
         Self {

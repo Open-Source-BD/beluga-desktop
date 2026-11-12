@@ -108,27 +108,67 @@ pub(super) fn harness_full(
     timeouts: HttpTimeouts,
     builtin_skills: Option<std::path::PathBuf>,
 ) -> Harness {
+    harness_build(origin, keys, timeouts, builtin_skills, None)
+}
+
+/// A signed-in harness whose chats run on `engine` instead of OpenRouter.
+pub(super) fn harness_with_engine(engine: Arc<dyn crate::engine::Engine>) -> Harness {
+    let keys = SessionStore::default();
+    keys.set(KEY).unwrap();
+    harness_build(
+        "http://127.0.0.1:1",
+        Arc::new(keys),
+        HttpTimeouts::PRODUCTION,
+        None,
+        Some(engine),
+    )
+}
+
+fn harness_build(
+    origin: &str,
+    keys: Arc<dyn KeyStore>,
+    timeouts: HttpTimeouts,
+    builtin_skills: Option<std::path::PathBuf>,
+    engine: Option<Arc<dyn crate::engine::Engine>>,
+) -> Harness {
     let dir = tempfile::tempdir().unwrap();
     let events = Arc::new(Recorder::default());
     let http =
         HttpClients::from_builder(|| reqwest::Client::builder().no_proxy(), timeouts).unwrap();
     let dialogs = Arc::new(FakeDialogs::default());
-    let state = Arc::new(
-        AppState::new(
+    let builtin_skills = builtin_skills.unwrap_or_else(|| dir.path().join("no-bundled-skills"));
+    let (origin_owned, store, data_dir) = (
+        origin.to_string(),
+        Store::in_memory().unwrap(),
+        dir.path().to_path_buf(),
+    );
+    let base = match engine {
+        None => AppState::new(
             http,
-            origin.to_string(),
+            origin_owned,
             keys,
-            Store::in_memory().unwrap(),
-            dir.path().to_path_buf(),
-            builtin_skills.unwrap_or_else(|| dir.path().join("no-bundled-skills")),
+            store,
+            data_dir,
+            builtin_skills,
             events.clone(),
             dialogs.clone(),
-        )
-        .with_github(crate::state::GithubBases {
-            api: origin.to_string(),
-            codeload: origin.to_string(),
-        }),
-    );
+        ),
+        Some(engine) => AppState::with_engine(
+            http,
+            origin_owned,
+            keys,
+            store,
+            data_dir,
+            builtin_skills,
+            events.clone(),
+            dialogs.clone(),
+            engine,
+        ),
+    };
+    let state = Arc::new(base.with_github(crate::state::GithubBases {
+        api: origin.to_string(),
+        codeload: origin.to_string(),
+    }));
     Harness {
         state,
         events,
@@ -3212,4 +3252,29 @@ fn attach_folder_file_refuses_a_fifo_promptly() {
         got,
         Err(UiError::other("pipe.txt is not a text file or image."))
     );
+}
+
+#[tokio::test]
+async fn a_scripted_engine_can_replace_the_real_one() {
+    use crate::engine::StepOutcome;
+    use crate::engine::scripted::ScriptedEngine;
+    let engine = Arc::new(ScriptedEngine::new(vec![StepOutcome {
+        text: "scripted reply".into(),
+        ..StepOutcome::default()
+    }]));
+    let h = harness_with_engine(engine.clone());
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    let (r, events) = send(&h, &chat.id, "Hi", "m/a", vec![]).await;
+    assert_eq!(r.unwrap().status, TurnStatus::Done);
+    assert_eq!(events.last(), Some(&EngineEvent::Done));
+    let requests = engine.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].model_id, "m/a");
+    assert!(requests[0].tools.is_none());
+    let stored: Vec<String> = chats::get_messages(&h.state, &chat.id)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.text)
+        .collect();
+    assert_eq!(stored, ["Hi", "scripted reply"]);
 }

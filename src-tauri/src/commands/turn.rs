@@ -46,6 +46,10 @@ pub enum TurnStatus {
     Done,
     Interrupted,
     Failed,
+    /// A project task stopped and waits for the user; `reason` says why
+    /// (`keep_going_declined`, `no_free_requests`, `daily_limit`,
+    /// `chat_full`, `going_in_circles` or `rate_limited`).
+    Paused,
 }
 
 /// How a turn that ran ended, returned only after its reply and usage are
@@ -71,6 +75,15 @@ impl TurnResult {
         Self {
             status: TurnStatus::Interrupted,
             reason: Some(reason),
+            error: None,
+        }
+    }
+
+    #[allow(dead_code)] // Used by the project-work loop.
+    pub(super) fn paused(reason: &str) -> Self {
+        Self {
+            status: TurnStatus::Paused,
+            reason: Some(reason.to_string()),
             error: None,
         }
     }

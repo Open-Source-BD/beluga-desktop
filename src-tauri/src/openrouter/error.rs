@@ -28,6 +28,26 @@ impl ApiError {
             _ => ApiError::Other { status, message },
         }
     }
+
+    /// Add the wait the server asked for; only a rate limit has one.
+    pub fn with_retry_after(self, header: Option<&str>) -> ApiError {
+        match self {
+            ApiError::RateLimited { .. } => ApiError::RateLimited {
+                retry_after_secs: header.and_then(parse_retry_after),
+            },
+            other => other,
+        }
+    }
+}
+
+/// The seconds form of a `Retry-After` header. An HTTP date or anything else
+/// that is not plain digits gives `None`.
+pub fn parse_retry_after(value: &str) -> Option<u64> {
+    let v = value.trim();
+    if v.is_empty() || !v.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    v.parse().ok()
 }
 
 /// Prefer the `error.message` of an OpenRouter JSON error; otherwise the raw
@@ -99,5 +119,38 @@ mod tests {
             ApiError::Other { message, .. } => assert_eq!(message, "bad field"),
             other => panic!("unexpected {other:?}"),
         }
+    }
+
+    #[test]
+    fn retry_after_reads_seconds_only() {
+        assert_eq!(parse_retry_after("7"), Some(7));
+        assert_eq!(parse_retry_after(" 30 "), Some(30));
+        assert_eq!(parse_retry_after("0"), Some(0));
+        assert_eq!(parse_retry_after("Wed, 21 Oct 2026 07:28:00 GMT"), None);
+        assert_eq!(parse_retry_after("-3"), None);
+        assert_eq!(parse_retry_after("+3"), None);
+        assert_eq!(parse_retry_after("1.5"), None);
+        assert_eq!(parse_retry_after(""), None);
+        assert_eq!(parse_retry_after("99999999999999999999999"), None);
+    }
+
+    #[test]
+    fn retry_after_applies_only_to_rate_limits() {
+        assert_eq!(
+            ApiError::from_response(429, "{}").with_retry_after(Some("7")),
+            ApiError::RateLimited {
+                retry_after_secs: Some(7)
+            }
+        );
+        assert_eq!(
+            ApiError::from_response(401, "{}").with_retry_after(Some("7")),
+            ApiError::Unauthorized
+        );
+        assert_eq!(
+            ApiError::from_response(429, "{}").with_retry_after(None),
+            ApiError::RateLimited {
+                retry_after_secs: None
+            }
+        );
     }
 }
