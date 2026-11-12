@@ -12,6 +12,15 @@
 //! `real`, and open the file without following a final link (for example
 //! `O_NOFOLLOW`, or create-new for a new file). Nothing here creates or locks
 //! anything.
+//!
+//! More for callers:
+//! - A reader must open the file immediately after `existing` and check, on
+//!   the open handle, that it is a regular file (a path can be swapped for a
+//!   pipe or device between the check and the open).
+//! - A writer must call `for_write` again right before writing, and create
+//!   missing folders one at a time without following a link.
+//! - A hard link to a file outside the root cannot be detected by path; it
+//!   looks like any other file inside the project and is accepted.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -38,13 +47,24 @@ const DEVICE_NAMES: [&str; 22] = [
     "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
 ];
 
+/// Format (Cf) and line/paragraph separator characters: invisible or
+/// direction-changing, so two names could look identical on an approval
+/// card. A fixed list; no crate.
+fn invisible(c: char) -> bool {
+    matches!(c as u32,
+        0x00AD | 0x0600..=0x0605 | 0x061C | 0x06DD | 0x070F | 0x0890..=0x0891 | 0x08E2
+        | 0x180E | 0x200B..=0x200F | 0x2028..=0x202E | 0x2060..=0x206F | 0xFEFF
+        | 0xFFF9..=0xFFFB | 0x110BD | 0x110CD | 0x13430..=0x1343F | 0x1BCA0..=0x1BCA3
+        | 0x1D173..=0x1D17A | 0xE0001 | 0xE0020..=0xE007F)
+}
+
 /// A name that is safe on every system: no `:` (drive or stream), no control
 /// characters, no trailing space or dot (Windows drops them, so `.. ` would
 /// become `..`), and not a device name.
 fn plain_name(seg: &str) -> bool {
     if seg.is_empty()
         || seg.contains(':')
-        || seg.chars().any(char::is_control)
+        || seg.chars().any(|c| c.is_control() || invisible(c))
         || seg.ends_with([' ', '.'])
     {
         return false;
@@ -83,12 +103,33 @@ impl Project {
         let segs = self.segments(given)?;
         let mut joined = self.root.clone();
         joined.extend(&segs);
-        let real = std::fs::canonicalize(&joined).map_err(|_| UNUSABLE.to_string())?;
+        let real = match std::fs::canonicalize(&joined) {
+            Ok(r) => r,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && self.no_link_on(&segs) => {
+                return Err(format!("There is no file or folder at {}.", segs.join("/")));
+            }
+            Err(_) => return Err(UNUSABLE.to_string()),
+        };
         if !real.starts_with(&self.root) {
             return Err(OUTSIDE.to_string());
         }
         let shown = shown_of(&self.root, &real);
         Ok(InProject { real, shown })
+    }
+
+    /// True when no existing component of `segs` below the root is a link,
+    /// so a missing path is plainly missing and not a dangling link.
+    fn no_link_on(&self, segs: &[String]) -> bool {
+        let mut cur = self.root.clone();
+        for seg in segs {
+            cur.push(seg);
+            match std::fs::symlink_metadata(&cur) {
+                Ok(m) if m.file_type().is_symlink() => return false,
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+        true
     }
 
     /// For writing a file that may not exist yet (and whose folders may not
@@ -176,9 +217,11 @@ impl Project {
         }
     }
 
-    /// An absolute `given`, as segments below the root. The nearest existing
-    /// ancestor is canonicalized (which also gives the on-disk spelling of
-    /// the root) and must lie inside; the rest must be plain names.
+    /// An absolute `given`, as segments below the root, taken lexically: the
+    /// shortest leading part of `given` that resolves to the root is the
+    /// root, and the names after it are kept as given, so the caller walks
+    /// them link by link exactly like a relative path. Nothing below the
+    /// root is resolved here. A path not under the root is outside.
     fn absolute_segments(&self, given: &str, path: &Path) -> Result<Vec<String>, String> {
         if cfg!(not(windows)) && given.contains('\\') {
             return Err(UNUSABLE.to_string());
@@ -186,25 +229,22 @@ impl Project {
         if path.components().any(|c| matches!(c, Component::ParentDir)) {
             return Err(OUTSIDE.to_string());
         }
-        let mut anc = path;
-        let mut tail = Vec::new();
-        let base = loop {
-            if let Ok(c) = std::fs::canonicalize(anc) {
-                break c;
+        let comps: Vec<Component> = path.components().collect();
+        let mut prefix = PathBuf::new();
+        for (i, c) in comps.iter().enumerate() {
+            prefix.push(c.as_os_str());
+            if matches!(c, Component::CurDir) {
+                continue;
             }
-            let name = anc.file_name().ok_or_else(|| UNUSABLE.to_string())?;
-            tail.push(name.to_string_lossy().into_owned());
-            anc = anc.parent().ok_or_else(|| UNUSABLE.to_string())?;
-        };
-        let rel = base
-            .strip_prefix(&self.root)
-            .map_err(|_| OUTSIDE.to_string())?;
-        let mut segs: Vec<String> = rel
-            .components()
-            .map(|c| c.as_os_str().to_string_lossy().into_owned())
-            .collect();
-        segs.extend(tail.into_iter().rev());
-        Ok(segs)
+            if std::fs::canonicalize(&prefix).is_ok_and(|r| r == self.root) {
+                return Ok(comps[i + 1..]
+                    .iter()
+                    .filter(|c| !matches!(c, Component::CurDir))
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                    .collect());
+            }
+        }
+        Err(OUTSIDE.to_string())
     }
 }
 
@@ -297,6 +337,138 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_drive_path_is_refused_everywhere() {
+        let (_d, p) = project();
+        // An absolute path on Windows (outside), a odd relative name elsewhere.
+        assert!(p.existing("C:\\x").is_err());
+        assert!(p.for_write("C:\\x").is_err());
+        #[cfg(unix)]
+        {
+            assert_eq!(p.existing("C:\\x").unwrap_err(), BAD);
+            assert_eq!(p.for_write("C:\\x").unwrap_err(), BAD);
+        }
+    }
+
+    #[test]
+    fn invisible_and_direction_changing_characters_are_refused() {
+        let (_d, p) = project();
+        for c in [
+            '\u{200b}', '\u{202e}', '\u{feff}', '\u{00ad}', '\u{2060}', '\u{2066}', '\u{200f}',
+        ] {
+            for given in [
+                format!("src/a.ts{c}"),
+                format!("sr{c}c/a.ts"),
+                format!("{c}x"),
+            ] {
+                assert_eq!(p.existing(&given).unwrap_err(), BAD, "read {given:?}");
+                assert_eq!(p.for_write(&given).unwrap_err(), BAD, "write {given:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_missing_path_inside_names_itself_but_outside_reveals_nothing() {
+        let (d, p) = project();
+        assert_eq!(
+            p.existing("./src\\nope.ts").unwrap_err(),
+            "There is no file or folder at src/nope.ts."
+        );
+        assert_eq!(
+            p.existing("nodir/deeper/x").unwrap_err(),
+            "There is no file or folder at nodir/deeper/x."
+        );
+        let abs = d.path().join("src").join("nope.ts");
+        assert_eq!(
+            p.existing(abs.to_str().unwrap()).unwrap_err(),
+            "There is no file or folder at src/nope.ts."
+        );
+        assert_eq!(p.existing("../nope").unwrap_err(), OUT);
+        assert_eq!(p.existing("src/../../nope").unwrap_err(), OUT);
+        let elsewhere = tempfile::tempdir().unwrap();
+        let out = elsewhere.path().join("missing");
+        assert_eq!(p.existing(out.to_str().unwrap()).unwrap_err(), OUT);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_link_keeps_the_cannot_be_used_message_for_reading() {
+        use std::os::unix::fs::symlink;
+        let outside = tempfile::tempdir().unwrap();
+        let (d, p) = project();
+        symlink(outside.path().join("gone"), d.path().join("dangling")).unwrap();
+        symlink(d.path().join("src/none"), d.path().join("dangling_in")).unwrap();
+        assert_eq!(p.existing("dangling").unwrap_err(), BAD);
+        assert_eq!(p.existing("dangling/x").unwrap_err(), BAD);
+        assert_eq!(p.existing("dangling_in").unwrap_err(), BAD);
+    }
+
+    #[cfg(unix)]
+    fn links(d: &std::path::Path) {
+        use std::os::unix::fs::symlink;
+        fs::write(d.join(".env"), "S=1").unwrap();
+        symlink(d.join("src/a.ts"), d.join("l.ts")).unwrap();
+        symlink(d.join("src"), d.join("lsrc")).unwrap();
+        symlink(d.join("l.ts"), d.join("chain")).unwrap();
+        symlink(d.join(".env"), d.join("innocent")).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn writing_through_a_link_is_refused_in_absolute_form_too() {
+        let (d, p) = project();
+        links(d.path());
+        let root = d.path().to_str().unwrap();
+        for rel in ["l.ts", "lsrc/a.ts", "lsrc/new.ts", "chain", "innocent"] {
+            assert!(p.for_write(rel).is_err(), "relative {rel}");
+            let abs = format!("{root}/{rel}");
+            assert!(p.for_write(&abs).is_err(), "absolute {abs}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn links_inside_still_read_in_absolute_form() {
+        let (d, p) = project();
+        links(d.path());
+        let root = d.path().to_str().unwrap();
+        for rel in ["l.ts", "lsrc/a.ts", "chain"] {
+            let a = p.existing(&format!("{root}/{rel}")).unwrap();
+            assert_eq!(a.shown, p.existing(rel).unwrap().shown, "{rel}");
+        }
+    }
+
+    #[test]
+    fn an_absolute_path_to_a_plain_file_works_for_read_and_write() {
+        let (d, p) = project();
+        let a = d.path().join("src/a.ts");
+        assert_eq!(p.existing(a.to_str().unwrap()).unwrap().shown, "src/a.ts");
+        assert_eq!(p.for_write(a.to_str().unwrap()).unwrap().shown, "src/a.ts");
+        let n = d.path().join("fresh/n.ts");
+        assert_eq!(
+            p.for_write(n.to_str().unwrap()).unwrap().shown,
+            "fresh/n.ts"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_root_reached_through_a_symlinked_parent_works() {
+        use std::os::unix::fs::symlink;
+        let (d, _p) = project();
+        let outer = tempfile::tempdir().unwrap();
+        let via = outer.path().join("via");
+        symlink(d.path(), &via).unwrap();
+        let p = Project::open(via.to_str().unwrap()).unwrap();
+        let a = via.join("src/a.ts");
+        assert_eq!(p.existing(a.to_str().unwrap()).unwrap().shown, "src/a.ts");
+        let n = via.join("src/n.ts");
+        assert_eq!(p.for_write(n.to_str().unwrap()).unwrap().shown, "src/n.ts");
+        // The real spelling works as well.
+        let r = d.path().join("src/a.ts");
+        assert_eq!(p.existing(r.to_str().unwrap()).unwrap().shown, "src/a.ts");
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_link_pointing_outside_is_refused_for_reading_and_writing() {
@@ -370,7 +542,10 @@ mod tests {
     #[test]
     fn a_missing_file_cannot_be_read() {
         let (_d, p) = project();
-        assert_eq!(p.existing("src/nope.ts").unwrap_err(), BAD);
+        assert_eq!(
+            p.existing("src/nope.ts").unwrap_err(),
+            "There is no file or folder at src/nope.ts."
+        );
     }
 
     #[test]
@@ -457,6 +632,100 @@ mod tests {
                 "{}",
                 r.shown
             );
+        }
+    }
+
+    #[cfg(windows)]
+    mod windows {
+        use super::*;
+
+        fn junction(link: &std::path::Path, target: &std::path::Path) {
+            let st = std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(link)
+                .arg(target)
+                .output()
+                .unwrap();
+            assert!(st.status.success(), "mklink failed: {st:?}");
+        }
+
+        #[test]
+        fn drive_and_unc_and_device_forms_are_refused() {
+            let (_d, p) = project();
+            let other = tempfile::tempdir().unwrap();
+            let elsewhere = other.path().join("x");
+            assert!(p.existing("C:\\x").is_err());
+            assert!(p.for_write("C:\\x").is_err());
+            assert!(p.for_write(elsewhere.to_str().unwrap()).is_err());
+            for given in [
+                "C:x",
+                "\\\\server\\share\\x",
+                "\\\\?\\C:\\x",
+                "\\\\.\\pipe\\x",
+                "a.txt:stream",
+                "a.txt::$DATA",
+            ] {
+                assert_eq!(p.existing(given).unwrap_err(), BAD, "read {given}");
+                assert_eq!(p.for_write(given).unwrap_err(), BAD, "write {given}");
+            }
+        }
+
+        #[test]
+        fn a_junction_is_not_written_through() {
+            let outside = tempfile::tempdir().unwrap();
+            fs::write(outside.path().join("s.txt"), "secret").unwrap();
+            let (d, p) = project();
+            junction(&d.path().join("jout"), outside.path());
+            junction(&d.path().join("jin"), &d.path().join("src"));
+            assert!(p.existing("jout/s.txt").is_err());
+            assert!(p.for_write("jout/s.txt").is_err());
+            assert!(p.for_write("jout/new.txt").is_err());
+            assert!(p.for_write("jin/a.ts").is_err());
+            assert!(p.for_write("jin/new.ts").is_err());
+            let abs = d.path().join("jin").join("a.ts");
+            assert!(p.for_write(abs.to_str().unwrap()).is_err());
+            let abs_out = d.path().join("jout").join("s.txt");
+            assert!(p.existing(abs_out.to_str().unwrap()).is_err());
+            assert!(!outside.path().join("new.txt").exists());
+        }
+
+        #[test]
+        fn a_different_drive_letter_case_works() {
+            let (d, p) = project();
+            let s = d
+                .path()
+                .join("src")
+                .join("a.ts")
+                .to_str()
+                .unwrap()
+                .to_string();
+            let mut chars = s.chars();
+            let first = chars.next().unwrap();
+            let flipped = if first.is_ascii_uppercase() {
+                first.to_ascii_lowercase()
+            } else {
+                first.to_ascii_uppercase()
+            };
+            let other = format!("{flipped}{}", chars.as_str());
+            assert_eq!(p.existing(&other).unwrap().shown, "src/a.ts");
+            assert_eq!(p.for_write(&other).unwrap().shown, "src/a.ts");
+        }
+
+        #[test]
+        fn shown_has_no_backslash_or_verbatim_prefix() {
+            let (d, p) = project();
+            let abs = d.path().join("src").join("a.ts");
+            for r in [
+                p.existing(abs.to_str().unwrap()).unwrap(),
+                p.existing("src\\a.ts").unwrap(),
+                p.for_write("n\\m.txt").unwrap(),
+            ] {
+                assert!(
+                    !r.shown.contains('\\') && !r.shown.contains("?"),
+                    "{}",
+                    r.shown
+                );
+            }
         }
     }
 }
