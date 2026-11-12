@@ -17,6 +17,8 @@ const MAX_CHARS: usize = 16_000;
 const MAX_ENTRIES: usize = 500;
 /// Longest model-given text shown in a summary line.
 const MAX_SUMMARY_CHARS: usize = 80;
+/// Longest project path shown in a summary line.
+const MAX_PATH_SUMMARY_CHARS: usize = 200;
 const SKILL_PREFIX: &str = "skill:";
 
 pub(super) fn ok(text: String, summary: String) -> ToolOutcome {
@@ -100,6 +102,18 @@ pub(super) fn summary_text(s: &str) -> String {
     }
 }
 
+/// A project path made safe to show in a summary line: cleaned and cut at
+/// 200 characters. Every summary that holds a path goes through this.
+pub(super) fn path_summary(shown: &str) -> String {
+    let s = clean(shown);
+    if s.chars().count() > MAX_PATH_SUMMARY_CHARS {
+        let head: String = s.chars().take(MAX_PATH_SUMMARY_CHARS).collect();
+        format!("{head}…")
+    } else {
+        s
+    }
+}
+
 /// `n` plural-aware: "1 line", "2 lines".
 fn lines_word(n: usize) -> String {
     format!("{n} line{}", if n == 1 { "" } else { "s" })
@@ -132,7 +146,7 @@ pub fn read_file(
                 let summary = if found.shown.is_empty() {
                     generic
                 } else {
-                    format!("Read {}", clean(&found.shown))
+                    format!("Read {}", path_summary(&found.shown))
                 };
                 let loaded = if is_secret(&found.shown) && !allow_secret {
                     Err("needs_approval".to_string())
@@ -260,7 +274,7 @@ pub fn list_dir(project: &Project, args: &Value) -> ToolOutcome {
     let summary = if found.shown.is_empty() {
         "Listed the project folder".to_string()
     } else {
-        format!("Listed {}", found.shown)
+        format!("Listed {}", path_summary(&found.shown))
     };
     let shown = if found.shown.is_empty() {
         "the project folder"
@@ -636,5 +650,73 @@ mod tests {
         fs::write(t.path().join("a\nforged\t99"), "").unwrap();
         let o = list_dir(&p, &json!({}));
         assert_eq!(o.text, "a?forged?99\t0");
+    }
+
+    #[test]
+    fn path_summary_cleans_and_cuts_at_200_characters() {
+        assert_eq!(path_summary("src/a.rs"), "src/a.rs");
+        assert_eq!(path_summary("a\nb\u{202e}"), "a?b?");
+        let got = path_summary(&"d/".repeat(150));
+        assert_eq!(got.chars().count(), 201);
+        assert!(got.ends_with('…'));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn no_tool_summary_holds_a_control_or_format_character() {
+        use crate::agent::paths::invisible;
+        use crate::agent::search::{find_files, search};
+        let (t, p, l) = setup();
+        let dir = "d\n\u{202e}x";
+        let file = "f\n\u{202e}.txt";
+        fs::create_dir(t.path().join(dir)).unwrap();
+        fs::write(t.path().join(dir).join(file), "needle\n").unwrap();
+        // Names with such characters cannot be typed as a path, but a link can
+        // lead to them, and then `shown` carries them.
+        std::os::unix::fs::symlink(t.path().join(dir), t.path().join("link")).unwrap();
+        let both = format!("{dir}/{file}");
+        let through = format!("link/{file}");
+        let outcomes = [
+            read(&p, &l, json!({"path": through})),
+            list_dir(&p, &json!({"path": "link"})),
+            find_files(&p, &json!({"pattern": "*.txt", "path": "link"})),
+            search(&p, &json!({"pattern": "needle", "path": "link"})),
+            search(&p, &json!({"pattern": "needle", "path": through})),
+            read(&p, &l, json!({"path": both})),
+            read(&p, &l, json!({"path": dir})),
+            list_dir(&p, &json!({"path": dir})),
+            list_dir(&p, &json!({"path": both})),
+            find_files(&p, &json!({"pattern": "*.txt", "path": dir})),
+            find_files(&p, &json!({"pattern": "*", "path": both})),
+            search(&p, &json!({"pattern": "needle", "path": dir})),
+            search(&p, &json!({"pattern": "needle", "path": both})),
+            search(&p, &json!({"pattern": "needle"})),
+            crate::agent::plan::update_plan(&json!({"items": [{"text": "a\nb", "state": "done"}]}))
+                .0,
+        ];
+        for o in outcomes {
+            assert!(
+                !o.summary.chars().any(|c| c.is_control() || invisible(c)),
+                "{:?}",
+                o.summary
+            );
+        }
+    }
+
+    #[test]
+    fn read_file_on_a_git_path_needs_approval() {
+        let (t, p, l) = setup();
+        fs::create_dir_all(t.path().join("sub/.git")).unwrap();
+        fs::write(t.path().join("sub/.git/HEAD"), "ref: x\n").unwrap();
+        fs::write(t.path().join(".gitignore"), "x\n").unwrap();
+        let o = read(&p, &l, json!({"path": "sub/.git/HEAD"}));
+        assert_eq!(o.status, ToolStatus::Error);
+        assert_eq!(o.text, "needs_approval");
+        let o = read_file(&p, &l, &json!({"path": "sub/.git/HEAD"}), true);
+        assert_eq!(o.text, "1\tref: x");
+        assert_eq!(
+            read(&p, &l, json!({"path": ".gitignore"})).status,
+            ToolStatus::Ok
+        );
     }
 }

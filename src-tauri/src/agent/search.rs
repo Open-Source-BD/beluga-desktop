@@ -87,8 +87,8 @@ fn candidate_files(base: &InProject) -> (Vec<FileEntry>, bool) {
         .filter(|e| !e.is_dir)
         .filter(|e| {
             let shown = shown_path(base, &e.path);
-            // `.git` is never searched, even when it is the folder given.
-            !is_secret(&shown) && !shown.split('/').any(|seg| seg == ".git")
+            // Anything inside `.git` counts as secret, even when it is the folder given.
+            !is_secret(&shown)
         })
         .collect();
     (files, cut)
@@ -217,7 +217,10 @@ pub fn search(project: &Project, args: &Value) -> ToolOutcome {
             .collect();
         (targets, cut)
     } else if is_secret(&base.shown) {
-        (Vec::new(), false)
+        return fail(
+            "That file usually holds secrets, so it is not searched.".to_string(),
+            summary,
+        );
     } else {
         // Only a regular file is opened (opening a named pipe blocks).
         let meta = std::fs::metadata(&base.real).ok().filter(|m| m.is_file());
@@ -267,8 +270,9 @@ pub fn search(project: &Project, args: &Value) -> ToolOutcome {
         ));
     }
     if skipped > 0 {
+        let word = if skipped == 1 { "file" } else { "files" };
         out.push(format!(
-            "({skipped} files skipped: binary, unreadable or over 5 MB)"
+            "({skipped} {word} skipped: binary, unreadable or over 5 MB)"
         ));
     }
     if cut {
@@ -445,7 +449,7 @@ mod tests {
         let o = search(&p, &json!({"pattern": "needle"}));
         assert_eq!(
             o.text,
-            "ok.txt:1:needle\n(1 files skipped: binary, unreadable or over 5 MB)"
+            "ok.txt:1:needle\n(1 file skipped: binary, unreadable or over 5 MB)"
         );
     }
 
@@ -571,5 +575,26 @@ mod tests {
         assert_eq!(o.text, "a?forged.txt:1:needle");
         let o = find_files(&p, &json!({"pattern": "*.txt"}));
         assert_eq!(o.text, "a?forged.txt");
+    }
+
+    #[test]
+    fn git_files_are_never_found_or_searched_even_when_named() {
+        let (t, p) = setup();
+        put(&t, ".git/config", "needle\n");
+        put(&t, "sub/.git/HEAD", "needle\n");
+        put(&t, "ok.txt", "needle\n");
+        assert_eq!(
+            search(&p, &json!({"pattern": "needle"})).text,
+            "ok.txt:1:needle"
+        );
+        let o = search(&p, &json!({"pattern": "needle", "path": ".git/config"}));
+        assert_eq!(o.status, ToolStatus::Error);
+        assert!(!o.text.contains("needle:"), "{}", o.text);
+        let o = search(&p, &json!({"pattern": "needle", "path": "sub/.git"}));
+        assert_eq!(o.text, "No matches.");
+        let o = find_files(&p, &json!({"pattern": "**/*"}));
+        assert_eq!(o.text, "ok.txt");
+        let o = find_files(&p, &json!({"pattern": "*", "path": "sub/.git"}));
+        assert_eq!(o.text, "No files matched.");
     }
 }

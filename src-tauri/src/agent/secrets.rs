@@ -6,6 +6,14 @@ const TEMPLATES: [&str; 3] = [".env.example", ".env.sample", ".env.template"];
 /// Whether the file at `shown` (a forward-slash path; a backslash is also
 /// treated as a separator) is a secret file. Case-insensitive.
 pub fn is_secret(shown: &str) -> bool {
+    // Anything inside, or named, `.git` (a repository, or a worktree's link
+    // file) is secret; `.gitignore`, `.github` and the like are not.
+    if shown
+        .split(['/', '\\'])
+        .any(|seg| seg.eq_ignore_ascii_case(".git"))
+    {
+        return true;
+    }
     let name = shown
         .rsplit(['/', '\\'])
         .next()
@@ -98,5 +106,27 @@ mod tests {
     fn only_the_file_name_counts_even_with_backslashes() {
         assert!(is_secret("a\\b\\.env"));
         assert!(!is_secret(""));
+    }
+
+    #[test]
+    fn anything_with_a_git_component_is_secret() {
+        for p in [
+            ".git",
+            ".git/config",
+            "sub/.git/HEAD",
+            "a\\.GIT\\x",
+            "sub/.git",
+        ] {
+            assert!(is_secret(p), "{p}");
+        }
+        for p in [
+            ".gitignore",
+            ".github/workflows/ci.yml",
+            ".gitattributes",
+            "git/x",
+            "a.git",
+        ] {
+            assert!(!is_secret(p), "{p}");
+        }
     }
 }
