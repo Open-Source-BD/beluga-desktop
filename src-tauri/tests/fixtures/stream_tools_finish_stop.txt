@@ -1,0 +1,6 @@
+data: {"id":"gen-t","object":"chat.completion.chunk","created":1,"model":"m/x","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_s","type":"function","function":{"name":"list_dir","arguments":"{}"}}]},"finish_reason":null}]}
+
+data: {"id":"gen-t","object":"chat.completion.chunk","created":1,"model":"m/x","choices":[{"index":0,"delta":{"content":""},"finish_reason":"stop"}]}
+
+data: [DONE]
+

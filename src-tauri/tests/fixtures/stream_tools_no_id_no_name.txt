@@ -1,0 +1,10 @@
+data: {"id":"gen-t","object":"chat.completion.chunk","created":1,"model":"m/x","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"list_dir","arguments":"{\"path\":"}}]},"finish_reason":null}]}
+
+data: {"id":"gen-t","object":"chat.completion.chunk","created":1,"model":"m/x","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"name":"list_dir","arguments":"\".\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"gen-t","object":"chat.completion.chunk","created":1,"model":"m/x","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"call_x","function":{"arguments":"{}"}}]},"finish_reason":null}]}
+
+data: {"id":"gen-t","object":"chat.completion.chunk","created":1,"model":"m/x","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+

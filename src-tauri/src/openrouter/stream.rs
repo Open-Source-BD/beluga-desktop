@@ -1,5 +1,6 @@
 use super::endpoint;
 use super::error::ApiError;
+use crate::agent::ToolCall;
 use crate::brand;
 use bytes::Bytes;
 use eventsource_stream::Eventsource;
@@ -21,12 +22,17 @@ pub enum Role {
     User,
     Assistant,
     System,
+    Tool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WireMessage {
     pub role: Role,
     pub parts: Vec<Part>,
+    /// Calls an assistant message made; empty for every other message.
+    pub tool_calls: Vec<ToolCall>,
+    /// For a `Role::Tool` message, the call it answers.
+    pub tool_call_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -36,6 +42,17 @@ pub enum Delta {
         cost_usd: f64,
         prompt_tokens: u64,
         completion_tokens: u64,
+    },
+    /// One piece of a tool call; pieces with the same `index` belong together.
+    ToolCallPart {
+        index: u32,
+        id: Option<String>,
+        name: Option<String>,
+        arguments: String,
+    },
+    /// The reply ended for a reason other than a plain `stop`.
+    Finish {
+        reason: String,
     },
     Done,
 }
@@ -49,16 +66,61 @@ fn message_json(m: &WireMessage) -> Value {
             Part::ImageDataUrl(u) => json!({"type": "image_url", "image_url": {"url": u}}),
         })
         .collect();
+    if m.role == Role::Tool {
+        // A tool result is plain string content.
+        let text: String = m
+            .parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::Text(t) => Some(t.as_str()),
+                Part::ImageDataUrl(_) => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        return json!({"role": m.role, "tool_call_id": m.tool_call_id, "content": text});
+    }
+    if !m.tool_calls.is_empty() {
+        let calls: Vec<Value> = m
+            .tool_calls
+            .iter()
+            .map(|c| {
+                json!({
+                    "id": c.id,
+                    "type": "function",
+                    "function": {"name": c.name, "arguments": c.arguments},
+                })
+            })
+            .collect();
+        let content = if content.is_empty() {
+            Value::Null
+        } else {
+            Value::Array(content)
+        };
+        return json!({"role": m.role, "content": content, "tool_calls": calls});
+    }
     json!({"role": m.role, "content": content})
 }
 
-fn request_body(model_id: &str, messages: &[WireMessage]) -> Value {
-    json!({
+fn request_body(
+    model_id: &str,
+    messages: &[WireMessage],
+    tools: Option<&Value>,
+    session_id: Option<&str>,
+) -> Value {
+    let mut body = json!({
         "model": model_id,
         "messages": messages.iter().map(message_json).collect::<Vec<_>>(),
         "stream": true,
         "usage": {"include": true},
-    })
+    });
+    if let Some(tools) = tools {
+        body["tools"] = tools.clone();
+        body["provider"] = json!({"require_parameters": true});
+        if let Some(id) = session_id {
+            body["session_id"] = json!(id);
+        }
+    }
+    body
 }
 
 /// Start a streaming chat completion. Non-2xx responses fail here; once the
@@ -69,12 +131,14 @@ pub async fn chat_stream(
     key: &str,
     model_id: &str,
     messages: &[WireMessage],
+    tools: Option<&Value>,
+    session_id: Option<&str>,
 ) -> Result<impl Stream<Item = Result<Delta, ApiError>> + use<>, ApiError> {
     let resp = http
         .post(endpoint(base_url, "chat/completions"))
         .bearer_auth(key)
         .header("X-Title", brand::APP_NAME)
-        .json(&request_body(model_id, messages))
+        .json(&request_body(model_id, messages, tools, session_id))
         .send()
         .await
         .map_err(|e| ApiError::Network(e.to_string()))?;
@@ -163,6 +227,35 @@ fn handle_data(data: &str, out: &mut VecDeque<Result<Delta, ApiError>>) {
     {
         out.push_back(Ok(Delta::Text(text.to_string())));
     }
+    let choice = &chunk["choices"][0];
+    if let Some(parts) = choice["delta"]["tool_calls"].as_array() {
+        for part in parts {
+            let function = &part["function"];
+            let arguments = match &function["arguments"] {
+                Value::String(s) => s.clone(),
+                Value::Object(_) => function["arguments"].to_string(),
+                _ => String::new(),
+            };
+            out.push_back(Ok(Delta::ToolCallPart {
+                index: part["index"]
+                    .as_u64()
+                    .and_then(|i| u32::try_from(i).ok())
+                    .unwrap_or(0),
+                id: part["id"].as_str().map(str::to_string),
+                name: function["name"].as_str().map(str::to_string),
+                arguments,
+            }));
+        }
+    }
+    // A plain "stop" is the ordinary end and reports nothing.
+    if let Some(reason) = choice["finish_reason"]
+        .as_str()
+        .filter(|r| !r.is_empty() && *r != "stop")
+    {
+        out.push_back(Ok(Delta::Finish {
+            reason: reason.to_string(),
+        }));
+    }
     if let Some(usage) = chunk.get("usage").filter(|u| u.is_object()) {
         out.push_back(Ok(Delta::Usage {
             cost_usd: usage["cost"].as_f64().unwrap_or(0.0),
@@ -188,6 +281,8 @@ mod tests {
         vec![WireMessage {
             role: Role::User,
             parts: vec![Part::Text(text.to_string())],
+            tool_calls: vec![],
+            tool_call_id: None,
         }]
     }
 
@@ -203,9 +298,17 @@ mod tests {
             .mount(&server)
             .await;
         let base = format!("{}/api/v1", server.uri());
-        let s = chat_stream(&reqwest::Client::new(), &base, "sk-k", "m/x", &user("hi"))
-            .await
-            .unwrap();
+        let s = chat_stream(
+            &reqwest::Client::new(),
+            &base,
+            "sk-k",
+            "m/x",
+            &user("hi"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         s.collect().await
     }
 
@@ -330,6 +433,8 @@ mod tests {
             "bad",
             "m",
             &user("x"),
+            None,
+            None,
         )
         .await;
         assert!(matches!(r, Err(ApiError::Unauthorized)));
@@ -347,6 +452,8 @@ mod tests {
             WireMessage {
                 role: Role::System,
                 parts: vec![Part::Text("be brief".into())],
+                tool_calls: vec![],
+                tool_call_id: None,
             },
             WireMessage {
                 role: Role::User,
@@ -354,11 +461,21 @@ mod tests {
                     Part::Text("what is this".into()),
                     Part::ImageDataUrl("data:image/png;base64,AAAA".into()),
                 ],
+                tool_calls: vec![],
+                tool_call_id: None,
             },
         ];
-        let s = chat_stream(&reqwest::Client::new(), &server.uri(), "sk-k", "m/x", &msgs)
-            .await
-            .unwrap();
+        let s = chat_stream(
+            &reqwest::Client::new(),
+            &server.uri(),
+            "sk-k",
+            "m/x",
+            &msgs,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         let _: Vec<_> = s.collect().await;
         let reqs = server.received_requests().await.unwrap();
         assert_eq!(reqs.len(), 1);
@@ -393,6 +510,8 @@ mod tests {
             "sk-secret-123",
             "m",
             &user("x"),
+            None,
+            None,
         )
         .await
         .unwrap();
@@ -401,5 +520,215 @@ mod tests {
         assert_eq!(reqs.len(), 1);
         assert!(!reqs[0].url.as_str().contains("sk-secret-123"));
         assert!(!String::from_utf8_lossy(&reqs[0].body).contains("sk-secret-123"));
+    }
+
+    // ---- tools on the wire ----
+
+    use crate::agent::ToolCall;
+    use crate::openrouter::tool_calls::{Collector, Fragment};
+
+    const T_FRAGMENTS: &str = include_str!("../../tests/fixtures/stream_tools_fragments.txt");
+    const T_INTERLEAVED: &str = include_str!("../../tests/fixtures/stream_tools_interleaved.txt");
+    const T_FINISH_STOP: &str = include_str!("../../tests/fixtures/stream_tools_finish_stop.txt");
+    const T_TEXT_AND_CALL: &str =
+        include_str!("../../tests/fixtures/stream_tools_text_and_call.txt");
+    const T_NO_ID_NO_NAME: &str =
+        include_str!("../../tests/fixtures/stream_tools_no_id_no_name.txt");
+
+    /// Run a stream the way the engine will: text joined, fragments collected.
+    async fn run_tools(body: &str) -> (String, Vec<ToolCall>, Option<String>) {
+        let mut text = String::new();
+        let mut collector = Collector::default();
+        let mut finish = None;
+        for item in collect_from(body).await {
+            match item.unwrap() {
+                Delta::Text(t) => text.push_str(&t),
+                Delta::ToolCallPart {
+                    index,
+                    id,
+                    name,
+                    arguments,
+                } => collector.push(Fragment {
+                    index,
+                    id,
+                    name,
+                    arguments,
+                }),
+                Delta::Finish { reason } => finish = Some(reason),
+                _ => {}
+            }
+        }
+        (text, collector.finish(), finish)
+    }
+
+    fn legacy_body(model_id: &str, messages: &[WireMessage]) -> Value {
+        // The 0.2.0 body, as it was written.
+        json!({
+            "model": model_id,
+            "messages": messages.iter().map(message_json).collect::<Vec<_>>(),
+            "stream": true,
+            "usage": {"include": true},
+        })
+    }
+
+    #[test]
+    fn request_body_without_tools_is_byte_identical_to_0_2_0() {
+        let msgs = vec![
+            plain(Role::System, "be brief"),
+            WireMessage {
+                role: Role::User,
+                parts: vec![
+                    Part::Text("what".into()),
+                    Part::ImageDataUrl("data:image/png;base64,AAAA".into()),
+                ],
+                tool_calls: vec![],
+                tool_call_id: None,
+            },
+        ];
+        let now = serde_json::to_string(&request_body("m/x", &msgs, None, None)).unwrap();
+        let then = serde_json::to_string(&legacy_body("m/x", &msgs)).unwrap();
+        assert_eq!(now, then);
+        // A session id alone does not change a request without tools either.
+        let with_sid = request_body("m/x", &msgs, None, Some("s1"));
+        assert_eq!(serde_json::to_string(&with_sid).unwrap(), then);
+    }
+
+    fn plain(role: Role, text: &str) -> WireMessage {
+        WireMessage {
+            role,
+            parts: vec![Part::Text(text.to_string())],
+            tool_calls: vec![],
+            tool_call_id: None,
+        }
+    }
+
+    #[test]
+    fn request_body_with_tools_sends_tools_provider_and_session() {
+        let tools = json!([{"type": "function", "function": {"name": "list_dir"}}]);
+        let v = request_body(
+            "m/x",
+            &[plain(Role::User, "hi")],
+            Some(&tools),
+            Some("chat-1"),
+        );
+        assert_eq!(v["tools"], tools);
+        assert_eq!(v["provider"], json!({"require_parameters": true}));
+        assert_eq!(v["session_id"], "chat-1");
+        assert_eq!(v["stream"], true);
+        assert_eq!(v["usage"]["include"], true);
+    }
+
+    #[test]
+    fn assistant_calls_and_tool_result_serialise_in_the_openai_form() {
+        let calls = vec![
+            ToolCall {
+                id: "call_1".into(),
+                name: "read_file".into(),
+                arguments: "{\"path\":\"a\"}".into(),
+            },
+            ToolCall {
+                id: "call_2".into(),
+                name: "list_dir".into(),
+                arguments: "{}".into(),
+            },
+        ];
+        let assistant = WireMessage {
+            role: Role::Assistant,
+            parts: vec![],
+            tool_calls: calls,
+            tool_call_id: None,
+        };
+        let v = message_json(&assistant);
+        assert_eq!(v["role"], "assistant");
+        assert!(v["content"].is_null());
+        assert_eq!(
+            v["tool_calls"],
+            json!([
+                {"id": "call_1", "type": "function",
+                 "function": {"name": "read_file", "arguments": "{\"path\":\"a\"}"}},
+                {"id": "call_2", "type": "function",
+                 "function": {"name": "list_dir", "arguments": "{}"}},
+            ])
+        );
+        let tool = WireMessage {
+            role: Role::Tool,
+            parts: vec![Part::Text("file text".into())],
+            tool_calls: vec![],
+            tool_call_id: Some("call_1".into()),
+        };
+        assert_eq!(
+            message_json(&tool),
+            json!({"role": "tool", "tool_call_id": "call_1", "content": "file text"})
+        );
+    }
+
+    #[tokio::test]
+    async fn one_call_in_five_fragments_is_collected_whole() {
+        let (_, calls, finish) = run_tools(T_FRAGMENTS).await;
+        assert_eq!(
+            calls,
+            vec![ToolCall {
+                id: "call_abc".into(),
+                name: "read_file".into(),
+                arguments: "{\"path\": \"src/app.ts\"}".into(),
+            }]
+        );
+        assert_eq!(finish.as_deref(), Some("tool_calls"));
+    }
+
+    #[tokio::test]
+    async fn interleaved_calls_come_out_in_index_order() {
+        let (_, calls, _) = run_tools(T_INTERLEAVED).await;
+        let got: Vec<_> = calls
+            .iter()
+            .map(|c| (c.id.as_str(), c.name.as_str(), c.arguments.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("call_a", "read_file", "{\"path\":\"a.txt\"}"),
+                ("call_b", "list_dir", "{\"path\":\".\"}"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_call_followed_by_finish_stop_still_yields_the_call() {
+        let (_, calls, finish) = run_tools(T_FINISH_STOP).await;
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "list_dir");
+        assert_eq!(finish, None, "a plain stop is not reported as a finish");
+    }
+
+    #[tokio::test]
+    async fn text_and_a_call_in_one_reply_yield_both() {
+        let (text, calls, _) = run_tools(T_TEXT_AND_CALL).await;
+        assert_eq!(text, "Let me look.");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "call_t");
+    }
+
+    #[tokio::test]
+    async fn no_id_gets_call_index_and_no_name_is_dropped() {
+        let (_, calls, _) = run_tools(T_NO_ID_NO_NAME).await;
+        assert_eq!(
+            calls,
+            vec![ToolCall {
+                id: "call_0".into(),
+                name: "list_dir".into(),
+                arguments: "{\"path\":\".\"}".into(),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn arguments_sent_as_an_object_are_serialised() {
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c\",",
+            "\"function\":{\"name\":\"list_dir\",\"arguments\":{\"path\":\".\"}}}]}}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let (_, calls, _) = run_tools(body).await;
+        assert_eq!(calls[0].arguments, "{\"path\":\".\"}");
     }
 }

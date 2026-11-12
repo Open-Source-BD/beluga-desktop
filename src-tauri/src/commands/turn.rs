@@ -187,13 +187,20 @@ pub(super) fn wire(m: &StoredMessage, with_images: bool) -> WireMessage {
             parts.push(Part::Text(format!("File: {}\n{}", a.name, fenced(&text))));
         }
     }
-    WireMessage { role, parts }
+    WireMessage {
+        role,
+        parts,
+        tool_calls: Vec::new(),
+        tool_call_id: None,
+    }
 }
 
 pub(super) fn system(text: String) -> WireMessage {
     WireMessage {
         role: Role::System,
         parts: vec![Part::Text(text)],
+        tool_calls: Vec::new(),
+        tool_call_id: None,
     }
 }
 

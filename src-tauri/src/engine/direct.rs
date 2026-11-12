@@ -57,7 +57,7 @@ impl Engine for DirectEngine {
         out.requests = 1;
         let started = tokio::select! {
             _ = cancel.cancelled() => None,
-            r = chat_stream(&self.http, &self.base_url, &key, &req.model_id, &req.messages) => Some(r),
+            r = chat_stream(&self.http, &self.base_url, &key, &req.model_id, &req.messages, None, None) => Some(r),
         };
         let stream = match started {
             None => return stopped(emit, out),
@@ -83,6 +83,8 @@ impl Engine for DirectEngine {
                         cost_usd: out.cost_usd,
                     });
                 }
+                // Tool calls are not used yet; the next task reads them.
+                Some(Ok(Delta::ToolCallPart { .. } | Delta::Finish { .. })) => {}
                 Some(Ok(Delta::Done)) => {
                     emit(EngineEvent::Done);
                     return out;
@@ -134,6 +136,8 @@ mod tests {
             messages: vec![WireMessage {
                 role: Role::User,
                 parts: vec![Part::Text("hi".into())],
+                tool_calls: vec![],
+                tool_call_id: None,
             }],
         }
     }
