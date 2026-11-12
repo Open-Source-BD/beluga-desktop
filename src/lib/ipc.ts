@@ -132,7 +132,8 @@ export type EngineEvent =
  * a UiError kind), `error` for "failed". A rejection means the turn never ran.
  */
 export interface TurnResult {
-  status: "done" | "interrupted" | "failed";
+  /** "paused": a project task waits for the user (`reason` says why). */
+  status: "done" | "interrupted" | "failed" | "paused";
   reason: string | null;
   error: UiError | null;
 }

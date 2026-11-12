@@ -3,6 +3,7 @@
 use super::auth::revoke;
 use super::chat_state::{SKILL_NOTE, skills_to_send};
 use super::chats::local;
+use crate::agent::task;
 use crate::engine::{EngineEvent, TurnOutcome, TurnRequest, UiError};
 use crate::openrouter::models::ModelCache;
 use crate::openrouter::stream::{Part, Role, WireMessage};
@@ -63,7 +64,7 @@ pub struct TurnResult {
 }
 
 impl TurnResult {
-    pub(super) fn done() -> Self {
+    pub(crate) fn done() -> Self {
         Self {
             status: TurnStatus::Done,
             reason: None,
@@ -71,7 +72,7 @@ impl TurnResult {
         }
     }
 
-    pub(super) fn interrupted(reason: String) -> Self {
+    pub(crate) fn interrupted(reason: String) -> Self {
         Self {
             status: TurnStatus::Interrupted,
             reason: Some(reason),
@@ -79,8 +80,7 @@ impl TurnResult {
         }
     }
 
-    #[allow(dead_code)] // Used by the project-work loop.
-    pub(super) fn paused(reason: &str) -> Self {
+    pub(crate) fn paused(reason: &str) -> Self {
         Self {
             status: TurnStatus::Paused,
             reason: Some(reason.to_string()),
@@ -88,7 +88,7 @@ impl TurnResult {
         }
     }
 
-    pub(super) fn failed(error: UiError) -> Self {
+    pub(crate) fn failed(error: UiError) -> Self {
         Self {
             status: TurnStatus::Failed,
             reason: None,
@@ -159,7 +159,7 @@ fn validate(attachments: &[StoredAttachment]) -> Result<(), UiError> {
 
 /// The cached model list says this model cannot read images. A model that is
 /// not in the cache is given the benefit of the doubt.
-fn model_is_blind(s: &AppState, model_id: &str) -> bool {
+pub(crate) fn model_is_blind(s: &AppState, model_id: &str) -> bool {
     ModelCache::load(&s.model_cache_file())
         .and_then(|list| list.into_iter().find(|m| m.id == model_id))
         .is_some_and(|m| !m.accepts_images)
@@ -177,7 +177,7 @@ fn fenced(text: &str) -> String {
     format!("{fence}\n{text}\n{fence}")
 }
 
-pub(super) fn wire(m: &StoredMessage, with_images: bool) -> WireMessage {
+pub(crate) fn wire(m: &StoredMessage, with_images: bool) -> WireMessage {
     let role = match m.role.as_str() {
         "assistant" => Role::Assistant,
         "system" => Role::System,
@@ -208,7 +208,7 @@ pub(super) fn wire(m: &StoredMessage, with_images: bool) -> WireMessage {
     }
 }
 
-pub(super) fn system(text: String) -> WireMessage {
+pub(crate) fn system(text: String) -> WireMessage {
     WireMessage {
         role: Role::System,
         parts: vec![Part::Text(text)],
@@ -223,9 +223,19 @@ pub(super) fn system(text: String) -> WireMessage {
 ///    order), `Skill: {id}\n\n{text}`;
 /// 3. when there is a summary, `Summary of the earlier conversation:\n\n{summary}`.
 pub(super) fn preamble(skills: &[(&str, &str)], summary: Option<&str>) -> Vec<WireMessage> {
+    preamble_with(SKILL_NOTE, skills, summary)
+}
+
+/// `preamble` with `note` in place of `SKILL_NOTE` (a project chat sends
+/// its own note).
+pub(crate) fn preamble_with(
+    note: &str,
+    skills: &[(&str, &str)],
+    summary: Option<&str>,
+) -> Vec<WireMessage> {
     let mut out = Vec::new();
     if !skills.is_empty() {
-        out.push(system(SKILL_NOTE.to_string()));
+        out.push(system(note.to_string()));
     }
     for (id, body) in skills {
         out.push(system(format!("Skill: {id}\n\n{body}")));
@@ -236,6 +246,42 @@ pub(super) fn preamble(skills: &[(&str, &str)], summary: Option<&str>) -> Vec<Wi
         )));
     }
     out
+}
+
+/// Stored rows as plain chat for a request without tools. A chat may hold
+/// rows of earlier project tasks, and a model sent `tool` messages or
+/// `tool_calls` without tools can reject them, so an assistant row's calls
+/// are dropped and each result becomes `[{summary}]` on its own line at the
+/// end of the assistant message that made the call. A result with no such
+/// message before it is left out, and so is an assistant message left with
+/// nothing to say. Rows of a chat that never had tools come out exactly as
+/// before.
+pub(super) fn plain_history(rows: &[StoredMessage], with_images: bool) -> Vec<WireMessage> {
+    // Each message, and whether it is an assistant row that made calls.
+    let mut out: Vec<(WireMessage, bool)> = Vec::new();
+    let mut after_assistant = false;
+    for m in rows {
+        if m.kind == "tool" {
+            let Some((last, _)) = out.last_mut().filter(|_| after_assistant) else {
+                continue;
+            };
+            let summary = m.tool_meta.as_ref().map_or("", |t| t.summary.as_str());
+            match last.parts.iter_mut().find_map(|p| match p {
+                Part::Text(t) => Some(t),
+                Part::ImageDataUrl(_) => None,
+            }) {
+                Some(text) => text.push_str(&format!("\n[{summary}]")),
+                None => last.parts.insert(0, Part::Text(format!("[{summary}]"))),
+            }
+        } else {
+            after_assistant = m.role == "assistant";
+            out.push((wire(m, with_images), !m.tool_calls.is_empty()));
+        }
+    }
+    out.into_iter()
+        .filter(|(w, made_calls)| !(*made_calls && w.parts.is_empty()))
+        .map(|(w, _)| w)
+        .collect()
 }
 
 /// Everything a turn on `model_id` sends: the `preamble`, then every
@@ -253,13 +299,8 @@ fn wire_history(s: &AppState, chat_id: &str, model_id: &str) -> Result<Vec<WireM
         .map(|(text, _)| text);
     let with_images = !model_is_blind(s, model_id);
     let mut messages = preamble(&skills, summary.as_deref());
-    messages.extend(
-        s.store
-            .sendable_messages(chat_id)
-            .map_err(local)?
-            .iter()
-            .map(|m| wire(m, with_images)),
-    );
+    let rows = s.store.sendable_messages(chat_id).map_err(local)?;
+    messages.extend(plain_history(&rows, with_images));
     Ok(messages)
 }
 
@@ -291,6 +332,13 @@ pub async fn send_message(
     if attachments.iter().any(is_image) && model_is_blind(s, model_id) {
         return Err(UiError::other(BLIND_MODEL));
     }
+    if task::project_for(s, chat_id, model_id).is_some() {
+        let first = Before::Send {
+            text,
+            attachments: &attachments,
+        };
+        return run_project_turn(s, chat_id, model_id, first, on_event).await;
+    }
     s.store
         .append_message(chat_id, "user", text, &attachments, false)
         .map_err(local)?;
@@ -319,6 +367,79 @@ async fn run_stored_turn(
         return Ok(TurnResult::failed(e));
     }
     Ok(ran.result)
+}
+
+/// What a project turn stores before the task starts.
+enum Before<'a> {
+    /// The user's new message.
+    Send {
+        text: &'a str,
+        attachments: &'a [StoredAttachment],
+    },
+    /// A retry: the reply to remove first, if any.
+    Retry { replace: Option<String> },
+}
+
+/// Removes the chat's running turn when it is still this one, also when the
+/// turn's future is dropped part way.
+struct Registered<'a> {
+    s: &'a AppState,
+    chat_id: &'a str,
+    id: u64,
+}
+
+impl Drop for Registered<'_> {
+    fn drop(&mut self) {
+        let mut turns = self.s.turns();
+        if turns.get(self.chat_id).is_some_and(|t| t.id == self.id) {
+            turns.remove(self.chat_id);
+        }
+    }
+}
+
+/// Runs a project task as the chat's turn. A task already running in the
+/// chat is cancelled and, before anything is stored, allowed to finish
+/// storing its own rows, so the new rows come after all of them. Then calls
+/// left without a result are recorded as not run, the user's message is
+/// stored (or the replaced reply removed), and the loop runs. `Err` means
+/// the turn never ran.
+async fn run_project_turn(
+    s: &AppState,
+    chat_id: &str,
+    model_id: &str,
+    before: Before<'_>,
+    on_event: &(dyn Fn(EngineEvent) + Send + Sync),
+) -> Result<TurnResult, UiError> {
+    let (id, cancel) =
+        register_turn(s, chat_id, Register::Replace).expect("replacing always registers");
+    let _registered = Registered { s, chat_id, id };
+    let _held = s.task_locks.hold(chat_id).await;
+    s.store.set_chat_model(chat_id, model_id).map_err(local)?;
+    task::repair(&s.store, chat_id).map_err(local)?;
+    match before {
+        Before::Send { text, attachments } => {
+            s.store
+                .append_message(chat_id, "user", text, attachments, false)
+                .map_err(local)?;
+        }
+        Before::Retry { replace } => {
+            if let Some(replaced) = replace {
+                s.store.delete_message(chat_id, &replaced).map_err(local)?;
+            }
+        }
+    }
+    let unauthorized = AtomicBool::new(false);
+    let emit = |e: EngineEvent| {
+        if is_unauthorized(&e) {
+            unauthorized.store(true, Ordering::SeqCst);
+        }
+        on_event(e);
+    };
+    let result = task::run_task(s, chat_id, model_id, &emit, cancel).await;
+    if unauthorized.load(Ordering::SeqCst) {
+        revoke(s);
+    }
+    Ok(result)
 }
 
 /// What `run_registered` hands back once the engine is done.
@@ -448,6 +569,23 @@ pub async fn retry_turn(
         return Err(UiError::other("This chat no longer exists."));
     }
     let messages = s.store.sendable_messages(chat_id).map_err(local)?;
+    if task::project_for(s, chat_id, model_id).is_some() {
+        // A reply that made calls is never removed; a task that stopped
+        // after a call (its last row a call or a result) is continued.
+        let replaced = messages.last().filter(|m| {
+            m.role == "assistant" && m.tool_calls.is_empty() && (m.interrupted || regenerate)
+        });
+        let answered = &messages[..messages.len() - usize::from(replaced.is_some())];
+        let continues =
+            |m: &StoredMessage| m.role == "user" || m.kind == "tool" || !m.tool_calls.is_empty();
+        if !answered.last().is_some_and(continues) {
+            return Err(UiError::other("There is nothing to retry in this chat."));
+        }
+        let before = Before::Retry {
+            replace: replaced.map(|m| m.id.clone()),
+        };
+        return run_project_turn(s, chat_id, model_id, before, on_event).await;
+    }
     let replaced = messages
         .last()
         .filter(|m| m.role == "assistant" && (m.interrupted || regenerate));

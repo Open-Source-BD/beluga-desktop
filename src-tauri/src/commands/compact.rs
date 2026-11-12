@@ -4,7 +4,8 @@
 use super::chat_state::{CHARS_PER_TOKEN, message_chars, require_chat, sized_model};
 use super::chats::local;
 use super::turn::{
-    Register, TurnResult, TurnStatus, preamble, register_turn, run_registered, system, wire,
+    Register, TurnResult, TurnStatus, plain_history, preamble, register_turn, run_registered,
+    system,
 };
 use crate::engine::{TurnOutcome, TurnRequest, UiError};
 use crate::state::AppState;
@@ -71,11 +72,20 @@ pub async fn compact_chat(
     if s.turns().contains_key(chat_id) {
         return Err(UiError::other(TURN_RUNNING));
     }
-    let messages = s.store.sendable_messages(chat_id).map_err(local)?;
+    let mut messages = s.store.sendable_messages(chat_id).map_err(local)?;
+    // Never between a call and its result: a last reply whose calls are not
+    // all answered stays after the boundary, with the results still to come.
+    let boundary = match open_reply(&messages) {
+        Some(at) => {
+            let seq = messages[at].seq;
+            messages.truncate(at);
+            seq
+        }
+        None => messages.last().map_or(0, |m| m.seq + 1),
+    };
     if messages.len() < MIN_MESSAGES {
         return Err(UiError::other(TOO_SHORT));
     }
-    let boundary = messages.last().expect("at least four messages").seq + 1;
     let mut conversation = Conversation {
         summary: s
             .store
@@ -95,11 +105,10 @@ pub async fn compact_chat(
     }
     let mut wire_messages = vec![system(ask)];
     wire_messages.extend(preamble(&[], conversation.summary.as_deref()));
+    // The summary request has no tools, so tool rows go as plain text.
     wire_messages.extend(
-        conversation
-            .messages
-            .iter()
-            .map(|m| wire(m, false))
+        plain_history(&conversation.messages, false)
+            .into_iter()
             .filter(|w| !w.parts.is_empty()),
     );
     let request = TurnRequest {
@@ -141,6 +150,19 @@ pub async fn compact_chat(
         Ok(()) => result,
         Err(e) => TurnResult::failed(e),
     })
+}
+
+/// The index of the last reply when it made calls that are not all
+/// answered yet (a task that ended before storing every result).
+fn open_reply(messages: &[StoredMessage]) -> Option<usize> {
+    let at = messages.iter().rposition(|m| m.kind != "tool")?;
+    let calls = &messages[at].tool_calls;
+    let answered = |id: &str| {
+        messages[at + 1..]
+            .iter()
+            .any(|m| m.tool_call_id.as_deref() == Some(id))
+    };
+    calls.iter().any(|c| !answered(&c.id)).then_some(at)
 }
 
 fn record_usage(s: &AppState, chat_id: &str, out: &TurnOutcome) -> Result<(), UiError> {

@@ -4,6 +4,7 @@
 use crate::agent::approval::Approvals;
 use crate::agent::background::Background;
 use crate::agent::dispatch::ReadLogs;
+use crate::agent::task::TaskLocks;
 use crate::dialogs::Dialogs;
 use crate::engine::{DirectEngine, Engine};
 use crate::secrets::{FileStore, KeyStore, KeychainStore, SecretError, StorageKind};
@@ -263,6 +264,8 @@ pub struct AppState {
     /// Opens the system folder and save dialogs.
     pub dialogs: Arc<dyn Dialogs>,
     pub turns: Mutex<HashMap<String, RunningTurn>>,
+    /// Held by a project task while it stores rows, one task per chat.
+    pub task_locks: TaskLocks,
     pub pending_sign_in: Mutex<Option<PendingSignIn>>,
     /// A validated key the keychain could not take, awaiting `resolve_key_storage`.
     pub pending_key: Mutex<Option<HeldKey>>,
@@ -363,6 +366,7 @@ impl AppState {
             events,
             dialogs,
             turns: Mutex::new(HashMap::new()),
+            task_locks: TaskLocks::default(),
             pending_sign_in: Mutex::new(None),
             pending_key: Mutex::new(None),
             signed_out: AtomicBool::new(false),

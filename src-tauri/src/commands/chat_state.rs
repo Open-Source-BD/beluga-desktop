@@ -10,6 +10,7 @@
 
 use super::chats::local;
 use super::turn::{decode, is_image};
+use crate::agent::{prompt, schema, task};
 use crate::engine::UiError;
 use crate::openrouter::models::{ModelCache, ModelInfo};
 use crate::skills::MAX_BODY_CHARS;
@@ -152,7 +153,7 @@ fn resolve_chat(s: &AppState, chat_id: &str, model_id: &str) -> Result<Vec<Resol
 
 /// `(id, SKILL.md text)` of each active skill sent with a turn on `model_id`,
 /// in activation order.
-pub(super) fn skills_to_send(
+pub(crate) fn skills_to_send(
     s: &AppState,
     chat_id: &str,
     model_id: &str,
@@ -264,10 +265,12 @@ pub(super) fn message_chars(m: &StoredMessage, image_chars: usize) -> usize {
             .sum::<usize>()
 }
 
-/// How much of `model_id`'s context the next turn would use: the fixed note
-/// and fitting skill bodies, the summary, every sendable message's text and
-/// decoded text attachments, 1,000 characters per image, and the draft, at
-/// four characters a token.
+/// How much of `model_id`'s context the next turn would use: in a project
+/// chat the system message and the tool definitions; the skills note and
+/// fitting skill bodies, the summary, every sendable row's text (tool
+/// results included), decoded text attachments and call names and
+/// arguments, 1,000 characters per image, and the draft, at four characters
+/// a token.
 pub fn chat_fullness(
     s: &AppState,
     chat_id: &str,
@@ -283,14 +286,23 @@ pub fn chat_fullness(
     };
     let skills = skills_to_send(s, chat_id, model_id)?;
     let mut total = draft_chars as usize;
+    let project = task::project_for(s, chat_id, model_id);
+    if let Some(project) = &project {
+        total += chars(&task::system_text(project)) + chars(&schema::tools().to_string());
+    }
     if !skills.is_empty() {
-        total += chars(SKILL_NOTE) + skills.iter().map(|(_, b)| chars(b)).sum::<usize>();
+        total += chars(prompt::skills_note(project.is_some()))
+            + skills.iter().map(|(_, b)| chars(b)).sum::<usize>();
     }
     if let Some((summary, _)) = s.store.summary(chat_id).map_err(local)? {
         total += chars(&summary);
     }
     for m in s.store.sendable_messages(chat_id).map_err(local)? {
-        total += message_chars(&m, IMAGE_CHARS);
+        total += message_chars(&m, IMAGE_CHARS)
+            + m.tool_calls
+                .iter()
+                .map(|c| chars(&c.name) + chars(&c.arguments))
+                .sum::<usize>();
     }
     let tokens = total as f64 / CHARS_PER_TOKEN as f64;
     Ok(Fullness {

@@ -65,6 +65,18 @@ describe("useChat", () => {
     expect(result.current.messages.map((m) => m.text)).toEqual(["hi", "Hello"]);
   });
 
+  it("a paused or unknown result settles as idle without an error", async () => {
+    const { result } = renderHook(() => useChat("a"));
+    await waitFor(() => expect(ipc.getMessages).toHaveBeenCalled());
+    for (const status of ["paused", "something_new"]) {
+      act(() => result.current.send("hi", [], "m1"));
+      act(() => emit({ type: "paused", reason: "going_in_circles" } as unknown as EngineEvent));
+      await act(async () => finish({ status, reason: "going_in_circles", error: null } as TurnResult));
+      expect(result.current.status).toBe("idle");
+      expect(result.current.error).toBeNull();
+    }
+  });
+
   it("failed sets the error and keeps the user's message", async () => {
     const { result } = renderHook(() => useChat("a"));
     act(() => result.current.send("hi", [], "m1"));

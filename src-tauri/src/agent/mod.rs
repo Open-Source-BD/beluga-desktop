@@ -112,6 +112,7 @@ pub mod change;
 pub mod dispatch;
 pub mod paths;
 pub mod plan;
+pub mod prompt;
 pub mod read;
 pub mod rules;
 pub mod run;
@@ -119,6 +120,7 @@ pub mod schema;
 pub mod search;
 pub mod secrets;
 pub mod shell;
+pub mod task;
 
 #[cfg(test)]
 pub(crate) mod test_support;
