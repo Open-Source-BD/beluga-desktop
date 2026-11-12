@@ -12,6 +12,7 @@ const state = (text: string, over: Partial<TaskState> = {}): TaskState => ({
   background: [],
   project: true,
   waiting: null,
+  running: false,
   ...over,
 });
 let bg: (chatId: string) => void;

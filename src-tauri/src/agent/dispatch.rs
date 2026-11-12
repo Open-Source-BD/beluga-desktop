@@ -48,7 +48,11 @@ pub(crate) const TOOL_NAMES: [&str; 10] = [
     "stop_command",
 ];
 /// Longest command accepted, in characters.
-const MAX_COMMAND_CHARS: usize = 20_000;
+const MAX_COMMAND_CHARS: usize = 4_000;
+/// A command with more lines than this is refused: the card could not show it at a glance.
+const MAX_COMMAND_LINES: usize = 50;
+const COMMAND_TOO_LONG: &str =
+    "That command is too long to run. Put it in a script file and run the file.";
 const BUSY: &str = "Another request is already waiting for the user's answer in this chat, so this one was not done.";
 const HIDDEN_CHARACTERS: &str =
     "That command contains hidden or control characters and cannot be run.";
@@ -586,8 +590,8 @@ fn command_args(args: &Value) -> Result<CommandArgs, String> {
     if command.trim().is_empty() {
         return Err("The argument \"command\" must not be empty.".to_string());
     }
-    if command.chars().count() > MAX_COMMAND_CHARS {
-        return Err("The command is longer than 20,000 characters, so it was not run.".to_string());
+    if command.chars().count() > MAX_COMMAND_CHARS || command.lines().count() > MAX_COMMAND_LINES {
+        return Err(COMMAND_TOO_LONG.to_string());
     }
     if command.contains('\0') {
         return Err("The command contains a NUL character, so it was not run.".to_string());

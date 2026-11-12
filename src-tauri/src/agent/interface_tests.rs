@@ -150,6 +150,7 @@ async fn task_state_reflects_the_plan_edits_allowed_the_card_and_background_comm
             background: vec![],
             project: true,
             waiting: None,
+            running: false,
         }
     );
     let during = async {
@@ -164,6 +165,7 @@ async fn task_state_reflects_the_plan_edits_allowed_the_card_and_background_comm
             }
         ));
         assert_eq!(st.plan.len(), 2);
+        assert!(st.running, "a turn is registered while it waits");
         f.answer_cards(vec![Answer::Once]).await;
     };
     let (r, ()) = tokio::join!(f.send("go"), during);
@@ -172,6 +174,7 @@ async fn task_state_reflects_the_plan_edits_allowed_the_card_and_background_comm
     assert_eq!(st.plan[0].text, "read");
     assert_eq!(st.plan[1].text, "write");
     assert_eq!(st.waiting, None);
+    assert!(!st.running, "no turn is registered once it ended");
     assert_eq!(st.background.len(), 1);
     assert!(st.background[0].running);
     assert_eq!(st.background[0].command, sleeper());
@@ -910,6 +913,7 @@ mod fixtures {
                 background: bg(),
                 project: true,
                 waiting: Some(approvals().remove(0)),
+                running: true,
             },
             commands::TaskState {
                 plan: vec![],
@@ -917,6 +921,7 @@ mod fixtures {
                 background: vec![],
                 project: false,
                 waiting: None,
+                running: false,
             },
         ]
     }

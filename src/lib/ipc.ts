@@ -585,6 +585,8 @@ export interface TaskState {
   project: boolean;
   /** The card the core is waiting on in this chat, if any. */
   waiting: Approval | null;
+  /** A turn is running for this chat (it may be one this window has no event channel to). */
+  running: boolean;
 }
 
 /** Saved command rules of one folder; `folder` is the key to hand back to `removeProjectRule`. */

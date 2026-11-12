@@ -556,6 +556,7 @@ const taskState = obj<ipc.TaskState>({
   background: list(bgInfo),
   project: bool,
   waiting: or(approval.check, nul),
+  running: bool,
 });
 const chatState = obj<ipc.ChatState>({
   active_skills: list(

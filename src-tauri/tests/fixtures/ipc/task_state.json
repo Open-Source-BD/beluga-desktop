@@ -41,13 +41,15 @@
       "outside": false,
       "first_in_project": true,
       "background": false
-    }
+    },
+    "running": true
   },
   {
     "plan": [],
     "edits_allowed": false,
     "background": [],
     "project": false,
-    "waiting": null
+    "waiting": null,
+    "running": false
   }
 ]

@@ -25,7 +25,7 @@ const row = (over: Partial<StoredMessage>): StoredMessage => ({
   id: "x", role: "assistant", text: "", attachments: [], interrupted: false, created_at: 1,
   kind: "message", seq: 1, tool_calls: [], tool_call_id: null, tool_meta: null, ...over,
 });
-const noTask = { plan: [], edits_allowed: false, background: [], project: true, waiting: null };
+const noTask = { plan: [], edits_allowed: false, background: [], project: true, waiting: null, running: false };
 const CMD: Approval = { kind: "command", id: "ap1", command: "npm install", folder: "/p", rule: "npm install", outside: false, first_in_project: false, background: false };
 
 const emits: Record<string, (e: EngineEvent) => void> = {};

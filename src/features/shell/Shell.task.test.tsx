@@ -42,7 +42,7 @@ const row = (over: Partial<StoredMessage>): StoredMessage => ({
   id: "x", role: "assistant", text: "", attachments: [], interrupted: false, created_at: 1,
   kind: "message", seq: 1, tool_calls: [], tool_call_id: null, tool_meta: null, ...over,
 });
-const noTask = { plan: [], edits_allowed: false, background: [], project: true, waiting: null };
+const noTask = { plan: [], edits_allowed: false, background: [], project: true, waiting: null, running: false };
 
 const emits: Record<string, (e: EngineEvent) => void> = {};
 const finishes: Record<string, (r: TurnResult) => void> = {};

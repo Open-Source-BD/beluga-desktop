@@ -34,6 +34,8 @@ pub struct TaskState {
     pub project: bool,
     /// The card the core is waiting on in this chat, if any.
     pub waiting: Option<Approval>,
+    /// A turn is running for this chat (the interface may have lost its event channel to it).
+    pub running: bool,
 }
 
 /// The command rules saved for one folder, keyed as the dispatcher keys them
@@ -90,6 +92,7 @@ pub fn task_state(s: &AppState, chat_id: &str) -> Result<TaskState, UiError> {
         background: s.background.list(chat_id),
         project: has_project(s, chat_id)?,
         waiting: s.approvals.waiting(chat_id),
+        running: s.turns().contains_key(chat_id),
     })
 }
 

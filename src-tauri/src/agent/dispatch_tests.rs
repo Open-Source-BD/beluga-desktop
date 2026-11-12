@@ -732,7 +732,7 @@ async fn the_command_card_carries_the_whole_command_folder_outside_hint_and_firs
 #[tokio::test]
 async fn a_long_command_shows_complete_on_the_card() {
     let fx = Fx::new();
-    let command = format!("echo {}", "x".repeat(5_000));
+    let command = format!("echo {}", "x".repeat(3_900));
     let (_, card) = fx
         .answered(
             "run_command",
@@ -799,11 +799,23 @@ async fn a_declined_command_leaves_no_file_and_no_process() {
 async fn commands_too_long_or_with_nul_are_refused_without_asking() {
     let fx = Fx::new();
     for command in [
-        format!("echo {}", "x".repeat(20_000)),
+        format!("echo {}", "x".repeat(4_000)),
         "echo a\0b".to_string(),
+        vec!["echo a"; 51].join("\n"),
     ] {
         let d = fx.call("run_command", json!({"command": command})).await;
         assert_eq!(d.outcome.status, ToolStatus::Error);
+    }
+    // The size refusals say what to do instead.
+    for command in [
+        format!("echo {}", "x".repeat(4_000)),
+        vec!["echo a"; 51].join("\n"),
+    ] {
+        let d = fx.call("run_command", json!({"command": command})).await;
+        assert_eq!(
+            d.outcome.text,
+            "That command is too long to run. Put it in a script file and run the file."
+        );
     }
 }
 

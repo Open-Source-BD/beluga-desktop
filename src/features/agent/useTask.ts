@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { onBackgroundChanged, taskState, type TaskState } from "../../lib/ipc";
 
-const NONE: TaskState = { plan: [], edits_allowed: false, background: [], project: false, waiting: null };
+const NONE: TaskState = { plan: [], edits_allowed: false, background: [], project: false, waiting: null, running: false };
 
 /**
  * The selected chat's task state (checklist, edits switch, background commands, folder,
