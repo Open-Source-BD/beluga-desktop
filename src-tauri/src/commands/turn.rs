@@ -254,8 +254,9 @@ pub(crate) fn preamble_with(
 /// are dropped and each result becomes `[{summary}]` on its own line at the
 /// end of the assistant message that made the call. A result with no such
 /// message before it is left out, and so is an assistant message left with
-/// nothing to say. Rows of a chat that never had tools come out exactly as
-/// before.
+/// nothing to say. Assistant messages that follow each other (the steps of a
+/// task) are then sent as one (`merge_assistants`). Rows of a chat that never
+/// had tools come out exactly as before.
 pub(super) fn plain_history(rows: &[StoredMessage], with_images: bool) -> Vec<WireMessage> {
     // Each message, and whether it is an assistant row that made calls.
     let mut out: Vec<(WireMessage, bool)> = Vec::new();
@@ -278,10 +279,38 @@ pub(super) fn plain_history(rows: &[StoredMessage], with_images: bool) -> Vec<Wi
             out.push((wire(m, with_images), !m.tool_calls.is_empty()));
         }
     }
-    out.into_iter()
-        .filter(|(w, made_calls)| !(*made_calls && w.parts.is_empty()))
-        .map(|(w, _)| w)
-        .collect()
+    merge_assistants(
+        out.into_iter()
+            .filter(|(w, made_calls)| !(*made_calls && w.parts.is_empty()))
+            .map(|(w, _)| w),
+    )
+}
+
+/// Joins each assistant message that directly follows another into it, so
+/// no two are sent in a row (some providers require user and assistant to
+/// alternate). The texts are joined with a blank line, in order; nothing is
+/// merged across a user or system message.
+pub(super) fn merge_assistants(
+    messages: impl IntoIterator<Item = WireMessage>,
+) -> Vec<WireMessage> {
+    let mut out: Vec<WireMessage> = Vec::new();
+    for w in messages {
+        match out.last_mut() {
+            Some(prev) if prev.role == Role::Assistant && w.role == Role::Assistant => {
+                for part in w.parts {
+                    match (prev.parts.last_mut(), part) {
+                        (Some(Part::Text(joined)), Part::Text(t)) => {
+                            joined.push_str("\n\n");
+                            joined.push_str(&t);
+                        }
+                        (_, other) => prev.parts.push(other),
+                    }
+                }
+            }
+            _ => out.push(w),
+        }
+    }
+    out
 }
 
 /// Everything a turn on `model_id` sends: the `preamble`, then every

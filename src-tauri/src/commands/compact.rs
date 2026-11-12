@@ -4,8 +4,8 @@
 use super::chat_state::{CHARS_PER_TOKEN, message_chars, require_chat, sized_model, wire_chars};
 use super::chats::local;
 use super::turn::{
-    Register, TurnResult, TurnStatus, plain_history, preamble, recorded_cost, register_turn,
-    run_registered, system,
+    Register, TurnResult, TurnStatus, merge_assistants, plain_history, preamble, recorded_cost,
+    register_turn, run_registered, system,
 };
 use crate::agent::guards;
 use crate::engine::{TurnOutcome, TurnRequest, UiError};
@@ -115,11 +115,12 @@ pub async fn compact_chat(
     let mut wire_messages = vec![system(ask)];
     wire_messages.extend(preamble(&[], conversation.summary.as_deref()));
     // The summary request has no tools, so tool rows go as plain text.
-    wire_messages.extend(
+    // Leaving out an empty message must not put two replies side by side.
+    wire_messages.extend(merge_assistants(
         plain_history(&conversation.messages, false)
             .into_iter()
             .filter(|w| !w.parts.is_empty()),
-    );
+    ));
     let request_chars: usize = wire_messages.iter().map(wire_chars).sum();
     let request = TurnRequest {
         model_id: model_id.to_string(),

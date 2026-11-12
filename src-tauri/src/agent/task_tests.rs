@@ -993,22 +993,52 @@ async fn history_with_tool_rows_is_sent_as_plain_chat_on_the_one_request_path() 
     let last = f.requests().pop().unwrap();
     assert_plain(&last);
     let roles: Vec<Role> = last.messages.iter().map(|m| m.role).collect();
-    assert_eq!(
-        roles,
-        [
-            Role::User,
-            Role::Assistant,
-            Role::Assistant,
-            Role::Assistant,
-            Role::User
-        ]
-    );
+    // The task's three replies go as one assistant message, in order.
+    assert_eq!(roles, [Role::User, Role::Assistant, Role::User]);
     assert_eq!(
         text_of(&last.messages[1]),
-        format!("Reading.\n[{}]", summaries[0])
+        format!(
+            "Reading.\n[{}]\n\n[{}]\n\nDone.",
+            summaries[0], summaries[1]
+        )
     );
-    assert_eq!(text_of(&last.messages[2]), format!("[{}]", summaries[1]));
-    assert_eq!(text_of(&last.messages[3]), "Done.");
+}
+
+/// No two messages of `role` follow each other.
+fn assert_alternates(req: &StepRequest, role: Role) {
+    for pair in req.messages.windows(2) {
+        assert!(
+            !(pair[0].role == role && pair[1].role == role),
+            "two {role:?} messages in a row: {:#?}",
+            req.messages
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_compaction_request_never_has_two_assistant_messages_in_a_row() {
+    let f = fx(vec![
+        calls(
+            "Reading.",
+            vec![call("c1", "read_file", json!({"path": "a.txt"}))],
+        ),
+        calls("", vec![call("c2", "list_dir", json!({}))]),
+        say("Done."),
+        say("Next."),
+        say("SUMMARY"),
+    ]);
+    f.send("look").await;
+    f.send("more").await;
+    compact::compact_chat(&f.state, &f.chat, TOOLS_MODEL, None)
+        .await
+        .unwrap();
+    let summary_req = f.requests().pop().unwrap();
+    assert_plain(&summary_req);
+    assert_alternates(&summary_req, Role::Assistant);
+    let all: String = summary_req.messages.iter().map(text_of).collect();
+    for text in ["Reading.", "Done.", "Next.", "look", "more"] {
+        assert!(all.contains(text), "{text} is missing: {all}");
+    }
 }
 
 #[tokio::test]

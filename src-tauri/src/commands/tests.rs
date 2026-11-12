@@ -3672,3 +3672,26 @@ async fn a_paid_plain_reply_whose_usage_has_tokens_but_no_cost_records_an_estima
     let cost = chats::chat_usage(&h.state, &chat.id).unwrap().cost_usd;
     assert!((cost - 0.001_004).abs() < 1e-12, "{cost}");
 }
+
+// ---------------------------------------------------------------------------
+// The one-request history
+// ---------------------------------------------------------------------------
+
+#[test]
+fn plain_history_of_a_chat_without_tool_rows_is_each_row_as_it_is() {
+    let h = signed_in("http://unused.invalid");
+    let chat = chats::create_chat(&h.state, "m/a").unwrap();
+    seed(
+        &h,
+        &chat.id,
+        &[
+            ("user", "Hi"),
+            ("assistant", "Hello"),
+            ("user", "More"),
+            ("assistant", "Sure\n\nthing"),
+        ],
+    );
+    let rows = h.state.store.sendable_messages(&chat.id).unwrap();
+    let expected: Vec<_> = rows.iter().map(|m| turn::wire(m, true)).collect();
+    assert_eq!(turn::plain_history(&rows, true), expected);
+}
