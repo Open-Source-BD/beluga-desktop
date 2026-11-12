@@ -170,8 +170,9 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
 
   // A file picked on the Skills screen lands in the message box once it is back.
   useEffect(() => {
-    if (!pendingFile || showSkills) return;
-    control.current?.addAttachment(pendingFile);
+    // Stays pending until the message box exists; a refusal shows in the box itself.
+    if (!pendingFile || showSkills || !control.current) return;
+    control.current.addAttachment(pendingFile);
     setPendingFile(null);
   }, [pendingFile, showSkills, selectedId]);
 

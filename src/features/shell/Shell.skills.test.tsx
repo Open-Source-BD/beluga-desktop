@@ -107,4 +107,34 @@ describe("Shell skills screen", () => {
     await waitFor(() => expect(ipc.skillFile).toHaveBeenCalledWith("superpowers:brainstorming", "notes.md"));
     expect(await screen.findByText("notes.md")).toBeInTheDocument();
   });
+
+  it("Attach to this chat with a chat already open ends with the chip in that chat's box", async () => {
+    ipc.listChats.mockResolvedValue([CHAT]);
+    render(<Shell />);
+    await userEvent.click(await screen.findByText("Login page"));
+    await userEvent.click(await screen.findByRole("button", { name: /^Skills/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "brainstorming" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Attach to this chat" }));
+    expect(await screen.findByText("notes.md")).toBeInTheDocument();
+    expect(ipc.createChat).not.toHaveBeenCalled();
+  });
+
+  it("a file the message box refuses ends in a visible message", async () => {
+    ipc.listModels.mockResolvedValue([{ ...PAID, accepts_images: false }]);
+    ipc.skillFile.mockResolvedValue({ name: "pic.png", mime: "image/png", data_base64: "aGk=" });
+    render(<Shell />);
+    await userEvent.click(await screen.findByRole("button", { name: /^Skills/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "brainstorming" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Attach to this chat" }));
+    expect(await screen.findByText(/cannot read images|can't read images|read images/i)).toBeInTheDocument();
+  });
+
+  it("a skill file that cannot be read shows its message on the detail", async () => {
+    ipc.skillFile.mockRejectedValue({ kind: "other", message: "notes.md could not be read.", retryable: false });
+    render(<Shell />);
+    await userEvent.click(await screen.findByRole("button", { name: /^Skills/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "brainstorming" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Attach to this chat" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("notes.md could not be read.");
+  });
 });

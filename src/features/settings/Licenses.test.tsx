@@ -26,9 +26,22 @@ describe("Licenses", () => {
     expect(onBack).toHaveBeenCalled();
   });
 
-  it("a pack whose license cannot be read still appears", async () => {
+  it("a pack whose license cannot be read still appears, with a Could not load line", async () => {
     ipc.packLicenses.mockRejectedValue({ kind: "other", message: "x", retryable: false });
     render(<Licenses onBack={vi.fn()} />);
     expect(await screen.findByText("superpowers")).toBeInTheDocument();
+    expect(screen.getAllByText("Could not load the license text.")).toHaveLength(2);
+  });
+
+  it("a failing pack list shows the message as an alert", async () => {
+    ipc.listPacks.mockRejectedValue({ kind: "other", message: "Skills could not be listed.", retryable: false });
+    render(<Licenses onBack={vi.fn()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Skills could not be listed.");
+  });
+
+  it("shows Loading while the packs are read", async () => {
+    ipc.listPacks.mockReturnValue(new Promise(() => {}));
+    render(<Licenses onBack={vi.fn()} />);
+    expect(screen.getByText("Loading...")).toBeInTheDocument();
   });
 });
