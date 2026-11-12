@@ -1,12 +1,12 @@
 # Live check results: project work against real models
 
-Date: 2026-11-12. Machine: macOS (Darwin 25.6), bash. Test: `src-tauri/tests/live.rs` (commit b9249fe), run as
+Date: 2026-11-12. Machine: macOS (Darwin 25.6), bash. Test: `src-tauri/tests/live.rs` (commit 32c9f70), run as
 
 ```
 OPENROUTER_API_KEY_FILE=... cargo test --manifest-path src-tauri/Cargo.toml --test live -- --ignored --nocapture --test-threads=1
 ```
 
-The test uses the app's real `DirectEngine`, the real task loop (`turn::send_message` → `run_task`), the real dispatcher and tools, an in-memory store and a temp project folder. A local relay passes every request on to OpenRouter unchanged and enforces the budget. In the recorded runs every approval card was answered `Once` automatically. The approval policy was tightened after the run (commit c92101a). The test now approves only the task's own edit of `notes.txt` and its own script or a plain read of a project file, inside the project and not in the background. It declines every other command and every secret file. The new policy is checked offline only (`the_approval_policy_allows_only_the_task_itself`); it has not been through a live run. The task: *"Read notes.txt, change alpha to beta, run the count script, and tell me what it printed."* The project held `notes.txt` (`alpha`), `count.sh` and `count.ps1`, which print `lines: 3`.
+The test uses the app's real `DirectEngine`, the real task loop (`turn::send_message` → `run_task`), the real dispatcher and tools, an in-memory store and a temp project folder. A local relay passes every request on to OpenRouter unchanged and enforces the budget. In the recorded runs every approval card was answered `Once` automatically. The approval policy was tightened after the run (commit e96f338). The test now approves only the task's own edit of `notes.txt` and its own script or a plain read of a project file, inside the project and not in the background. It declines every other command and every secret file. The new policy is checked offline only (`the_approval_policy_allows_only_the_task_itself`); it has not been through a live run. The task: *"Read notes.txt, change alpha to beta, run the count script, and tell me what it printed."* The project held `notes.txt` (`alpha`), `count.sh` and `count.ps1`, which print `lines: 3`.
 
 A run passes when `notes.txt` contains `beta`, the final reply contains `lines: 3`, the task used at most 12 requests, every call has exactly one result, and the stored conversation is well formed.
 
@@ -43,8 +43,8 @@ Four models ran and three passed. In all four, every call got exactly one result
 
 The request and stream code handled every real stream correctly, so nothing needed fixing there. Two small fixes elsewhere came out of the run:
 
-- **A 402 the balance cannot cover was shown as an empty balance** (commit 3f61944). The app sends no `max_tokens`, so OpenRouter reserves a model's full output. For `z-ai/glm-5.2` it refused with 402: "You requested up to 131072 tokens, but can only afford 8450", even though the balance was not empty. A 402 whose message contains "can only afford" now becomes the `low_credit` error: "Your balance is too low for this model's full reply. Add credit or pick a cheaper model." Any other 402 keeps the empty-balance message. The app still sends no `max_tokens`; that remains the owner's decision.
-- **Commands inherited `OPENROUTER_API_KEY_FILE`** (commit 654dc29). The app already removed `OPENROUTER_API_KEY` from every command's environment, but not this variable, which names a file holding a key. With automatic approval, a model's command could have read the key through it. It is now removed too. The live test also clears both variables from its own process as soon as it has read the key (commit c92101a).
+- **A 402 the balance cannot cover was shown as an empty balance** (commit f7434b2). The app sends no `max_tokens`, so OpenRouter reserves a model's full output. For `z-ai/glm-5.2` it refused with 402: "You requested up to 131072 tokens, but can only afford 8450", even though the balance was not empty. A 402 whose message contains "can only afford" now becomes the `low_credit` error: "Your balance is too low for this model's full reply. Add credit or pick a cheaper model." Any other 402 keeps the empty-balance message. The app still sends no `max_tokens`; that remains the owner's decision.
+- **Commands inherited `OPENROUTER_API_KEY_FILE`** (commit 9d328ee). The app already removed `OPENROUTER_API_KEY` from every command's environment, but not this variable, which names a file holding a key. With automatic approval, a model's command could have read the key through it. It is now removed too. The live test also clears both variables from its own process as soon as it has read the key (commit e96f338).
 
 ### What the providers did (observed on four providers on one day; not settled)
 
