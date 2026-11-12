@@ -31,7 +31,7 @@ export default function CommandCard({ approval: a, busy, armed, onAnswer, safeRe
       </h3>
       <pre
         ref={gate.ref}
-        onScroll={gate.onScroll}
+        {...gate.handlers}
         className="card-pre card-command"
         style={{ whiteSpace: "break-spaces", overflowWrap: "anywhere" }}
         tabIndex={0}
@@ -40,7 +40,14 @@ export default function CommandCard({ approval: a, busy, armed, onAnswer, safeRe
         {a.command}
       </pre>
       <p className="card-fine">{`${plural(Array.from(a.command).length, "character")}, ${plural(lineCount(a.command), "line")}.`}</p>
-      {gate.gated && <p className="card-line">This command is longer than the box. Scroll to read all of it.</p>}
+      {gate.gated && (
+        <p className="card-line">
+          This command is longer than the box. Scroll to read all of it.{" "}
+          <button type="button" className="card-link" onClick={gate.showEnd}>
+            Show the end
+          </button>
+        </p>
+      )}
       <p className="card-line">
         <span className="card-key">Folder</span>{" "}
         <code className="card-mono" style={{ whiteSpace: "pre-wrap" }}>

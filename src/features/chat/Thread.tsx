@@ -278,7 +278,8 @@ export default function Thread({
             onSignInAgain={onSignInAgain}
             onPickModel={onPickModel}
             onRetry={onRetry}
-            onContinue={hasTools ? onContinue : undefined}
+            // An unsent message has no task of its own: its Retry re-sends the text.
+            onContinue={hasTools && !notSent ? onContinue : undefined}
           />
         )}
       </div>

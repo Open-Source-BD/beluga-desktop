@@ -621,3 +621,43 @@ describe("fix round 1: a failed task that ran tools", () => {
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 });
+
+describe("fix round 2: the mark goes when the card is answered", () => {
+  it("answering the card of chat B clears its needs-you mark at once, not at the next poll", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      ipc.taskState.mockImplementation((id: string) =>
+        Promise.resolve(id === "cb" ? { ...noTask, running: true, waiting: CMD } : noTask),
+      );
+      render(<Shell />);
+      const rowB = (await screen.findByRole("button", { name: /Chat B/ })).closest("li") as HTMLElement;
+      await waitFor(() => expect(within(rowB).getByText("needs you")).toBeInTheDocument());
+      await userEvent.click(within(rowB).getByRole("button", { name: /Chat B/ }));
+      await userEvent.click(await screen.findByRole("button", { name: "Run once" }));
+      expect(ipc.answerApproval).toHaveBeenCalledWith("cb", "ap1", { decision: "once" });
+      await open("Chat A");
+      expect(within(rowB).queryByText("needs you")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("fix round 2: a refused send in a chat with earlier tool rows", () => {
+  it("keeps Retry and re-sends the same text", async () => {
+    ipc.getMessages.mockResolvedValue([
+      row({ id: "u0", role: "user", text: "old" }),
+      row({ id: "a1", tool_calls: [{ id: "c1", name: "run_command", arguments: "{}" }] }),
+      row({ id: "t1", role: "tool", kind: "tool", tool_call_id: "c1", tool_meta: { name: "run_command", status: "ok", summary: "Ran x", detail: null } }),
+    ]);
+    ipc.sendMessage.mockRejectedValueOnce({ kind: "network", message: "Offline", retryable: true });
+    render(<Shell />);
+    await open("Chat A");
+    await userEvent.type(await box(), "my new text{Enter}");
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+    await userEvent.click(retry);
+    await waitFor(() => expect(ipc.sendMessage).toHaveBeenCalledTimes(2));
+    expect(ipc.sendMessage.mock.calls[1][1]).toBe("my new text");
+  });
+});

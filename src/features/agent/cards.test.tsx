@@ -362,3 +362,34 @@ describe("focus and announcement", () => {
     expect(screen.queryByText("A request needs your answer.")).toBeNull();
   });
 });
+
+describe("reaching the end without a pointer", () => {
+  it("Show the end unlocks the approve buttons of a command", async () => {
+    vi.mocked(measure.needsScroll).mockReturnValue(true);
+    vi.mocked(measure.atEnd).mockReturnValue(false);
+    show(cmd());
+    expect(screen.getByRole("button", { name: "Run once" })).toBeDisabled();
+    vi.mocked(measure.atEnd).mockReturnValue(true);
+    await userEvent.click(screen.getByRole("button", { name: "Show the end" }));
+    expect(screen.getByRole("button", { name: "Run once" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Show the end" })).toBeNull();
+  });
+
+  it("focusing or a key in the block also checks the end", () => {
+    vi.mocked(measure.needsScroll).mockReturnValue(true);
+    vi.mocked(measure.atEnd).mockReturnValue(false);
+    show(cmd());
+    vi.mocked(measure.atEnd).mockReturnValue(true);
+    fireEvent.keyUp(screen.getByLabelText("Command"), { key: "End" });
+    expect(screen.getByRole("button", { name: "Run once" })).toBeEnabled();
+  });
+
+  it("the edit card has the same button for its blocks", async () => {
+    vi.mocked(measure.needsScroll).mockReturnValue(true);
+    vi.mocked(measure.atEnd).mockReturnValue(false);
+    show(edit());
+    vi.mocked(measure.atEnd).mockReturnValue(true);
+    await userEvent.click(screen.getByRole("button", { name: "Show the end" }));
+    expect(screen.getByRole("button", { name: "Allow once" })).toBeEnabled();
+  });
+});

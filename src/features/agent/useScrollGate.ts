@@ -30,5 +30,20 @@ export function useScrollGate(content: unknown) {
   const onScroll = useCallback(() => {
     if (el.current && atEnd(el.current)) setReached(true);
   }, []);
-  return { ref, onScroll, overflow, gated: overflow && !reached };
+  /** Scrolls to the end for a reader whose cursor does not scroll the block. */
+  const showEnd = useCallback(() => {
+    const node = el.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+    if (atEnd(node)) setReached(true);
+  }, []);
+  return {
+    ref,
+    onScroll,
+    /** Props for the block: any way of arriving at its end counts. */
+    handlers: { onScroll, onFocus: onScroll, onKeyUp: onScroll },
+    showEnd,
+    overflow,
+    gated: overflow && !reached,
+  };
 }

@@ -177,7 +177,14 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     if (selectedRef.current === id) control.current?.replace(text, attachments);
   });
   const task = useTask(selectedId, chat.taskTick);
-  const watch = useChatWatch(chats.map((c) => c.id));
+  const watch = useChatWatch(chats);
+  // A card cleared in this session (answered, or its turn ended) no longer marks its chat.
+  const waitingBefore = useRef<string[]>([]);
+  const clearMark = watch.clear;
+  useEffect(() => {
+    for (const id of waitingBefore.current) if (!chat.waitingIds.includes(id)) clearMark(id);
+    waitingBefore.current = chat.waitingIds;
+  }, [chat.waitingIds, clearMark]);
   // The checklist: what the running task last sent, else the core's. It stays while items are
   // open (a paused task) and goes when the task ends with everything done.
   // While the task runs, its events are the truth; once it settles the core's state is.
@@ -260,6 +267,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     setCardError(null);
     try {
       await answerApproval(chatId, cardId, answer);
+      watch.clear(chatId);
       void task.refresh(chatId);
       return true;
     } catch (e) {

@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { taskState } from "../../lib/ipc";
 
 export const WATCH_MS = 5000;
+/** The startup sweep asks this many chats at a time, and only the most recent ones. */
+const BATCH = 5;
+const SWEEP_MAX = 50;
 
 interface Seen {
   running: boolean;
@@ -14,7 +17,7 @@ interface Seen {
  * five seconds for the chats found running only. Nothing is asked for a deleted chat; every
  * timer ends with the component.
  */
-export function useChatWatch(chatIds: string[]) {
+export function useChatWatch(chats: { id: string; updated_at: number }[]) {
   const [seen, setSeen] = useState<Record<string, Seen>>({});
   const swept = useRef(false);
   const gone = useRef(new Set<string>());
@@ -23,24 +26,28 @@ export function useChatWatch(chatIds: string[]) {
 
   const ask = useCallback(async (ids: string[]) => {
     const found: Record<string, Seen> = {};
-    await Promise.all(
-      ids.map(async (id) => {
-        try {
-          const s = await taskState(id);
-          if (s && !gone.current.has(id)) found[id] = { running: s.running === true, waiting: s.waiting !== null && s.waiting !== undefined };
-        } catch {
-          // Nothing known for this chat; it is not marked.
-        }
-      }),
-    );
+    for (let i = 0; i < ids.length; i += BATCH) {
+      await Promise.all(
+        ids.slice(i, i + BATCH).map(async (id) => {
+          try {
+            const s = await taskState(id);
+            if (s && !gone.current.has(id))
+              found[id] = { running: s.running === true, waiting: s.waiting !== null && s.waiting !== undefined };
+          } catch {
+            // Nothing known for this chat; it is not marked.
+          }
+        }),
+      );
+    }
     setSeen((cur) => ({ ...cur, ...found }));
   }, []);
 
   useEffect(() => {
-    if (swept.current || chatIds.length === 0) return;
+    if (swept.current || chats.length === 0) return;
     swept.current = true;
-    void ask(chatIds);
-  }, [chatIds, ask]);
+    const newest = [...chats].sort((a, b) => b.updated_at - a.updated_at).slice(0, SWEEP_MAX);
+    void ask(newest.map((c) => c.id));
+  }, [chats, ask]);
 
   const polling = Object.keys(seen).some((id) => seen[id].running);
   useEffect(() => {
@@ -57,5 +64,11 @@ export function useChatWatch(chatIds: string[]) {
     setSeen(({ [id]: _g, ...rest }) => rest);
   }, []);
 
-  return { waitingIds: Object.keys(seen).filter((id) => seen[id].waiting), forget };
+  /** The card of this chat was answered or cleared in this session: its mark goes now. */
+  const clear = useCallback(
+    (id: string) => setSeen((cur) => (cur[id]?.waiting ? { ...cur, [id]: { ...cur[id], waiting: false } } : cur)),
+    [],
+  );
+
+  return { clear, waitingIds: Object.keys(seen).filter((id) => seen[id].waiting), forget };
 }

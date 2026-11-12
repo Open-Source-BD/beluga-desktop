@@ -36,7 +36,7 @@ export default function EditCard({ approval: a, busy, armed, onAnswer, safeRef }
       {a.removed.length > 0 && (
         <div
           ref={removedGate.ref}
-          onScroll={removedGate.onScroll}
+          {...removedGate.handlers}
           className="card-pre card-diff"
           role="group"
           aria-label="Lines removed"
@@ -55,7 +55,7 @@ export default function EditCard({ approval: a, busy, armed, onAnswer, safeRef }
       {a.added.length > 0 && (
         <div
           ref={addedGate.ref}
-          onScroll={addedGate.onScroll}
+          {...addedGate.handlers}
           className="card-pre card-diff"
           role="group"
           aria-label="Lines added"
@@ -69,7 +69,21 @@ export default function EditCard({ approval: a, busy, armed, onAnswer, safeRef }
         </div>
       )}
       {addedMore > 0 && <p className="card-fine">{`${addedMore} more lines added are not shown.`}</p>}
-      {gated && <p className="card-line">Scroll to read all of the change.</p>}
+      {gated && (
+        <p className="card-line">
+          Scroll to read all of the change.{" "}
+          <button
+            type="button"
+            className="card-link"
+            onClick={() => {
+              removedGate.showEnd();
+              addedGate.showEnd();
+            }}
+          >
+            Show the end
+          </button>
+        </p>
+      )}
       <Choices
         choices={[
           { label: "Allow once", answer: { decision: "once" } },

@@ -107,3 +107,20 @@ describe("a failed turn that ran tools", () => {
     expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
   });
 });
+
+describe("a send the core refused before storing it", () => {
+  it("keeps Retry (it re-sends the unsent text) even though earlier tool rows exist", () => {
+    const old = [
+      row({ id: "u0", role: "user", text: "old" }),
+      row({ id: "a1", tool_calls: [call("c1")] }),
+      row({ id: "t1", role: "tool", kind: "tool", tool_call_id: "c1", tool_meta: { name: "n", status: "ok", summary: "done", detail: null } }),
+    ];
+    const onRetry = vi.fn();
+    const onContinue = vi.fn();
+    render(<Thread {...props} status="failed" error={{ kind: "network", message: "Offline", retryable: true }} messages={old} pendingUser="my new text" notSent onRetry={onRetry} onContinue={onContinue} />);
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+    screen.getByRole("button", { name: "Retry" }).click();
+    expect(onRetry).toHaveBeenCalled();
+    expect(onContinue).not.toHaveBeenCalled();
+  });
+});
