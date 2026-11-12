@@ -405,9 +405,14 @@ pub fn inspect(command: &str, family: ShellFamily, project_root: &Path) -> Inspe
     } else {
         rule_for(command, family)
     };
+    // An untabled key has no broader rule to offer: offer what would match.
+    let offer = match offer_for(command, family) {
+        Some(key) if spec_for(&key).is_none() => rule.clone(),
+        other => other,
+    };
     Inspected {
         rule,
-        offer: offer_for(command, family),
+        offer,
         outside,
     }
 }
@@ -648,9 +653,9 @@ const NONE: Spec = Spec {
 };
 
 /// The complete list of what a rule lets through. A key that is not here
-/// accepts no options, only positionals.
-fn spec_for(key: &str) -> Spec {
-    match key {
+/// (`None`) is untabled: its rule is the exact command text.
+fn spec_for(key: &str) -> Option<Spec> {
+    let spec = match key {
         "ls" => Spec {
             cluster: "laAhRtrS1Fd",
             ..NONE
@@ -737,8 +742,10 @@ fn spec_for(key: &str) -> Spec {
             flags: &["--check"],
             ..NONE
         },
-        _ => NONE,
-    }
+        "cat" | "eslint" | "ruff" | "mypy" | "rustfmt" | "gofmt" => NONE,
+        _ => return None,
+    };
+    Some(spec)
 }
 
 fn value_ok(kind: Val, v: &str) -> bool {
@@ -821,7 +828,15 @@ fn rule_for(command: &str, family: ShellFamily) -> Option<String> {
     let words: Vec<&str> = command.split(' ').collect();
     let key = key_for(words[0], words.get(1).copied(), family)?;
     let consumed = if key.contains(' ') { 2 } else { 1 };
-    args_ok(&spec_for(&key), &words[consumed..]).then_some(key)
+    let args = &words[consumed..];
+    match spec_for(&key) {
+        Some(spec) => args_ok(&spec, args).then_some(key),
+        // Untabled: no options at all, and the rule is the exact command.
+        None => args
+            .iter()
+            .all(|a| !a.starts_with('-') && path_ok(a))
+            .then(|| command.to_string()),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1040,13 +1055,70 @@ mod tests {
     }
 
     #[test]
+    fn untabled_commands_get_the_exact_text_as_their_rule() {
+        let t = "mytool deploy staging";
+        for fam in [P, W] {
+            let got = inspect(t, fam, root());
+            assert_eq!(got.rule.as_deref(), Some(t), "{fam:?}");
+            assert_eq!(got.offer.as_deref(), Some(t), "{fam:?}");
+        }
+        let saved = vec![t.to_string()];
+        assert!(allowed(t, P, root(), &saved));
+        for other in [
+            "mytool deploy production",
+            "mytool",
+            "mytool deploy staging x",
+            "mytool  deploy staging",
+            "mytool deploy staging ",
+        ] {
+            assert!(!allowed(other, P, root(), &saved), "{other:?}");
+        }
+        for (cmd, want) in [
+            ("pnpm lint", "pnpm lint"),
+            ("yarn build", "yarn build"),
+            ("cargo doc", "cargo doc"),
+        ] {
+            let got = inspect(cmd, P, root());
+            assert_eq!(got.rule.as_deref(), Some(want), "{cmd:?}");
+            assert_eq!(got.offer.as_deref(), Some(want), "{cmd:?}");
+        }
+        for cmd in [
+            "foo --bar",
+            "foo /etc/passwd",
+            "foo .env",
+            "foo ../x",
+            "foo x@y",
+            "foo a/-b",
+            "foo 'a b'",
+            "foo -",
+        ] {
+            let got = inspect(cmd, P, root());
+            assert_eq!((got.rule, got.offer), (None, None), "{cmd:?}");
+        }
+        nothing(P, &["pnpm run lint", "npm run build"]);
+        assert!(!allowed(
+            "rustup run x sh",
+            P,
+            root(),
+            &["rustup".to_string()]
+        ));
+        // A tabled key keeps its broader rule.
+        assert!(allowed("ls -la", P, root(), &["ls".to_string()]));
+        assert!(!allowed(
+            "mytool deploy staging",
+            P,
+            root(),
+            &["mytool".to_string()]
+        ));
+    }
+
+    #[test]
     fn powershell_lower_cases_and_strips_one_extension() {
         matched(
             W,
             &[
                 ("NPM.CMD install", "npm install"),
                 ("npm.exe install", "npm install"),
-                ("Get-ChildItem", "get-childitem"),
                 ("LS -la", "ls"),
             ],
         );
@@ -1240,7 +1312,7 @@ mod tests {
                 ("eslint --fix src", None, Some("eslint"), false),
                 ("ls \"my dir\"", None, Some("ls"), false),
                 ("go test -exec x", None, Some("go test"), false),
-                ("echo 'a\\b'", None, Some("echo"), false),
+                ("echo 'a\\b'", None, None, false),
                 ("ls -la ünï", None, Some("ls"), false),
                 ("git Status", None, None, false),
             ],
