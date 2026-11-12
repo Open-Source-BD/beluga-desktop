@@ -29,3 +29,6 @@ pub struct ToolOutcome {
     /// Change or output shown when the line opens.
     pub detail: Option<String>,
 }
+
+pub mod paths;
+pub mod secrets;
