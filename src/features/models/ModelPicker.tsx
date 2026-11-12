@@ -20,6 +20,8 @@ interface Props {
   onRetry: () => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** A project chat: only models that can use tools are listed. */
+  toolsOnly?: boolean;
 }
 
 interface RowProps {
@@ -55,7 +57,7 @@ function Chevron() {
   );
 }
 
-export default function ModelPicker({ models, loadFailed, value, onChange, onRetry, open, onOpenChange }: Props) {
+export default function ModelPicker({ models, loadFailed, value, onChange, onRetry, open, onOpenChange, toolsOnly = false }: Props) {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const root = useRef<HTMLDivElement>(null);
@@ -66,17 +68,20 @@ export default function ModelPicker({ models, loadFailed, value, onChange, onRet
   const { free, paid, flat } = useMemo(() => {
     const q = query.trim().toLowerCase();
     const hit = (models ?? []).filter(
-      (m) => !q || m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q),
+      (m) =>
+        (!toolsOnly || m.supports_tools) &&
+        (!q || m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)),
     );
     const free = hit.filter((m) => m.is_free);
     const paid = hit.filter((m) => !m.is_free);
     return { free, paid, flat: [...free, ...paid] };
-  }, [models, query]);
+  }, [models, query, toolsOnly]);
 
   useEffect(() => {
     if (open) {
       setQuery("");
-      const i = (models ?? []).filter((m) => m.is_free).concat((models ?? []).filter((m) => !m.is_free)).findIndex((m) => m.id === value);
+      const listed = (models ?? []).filter((m) => !toolsOnly || m.supports_tools);
+      const i = listed.filter((m) => m.is_free).concat(listed.filter((m) => !m.is_free)).findIndex((m) => m.id === value);
       setActive(Math.max(i, 0));
       search.current?.focus();
     }

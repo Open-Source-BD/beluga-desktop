@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { StoredMessage, UiError } from "../../lib/ipc";
 import Trail from "../agent/Trail";
 import { bareEntry, matchLive, pairStored, stateWord, type Run, type Slot, type TrailEntry } from "../agent/trailEntries";
@@ -33,6 +33,12 @@ interface Props {
   onRetryWithModel?: () => void;
   /** The retry after a failure or an interruption. */
   onRetry: () => void;
+  /** Sends "continue": offered on a paused task and on an interrupted one that ran tools. */
+  onContinue?: () => void;
+  /** Under the Continue button of a paused task (Open Settings, cheaper models). */
+  pausedExtras?: ReactNode;
+  /** The core refused a retry; nothing else changed. */
+  refusal?: string | null;
   onSignInAgain: () => void;
   onPickModel: () => void;
 }
@@ -57,6 +63,9 @@ export default function Thread({
   onRetryReply,
   onRetryWithModel,
   onRetry,
+  onContinue,
+  pausedExtras,
+  refusal = null,
   onSignInAgain,
   onPickModel,
 }: Props) {
@@ -239,9 +248,28 @@ export default function Thread({
         {showInterrupted && (
           <div className="notice">
             <p>Reply interrupted.</p>
-            <button type="button" className="btn" onClick={onRetry}>
-              Retry
+            {hasTools && onContinue ? (
+              <button type="button" className="btn" onClick={onContinue}>
+                Continue
+              </button>
+            ) : (
+              <button type="button" className="btn" onClick={onRetry}>
+                Retry
+              </button>
+            )}
+          </div>
+        )}
+        {status === "paused" && onContinue && (
+          <div className="notice paused">
+            <button type="button" className="btn" onClick={onContinue}>
+              Continue
             </button>
+            {pausedExtras}
+          </div>
+        )}
+        {refusal && (
+          <div className="notice">
+            <p role="alert">{refusal}</p>
           </div>
         )}
         {error && (

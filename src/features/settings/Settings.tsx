@@ -5,6 +5,8 @@ import { toUiError } from "../chat/errors";
 import Switch from "../skills/Switch";
 import "../skills/skills.css";
 import Licenses from "./Licenses";
+import ProjectRules from "./ProjectRules";
+import SpendLimit from "./SpendLimit";
 import { readSendWithModifier, writeSendWithModifier } from "./sendKey";
 import "./settings.css";
 
@@ -110,6 +112,8 @@ export default function Settings({ onBack, onSignedOut, onSendKeyChange }: Props
             </div>
             <p className="setting-line">Enter then adds a new line.</p>
           </div>
+          <SpendLimit />
+          <ProjectRules />
           <div className="setting">
             <h2>Account</h2>
             {storage && <p className="setting-line">{`Key storage: ${STORAGE_COPY[storage]}`}</p>}

@@ -113,3 +113,203 @@
   color: var(--deep);
   font-weight: 600;
 }
+
+/* Approval cards: amber for a command, the same frame for the others. */
+.card {
+  width: min(680px, 100% - 48px);
+  margin: 0 auto 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--ask-line);
+  background: var(--amber-soft);
+  border-radius: 10px;
+  color: var(--ask-ink);
+}
+.card-q {
+  margin: 0;
+  font-size: inherit;
+  font-weight: 600;
+  color: var(--ask-ink);
+}
+.card-line,
+.card-fine {
+  margin: 8px 0 0;
+  color: var(--ask-ink);
+}
+.card-fine {
+  font-size: 12.5px;
+}
+.card-key {
+  font-weight: 600;
+}
+.card-mono {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.card-pre {
+  margin: 8px 0 10px;
+  padding: 8px 10px;
+  max-height: 320px;
+  overflow: auto;
+  background: var(--white);
+  color: var(--deep);
+  border: 1px solid var(--ask-pre-line);
+  border-radius: 7px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+}
+.card-diff {
+  display: grid;
+}
+.diff-line {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.diff-line.removed {
+  color: var(--ask-ink);
+}
+.diff-line.added {
+  color: var(--sonar);
+}
+.card-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.card-btn {
+  font: inherit;
+  font-weight: 500;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--white);
+  color: var(--deep);
+  cursor: pointer;
+}
+.card-btn.primary {
+  background: var(--btn);
+  color: var(--on-btn);
+  border-color: var(--btn);
+}
+.card-btn:focus-visible,
+.card-pre:focus-visible,
+.bg-cmd:focus-visible {
+  outline: 2px solid var(--sonar);
+  outline-offset: 2px;
+}
+.card-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.card-note {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.card-note-field {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 6px 10px;
+  border: 1px solid var(--field-line);
+  border-radius: 7px;
+  background: var(--white);
+  color: var(--deep);
+}
+.card-error {
+  margin: 8px 0 0;
+  color: var(--ask-ink);
+  font-weight: 600;
+}
+.card-error.standalone {
+  width: min(680px, 100% - 48px);
+  margin: 0 auto 10px;
+}
+
+/* The edits chip and the strip of background commands above the message box. */
+.edits-chip-row,
+.bg-strip {
+  width: min(680px, 100% - 48px);
+  margin: 0 auto 8px;
+}
+.edits-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--ask-line);
+  background: var(--amber-soft);
+  color: var(--ask-ink);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.edits-chip:focus-visible {
+  outline: 2px solid var(--sonar);
+  outline-offset: 2px;
+}
+.bg-strip {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text2);
+}
+.bg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bg-label {
+  flex: none;
+}
+.bg-cmd {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  text-align: left;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--white);
+  color: var(--deep);
+  font: inherit;
+  cursor: pointer;
+}
+.bg-cmd code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+}
+.bg-stop {
+  flex: none;
+}
+.bg-out {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--white);
+  color: var(--deep);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+.bg-note {
+  margin: 6px 0 0;
+  color: var(--mid);
+}
+.notice.paused {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.notice.paused .low-allowance {
+  width: 100%;
+  margin: 0;
+}

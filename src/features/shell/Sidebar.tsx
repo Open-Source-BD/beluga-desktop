@@ -30,6 +30,8 @@ interface Props {
   skillsOn?: number;
   skillsActive?: boolean;
   footer?: ReactNode;
+  /** Chats with a card waiting for an answer. */
+  needsYou?: readonly string[];
 }
 
 export default function Sidebar({
@@ -47,6 +49,7 @@ export default function Sidebar({
   skillsOn,
   skillsActive = false,
   footer,
+  needsYou = [],
 }: Props) {
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -100,6 +103,7 @@ export default function Sidebar({
                   >
                     {chat.title}
                   </button>
+                  {needsYou.includes(chat.id) && <span className="needs-you">needs you</span>}
                   <button
                     type="button"
                     className="row-act"

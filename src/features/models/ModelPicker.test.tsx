@@ -126,3 +126,26 @@ describe("ModelPicker", () => {
     expect(performance.now() - t0).toBeLessThan(2000);
   });
 });
+
+describe("ModelPicker in a project chat", () => {
+  const withTools = [
+    model({ id: "x/tools", name: "Tools Paid" }),
+    model({ id: "x/plain", name: "Plain Paid", supports_tools: false }),
+    model({ id: "x/ftools", name: "Tools Free", is_free: true }),
+  ];
+  const picker = (toolsOnly: boolean) => (
+    <ModelPicker models={withTools} loadFailed={false} value="x/tools" onChange={() => {}} onRetry={() => {}} open onOpenChange={() => {}} toolsOnly={toolsOnly} />
+  );
+
+  it("lists only models that support tools", () => {
+    render(picker(true));
+    expect(screen.getByRole("option", { name: /Tools Paid/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Tools Free/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Plain Paid/ })).toBeNull();
+  });
+
+  it("lists every model in an ordinary chat", () => {
+    render(picker(false));
+    expect(screen.getByRole("option", { name: /Plain Paid/ })).toBeInTheDocument();
+  });
+});

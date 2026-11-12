@@ -33,3 +33,19 @@ describe("EmptyChat starter actions", () => {
     expect(screen.queryByRole("list", { name: "Ways to start" })).toBeNull();
   });
 });
+
+describe("EmptyChat for a project", () => {
+  it("shows the project line with the app name, and the top-up sentence for a free-tier key", () => {
+    render(<EmptyChat project freeTier><p>box</p></EmptyChat>);
+    expect(screen.getByText("Beluga can read files in this folder. It asks before changing a file or running a command.")).toBeInTheDocument();
+    expect(screen.getByText(/A one-time \$10 top-up on OpenRouter raises that to 1,000 a day\./)).toBeInTheDocument();
+  });
+  it("shows neither without a folder, and no top-up for a paid key", () => {
+    const { rerender } = render(<EmptyChat><p>box</p></EmptyChat>);
+    expect(screen.queryByText(/can read files in this folder/)).toBeNull();
+    expect(screen.queryByText(/top-up/)).toBeNull();
+    rerender(<EmptyChat project><p>box</p></EmptyChat>);
+    expect(screen.getByText(/can read files in this folder/)).toBeInTheDocument();
+    expect(screen.queryByText(/top-up/)).toBeNull();
+  });
+});

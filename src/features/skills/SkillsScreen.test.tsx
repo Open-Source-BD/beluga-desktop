@@ -174,7 +174,7 @@ describe("SkillsScreen detail", () => {
   };
 
   it("shows the acts note only when acts_on_computer", async () => {
-    const note = "Written for an agent that can edit files and run commands. In chat it can guide you step by step, but it cannot act yet.";
+    const note = "Written for an agent that can edit files and run commands. Open a folder in the chat and it can do that, asking you first.";
     ipc.getSkill.mockResolvedValue(detail({ acts_on_computer: true }));
     setup();
     await open();

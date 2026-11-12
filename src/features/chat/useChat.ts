@@ -7,6 +7,7 @@ import {
   sendMessage,
   stop as stopTurn,
   type AttachmentInput,
+  type Approval,
   type ChatUsage,
   type EngineEvent,
   type PlanItem,
@@ -47,7 +48,16 @@ export interface ChatState {
   runKey: string;
   /** Changes when the checklist, background commands or approvals may have changed. */
   taskTick: number;
+  /** The card the core is waiting on, from events; it ends with the turn. */
+  approval: Approval | null;
+  /** Ids of cards that were cleared or found not waiting, so a stale task state cannot bring one back. */
+  clearedApprovals: string[];
+  /** A refusal of Retry that changed nothing else, to show as an alert. */
+  refusal: string | null;
 }
+
+/** The core's refusal of a retry while the task still runs. */
+export const RETRY_BUSY = "Wait for the reply to finish, or stop it, before retrying.";
 
 let liveSeq = 0;
 
@@ -68,6 +78,9 @@ const EMPTY: ChatState = {
   runBase: null,
   runKey: "",
   taskTick: 0,
+  approval: null,
+  clearedApprovals: [],
+  refusal: null,
 };
 
 /** How a /compact ended: the core's result, or the rejection when it never ran. */
@@ -96,6 +109,10 @@ export interface UseChat extends ChatState {
   reload(): Promise<void>;
   /** Drops everything held for a deleted chat; later events and results for it are ignored. */
   forget(chatId: string): void;
+  /** The core said the card is no longer waiting: stop showing it. */
+  dismissApproval(chatId: string, approvalId: string): void;
+  /** Chats with a card waiting for the user, whether or not they are selected. */
+  waitingIds: string[];
   /**
    * Shortens the selected chat. It runs like a reply (status "streaming", Stop
    * cancels it); `onOutcome` hears how it ended, so a failure is reported by
@@ -230,7 +247,10 @@ export function useChat(
       // The run's base is the rows stored before it: when they were never read (a send before the
       // chat loaded, or after a failed load) read them now, before anything is sent.
       const known = loadedRows.current.has(id);
-      patch(id, (s) => ({
+      let before: ChatState | null = null;
+      patch(id, (s) => {
+        before = s;
+        return {
         runBase: known ? new Set(s.messages.map((m) => m.id)) : null,
         runKey: `r${turn}`,
         streamingText: "",
@@ -244,7 +264,11 @@ export function useChat(
         plan: null,
         taskUsage: null,
         usageBase: null,
-      }));
+        approval: null,
+        clearedApprovals: [],
+        refusal: null,
+        };
+      });
       const go = () => {
         // The task's usage events carry its own totals: remember the chat's as they stand now.
         try {
@@ -269,8 +293,10 @@ export function useChat(
         ) => {
           settled = true;
           const messages = await reload(id);
+          if (messages) loadedRows.current.add(id);
           streaming.current.delete(id);
           patch(id, (s) => ({
+            approval: null,
             messages: messages ?? s.messages,
             streamingText: "",
             pausedReason,
@@ -346,8 +372,17 @@ export function useChat(
               patch(id, (s) => ({ plan: event.items, taskTick: s.taskTick + 1 }));
               break;
             case "background_changed":
-            case "approval_cleared":
               patch(id, (s) => ({ taskTick: s.taskTick + 1 }));
+              break;
+            case "approval_needed":
+              patch(id, (s) => ({ approval: event.approval, taskTick: s.taskTick + 1 }));
+              break;
+            case "approval_cleared":
+              patch(id, (s) => ({
+                approval: s.approval?.id === event.id ? null : s.approval,
+                clearedApprovals: [...s.clearedApprovals, event.id].slice(-8),
+                taskTick: s.taskTick + 1,
+              }));
               break;
             case "waiting":
               patch(id, () => ({ waiting: event.seconds }));
@@ -370,7 +405,17 @@ export function useChat(
             if (r.status === "paused") return settle("paused", null, false, r.reason);
             return settle(r.status === "interrupted" ? "interrupted" : "idle", null);
           },
-          (e: unknown) => settle("failed", toUiError(e), true),
+          (e: unknown) => {
+          const refused = toUiError(e);
+          // A retry the core refuses because the task still runs changes nothing but this message.
+          if (refused.message === RETRY_BUSY && before) {
+            const prior = before as ChatState;
+            streaming.current.delete(id);
+            patch(id, () => ({ ...prior, refusal: refused.message }));
+            return;
+          }
+          return settle("failed", refused, true);
+        },
         );
       };
       if (known) go();
@@ -415,6 +460,20 @@ export function useChat(
     delete turnSeq.current[id];
     setStates(({ [id]: _gone, ...rest }) => rest);
   }, []);
+
+  const dismissApproval = useCallback(
+    (id: string, approvalId: string) =>
+      patch(id, (s) => ({
+        approval: s.approval?.id === approvalId ? null : s.approval,
+        clearedApprovals: [...s.clearedApprovals, approvalId].slice(-8),
+      })),
+    [patch],
+  );
+
+  const waitingIds = useMemo(
+    () => Object.keys(states).filter((id) => states[id].approval !== null),
+    [states],
+  );
 
   const reloadSelected = useCallback(async () => {
     if (!chatId || streaming.current.has(chatId)) return;
@@ -482,5 +541,5 @@ export function useChat(
     [current.runBase, current.runKey],
   );
 
-  return { ...current, usage, run, send, stop, reload: reloadSelected, forget, retry, regenerate, compact };
+  return { ...current, usage, run, send, stop, reload: reloadSelected, forget, dismissApproval, waitingIds, retry, regenerate, compact };
 }

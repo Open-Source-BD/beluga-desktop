@@ -13,6 +13,7 @@ import {
   type StorageChoice,
   type UiError,
 } from "../../lib/ipc";
+import { FREE_TIER_SENTENCE } from "../gauge/allowance";
 import { WhaleMark } from "../shell/icons";
 import KeyStorageChoice from "./KeyStorageChoice";
 import "./signin.css";
@@ -274,8 +275,7 @@ export default function SignIn({ notice, onSignedIn }: Props) {
           </>
         )}
         <p className="signin-allowance">
-          Free models allow 50 requests a day. A one-time $10 top-up on
-          OpenRouter raises that to 1,000 a day.
+          {FREE_TIER_SENTENCE}
         </p>
         <p className="signin-fine">
           Your key stays in this computer's keychain and is never sent to us.

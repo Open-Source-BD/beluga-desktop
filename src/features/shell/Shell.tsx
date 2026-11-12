@@ -5,6 +5,9 @@ import ConfirmEdit from "../chat/ConfirmEdit";
 import ErrorNotice from "../chat/ErrorNotice";
 import Fullness from "../chat/Fullness";
 import Queued from "../chat/Queued";
+import ApprovalCard from "../agent/ApprovalCard";
+import Background from "../agent/Background";
+import EditsChip from "../agent/EditsChip";
 import PlanList from "../agent/PlanList";
 import { useTask } from "../agent/useTask";
 import { useFullness } from "../chat/useFullness";
@@ -34,13 +37,16 @@ import SkillsScreen from "../skills/SkillsScreen";
 import { useSkills } from "../skills/useSkills";
 import {
   activateSkill,
+  answerApproval,
   deleteChat,
   listChats,
   peekUserMessage,
   renameChat,
+  revokeEdits,
   skillFile,
   rowsAfter,
   takeUserMessage,
+  type Answer,
   type AttachmentInput,
   type ChatSummary,
   type StoredMessage,
@@ -70,6 +76,11 @@ const STARTERS = [
     skill: "agent-skills:code-review-and-quality",
   },
 ];
+
+/** The core's refusal of an answer for a card that has already cleared. */
+const NOT_WAITING = "That request is no longer waiting.";
+/** An answer sent from the message box is at most this many characters. */
+const ANSWER_MAX_CHARS = 4000;
 
 /** A message waiting for the running reply to finish. */
 interface Queue {
@@ -117,7 +128,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   const [queued, setQueued] = useState<Record<string, Queue>>({});
   const queuedRef = useRef(queued);
   queuedRef.current = queued;
-  const [confirmEdit, setConfirmEdit] = useState<{ message: StoredMessage; count: number } | null>(null);
+  const [confirmEdit, setConfirmEdit] = useState<{ message: StoredMessage; count: number; toolsAfter: boolean } | null>(null);
   const [editing, setEditingState] = useState<Editing | null>(null);
   const editingRef = useRef<Editing | null>(null);
   const setEditing = (next: Editing | null) => {
@@ -148,8 +159,8 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
       refreshAllowance();
       void refreshActive(id);
       setTurn((n) => n + 1);
-      // A queued message goes out when the reply is done, not when it failed or was stopped.
-      if (status === "idle") flushRef.current(id);
+      // A queued message goes out when the reply is done or paused, not when it failed or was stopped.
+      if (status === "idle" || status === "paused") flushRef.current(id);
     },
     [refreshChats, refreshAllowance, refreshActive],
   );
@@ -167,6 +178,18 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   const running = chat.status === "streaming";
   // Until the refresh for the settle has returned, the core's list may be the pre-task one.
   const pending = running || task.loadedTick < chat.taskTick;
+  // The card the core waits on: from its events while the task runs, else from the core's own
+  // state (after a reload). A card the events cleared is not brought back by an older state.
+  const taskCard =
+    task.waiting && task.loadedTick >= chat.taskTick && !chat.clearedApprovals.includes(task.waiting.id)
+      ? task.waiting
+      : null;
+  const card = selectedId ? (chat.approval ?? taskCard) : null;
+  const [answering, setAnswering] = useState<string | null>(null);
+  const answeringRef = useRef<string | null>(null);
+  const [cardError, setCardError] = useState<{ id: string; message: string } | null>(null);
+  // A refusal belongs to the chat it happened in.
+  useEffect(() => setCardError(null), [selectedId]);
   const planItems = pending ? (chat.plan ?? task.plan) : task.plan;
   const showPlan =
     planItems.length > 0 &&
@@ -175,6 +198,49 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   const usage = chat.status === "streaming" && chat.usage ? chat.usage : allowance.usage;
   const selected = chats.find((c) => c.id === selectedId);
   const hasMessages = chat.messages.length > 0 || chat.pendingUser !== null;
+
+  /**
+   * Answers the open card. One answer per card: the card stays off from the first until it
+   * clears or the core refuses. A refusal is shown near the card and the task state is read again.
+   */
+  const answerCard = async (answer: Answer): Promise<boolean> => {
+    if (!selectedId || !card || answeringRef.current === card.id) return false;
+    const chatId = selectedId;
+    const cardId = card.id;
+    answeringRef.current = cardId;
+    setAnswering(cardId);
+    setCardError(null);
+    try {
+      await answerApproval(chatId, cardId, answer);
+      void task.refresh(chatId);
+      return true;
+    } catch (e) {
+      const message = toUiError(e).message;
+      answeringRef.current = null;
+      setAnswering(null);
+      setCardError({ id: cardId, message });
+      if (message === NOT_WAITING) chat.dismissApproval(chatId, cardId);
+      void task.refresh(chatId);
+      return false;
+    }
+  };
+
+  /** A message typed while a card is open is the answer to it: a decline with the text, or keep going. */
+  const answerWithMessage = async (body: string, attachments: AttachmentInput[]): Promise<BoxContents> => {
+    const text = body.trim();
+    if (text === "") {
+      control.current?.refuse("Type a message to answer the card.");
+      throw new Error("empty");
+    }
+    if (Array.from(text).length > ANSWER_MAX_CHARS) {
+      control.current?.refuse("That message is too long to send as an answer. Shorten it or answer the card first.");
+      throw new Error("too long");
+    }
+    if (!(await answerCard({ decision: "message", text }))) throw new Error("not accepted");
+    if (selectedId) clearDraft(selectedId);
+    // The chips are not part of the answer: they stay in the box.
+    return { text: "", attachments };
+  };
 
   const handleSend = async (
     text: string,
@@ -194,6 +260,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
         text = r.rest || "Start.";
       }
     }
+    if (card && selectedId) return answerWithMessage(original ?? text, attachments);
     if (!modelId || creating) return;
     const edit = editingRef.current;
     if (edit && edit.chatId === selectedId) return sendEdit(edit, modelId, text, attachments, intent);
@@ -335,7 +402,9 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     const latest = chat.messages.filter((m) => m.kind === "message" && m.role === "user").pop();
     if (latest?.id === message.id) return startEdit(message);
     try {
-      setConfirmEdit({ message, count: await rowsAfter(selectedId, message.id) });
+      const at = chat.messages.findIndex((m) => m.id === message.id);
+      const toolsAfter = task.project && chat.messages.slice(at + 1).some((m) => m.kind === "tool");
+      setConfirmEdit({ message, count: await rowsAfter(selectedId, message.id), toolsAfter });
     } catch (e) {
       actions.showAlert(toUiError(e).message);
     }
@@ -470,11 +539,30 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     refresh: refreshActive,
     onError: actions.showAlert,
   });
+  const taskRefresh = task.refresh;
+  /** Opens a folder; a model without tools cannot work on it, so the user is asked to pick another (nothing is switched). */
+  const openFolder = useCallback(async (): Promise<boolean> => {
+    const chosen = await folder.open();
+    if (!chosen) return false;
+    void taskRefresh();
+    const current = models?.find((m) => m.id === modelId);
+    if (current && !current.supports_tools) {
+      actions.showAlert("This model cannot use tools. Pick another model to work on the project.");
+      setPickerOpen(true);
+    }
+    return true;
+    // `actions.showAlert` is stable enough for a one-off alert.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folder.open, taskRefresh, models, modelId, setPickerOpen]);
+  const closeFolder = async () => {
+    await folder.close();
+    void taskRefresh();
+  };
   const slash = useSlashMenu({ skills: skillList.rows, ctx: actions.ctx, control });
   const mention = useMentionMenu({
     chatId: selectedId,
     folder: activeSkills.folder,
-    openFolder: folder.open,
+    openFolder,
     control,
   });
   const menus = useComposerMenus(slash, mention);
@@ -513,10 +601,44 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   const usingFreeModel = models?.find((m) => m.id === modelId)?.is_free ?? false;
   const blocked = usingFreeModel && allowance.status?.free_daily?.remaining === 0;
 
+  /** "continue" goes through the ordinary send: a paused or interrupted task picks up where it stopped. */
+  const continueTask = () => {
+    if (selectedId && modelId) chat.send("continue", [], modelId, selectedId);
+  };
+  const pausedExtras =
+    chat.status !== "paused" ? null : chat.pausedReason === "going_in_circles" && models ? (
+      <LowAllowance models={models} onPick={chooseFromPicker} modelsOnly />
+    ) : chat.pausedReason === "no_free_requests" && models && !blocked ? (
+      <LowAllowance models={models} onPick={chooseFromPicker} />
+    ) : chat.pausedReason === "daily_limit" ? (
+      <button
+        type="button"
+        className="linkish"
+        onClick={() => {
+          setShowSkills(false);
+          setShowSettings(true);
+        }}
+      >
+        Open Settings
+      </button>
+    ) : null;
+
   const composer = (
     <>
     {blocked && models && <LowAllowance models={models} onPick={chooseFromPicker} />}
     {selectedId && showPlan && <PlanList items={planItems} />}
+    {selectedId && <Background chatId={selectedId} items={task.background} onError={actions.showAlert} />}
+    {selectedId && task.editsAllowed && (
+      <EditsChip
+        onSwitchOff={() => {
+          const id = selectedId;
+          revokeEdits(id).then(
+            () => void task.refresh(id),
+            (e) => actions.showAlert(toUiError(e).message),
+          );
+        }}
+      />
+    )}
     {actions.panels}
     <ActiveSkills skills={activeSkills.skills} onRemove={activeSkills.remove} />
     {editing && editing.chatId === selectedId && (
@@ -534,13 +656,28 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
         onRemove={() => setQueued(({ [selectedId]: _gone, ...rest }) => rest)}
       />
     )}
+    {selectedId && !card && cardError && (
+      <p className="card-error standalone" role="alert">
+        {cardError.message}
+      </p>
+    )}
+    {selectedId && card && (
+      <ApprovalCard
+        key={card.id}
+        approval={card}
+        busy={answering === card.id}
+        error={cardError && cardError.id === card.id ? cardError.message : null}
+        onAnswer={(a) => void answerCard(a)}
+        onStop={chat.stop}
+      />
+    )}
     <Composer
       controlRef={control}
       initialAttachments={carried ?? undefined}
       draftId={selectedId}
       sendWithModifier={sendWithModifier}
       onEmptyUp={editLatest}
-      onEscape={editing ? cancelEdit : undefined}
+      onEscape={editing ? cancelEdit : card ? chat.stop : undefined}
       menu={menus.menu}
       fieldAria={menus.fieldAria}
       onKeyIntercept={menus.onKeyIntercept}
@@ -550,7 +687,8 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
       }}
       onSend={handleSend}
       onStop={chat.stop}
-      streaming={chat.status === "streaming"}
+      // With a card open the button sends the answer; Esc stops the task.
+      streaming={chat.status === "streaming" && !card}
       disabled={creating || models === null || blocked}
       noModel={models !== null && modelId === null}
       hasMessages={hasMessages}
@@ -565,6 +703,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
             onRetry={() => loadModels(true)}
             open={pickerOpen}
             onOpenChange={changePickerOpen}
+            toolsOnly={task.project}
           />
         ),
       }}
@@ -602,8 +741,9 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
         skillsOn={skillList.rows.length}
         skillsActive={showSkills}
         folder={activeSkills.folder}
-        onOpenFolder={() => void folder.open()}
-        onCloseFolder={() => void folder.close()}
+        onOpenFolder={() => void openFolder()}
+        onCloseFolder={() => void closeFolder()}
+        needsYou={chat.waitingIds.filter((id) => id !== selectedId || showSettings || showSkills)}
         footer={
           allowance.status ? (
             <Gauge
@@ -659,6 +799,11 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
             </EmptyChat>
           ) : (
             <>
+              {task.project && !hasMessages && chat.status === "idle" ? (
+                <EmptyChat project freeTier={allowance.status?.is_free_tier ?? false}>
+                  {null}
+                </EmptyChat>
+              ) : (
               <Thread
                 messages={chat.messages}
                 pendingUser={chat.pendingUser}
@@ -674,15 +819,20 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
                 onRetryReply={() => chat.regenerate(modelId)}
                 onRetryWithModel={retryWithAnotherModel}
                 onRetry={() => chat.retry(modelId)}
+                onContinue={continueTask}
+                pausedExtras={pausedExtras}
+                refusal={chat.refusal}
                 onSignInAgain={() => onSignInAgain?.()}
                 onPickModel={pickModel}
               />
+              )}
               {composer}
             </>
           )}
           {confirmEdit && (
             <ConfirmEdit
               count={confirmEdit.count}
+              toolsAfter={confirmEdit.toolsAfter}
               onCancel={() => setConfirmEdit(null)}
               onConfirm={() => {
                 const { message } = confirmEdit;

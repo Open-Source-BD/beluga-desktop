@@ -16,3 +16,14 @@ describe("ConfirmEdit", () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("ConfirmEdit in a project chat", () => {
+  it("adds the sentence about changes that stay when tool rows follow the message", () => {
+    render(<ConfirmEdit count={3} toolsAfter onConfirm={vi.fn()} onCancel={vi.fn()} />);
+    expect(screen.getByText("Files and commands already changed on your computer stay as they are.")).toBeInTheDocument();
+  });
+  it("does not add it otherwise", () => {
+    render(<ConfirmEdit count={3} onConfirm={vi.fn()} onCancel={vi.fn()} />);
+    expect(screen.queryByText(/already changed on your computer/)).toBeNull();
+  });
+});

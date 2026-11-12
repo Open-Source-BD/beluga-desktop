@@ -60,3 +60,36 @@
   gap: 16px;
   margin: 0 0 8px;
 }
+
+.setting-field {
+  width: 7rem;
+  font: inherit;
+  padding: 5px 8px;
+  border: 1px solid var(--field-line);
+  border-radius: 7px;
+  background: var(--white);
+  color: var(--deep);
+}
+.rules,
+.rules-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.rules-path,
+.rules-rule code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.rules-list {
+  margin: 6px 0 0 14px;
+}
+.rules-rule {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}

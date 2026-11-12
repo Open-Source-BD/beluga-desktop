@@ -4,7 +4,7 @@ import Markdown from "../chat/Markdown";
 import { toUiError } from "../chat/errors";
 
 export const ACTS_NOTE =
-  "Written for an agent that can edit files and run commands. In chat it can guide you step by step, but it cannot act yet.";
+  "Written for an agent that can edit files and run commands. Open a folder in the chat and it can do that, asking you first.";
 
 interface Props {
   id: string;

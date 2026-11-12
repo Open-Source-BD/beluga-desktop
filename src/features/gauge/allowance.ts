@@ -35,3 +35,7 @@ export function cheapestPaidTools(models: ModelInfo[]): ModelInfo[] {
     .sort((a, b) => price(a) - price(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .slice(0, 3);
 }
+
+/** What a free-tier key can do and how to raise it; the sign-in screen and the project new-chat screen say it. */
+export const FREE_TIER_SENTENCE =
+  "Free models allow 50 requests a day. A one-time $10 top-up on OpenRouter raises that to 1,000 a day.";
