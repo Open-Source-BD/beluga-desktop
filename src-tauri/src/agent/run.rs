@@ -6,13 +6,19 @@
 //! order between the two streams is not exact). Only the first quarter and the
 //! last part of what fits in `Limits::kept` is held; the pipes are still read
 //! to the end so the command never blocks on a full pipe.
+//!
+//! Stopping reaches everything the command started in its own process group.
+//! On macOS and Linux the command runs in a new session; a process that
+//! deliberately moves itself into another session (`setsid`, daemonizing) is
+//! NOT reached by the stop. On Windows the command runs in a Job Object, which
+//! does reach such processes.
 
 use std::path::Path;
 use std::process::ExitStatus;
 use std::time::{Duration, Instant};
 
 #[cfg(unix)]
-use process_wrap::tokio::ProcessGroup;
+use process_wrap::tokio::ProcessSession;
 use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
 #[cfg(windows)]
 use process_wrap::tokio::{CreationFlags, JobObject};
@@ -20,16 +26,17 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+use super::paths::invisible;
 use super::shell::Shell;
 
 /// Longest a command may run when the model gives no time limit.
 const DEFAULT_TIMEOUT_SECS: i64 = 120;
 const MAX_TIMEOUT_SECS: i64 = 600;
-/// Room kept free in `kept` for the "left out" notice.
+/// Room kept free in `kept` for the "left out" notice once it is cut.
 const NOTICE_ROOM: usize = 64;
-/// Output is passed on at least this often...
+/// `on_output` is called at most this often...
 const FLUSH_EVERY: Duration = Duration::from_millis(100);
-/// ...and in pieces of at most this many characters.
+/// ...with at most this many characters (skipped-notice line included).
 const FLUSH_CHARS: usize = 4_000;
 /// How long output is still collected after the child exited, waiting for the
 /// pipes to close, before the rest of its tree is stopped.
@@ -39,11 +46,9 @@ const DRAIN_AFTER_STOP: Duration = Duration::from_millis(300);
 /// On unix, how long the tree gets to end after SIGTERM before SIGKILL.
 #[cfg(unix)]
 const TERM_GRACE: Duration = Duration::from_millis(500);
-#[cfg(unix)]
-const SIGTERM: i32 = 15;
-/// Longest escape sequence given up on as a sequence (so a lone ESC cannot
-/// swallow the rest of the output).
-const MAX_SEQUENCE: usize = 2_048;
+/// Longest escape sequence given up on as a sequence (so an unterminated one
+/// cannot swallow the rest of the output).
+const MAX_SEQUENCE: usize = 4_096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
@@ -82,6 +87,9 @@ pub struct Ran {
     pub stopped: bool,
     /// The output (or a plain message), cut in the middle when it was long.
     pub kept: String,
+    /// All the cleaned output characters the command produced, including
+    /// those `kept` left out.
+    pub total_chars: u64,
     pub seconds: f32,
 }
 
@@ -97,10 +105,11 @@ enum Esc {
     Start,
     /// Inside `ESC [ ...`.
     Csi,
-    /// Inside `ESC ] ...`.
-    Osc,
-    /// Inside an OSC, after ESC (the start of its terminator).
-    OscTerminator,
+    /// Inside a string: `ESC ]` (OSC), `ESC P` (DCS), `ESC _` (APC), `ESC ^`
+    /// (PM) or `ESC X` (SOS), up to BEL or ST.
+    Str,
+    /// Inside such a string, after ESC (the start of ST).
+    Terminating,
     /// After `ESC (` and its kin: one more character belongs to it.
     Charset,
 }
@@ -172,7 +181,7 @@ impl Cleaner {
                 self.in_sequence = 0;
                 self.esc = match c {
                     '[' => Esc::Csi,
-                    ']' => Esc::Osc,
+                    ']' | 'P' | '_' | '^' | 'X' => Esc::Str,
                     '(' | ')' | '*' | '+' => Esc::Charset,
                     _ => Esc::Text,
                 };
@@ -185,16 +194,17 @@ impl Cleaner {
                 }
                 return;
             }
-            Esc::Osc => {
+            Esc::Str => {
                 self.in_sequence += 1;
-                if c == '\u{7}' || self.in_sequence > MAX_SEQUENCE {
+                // BEL, or U+009C (the 8-bit ST), ends it.
+                if c == '\u{7}' || c == '\u{9c}' || self.in_sequence > MAX_SEQUENCE {
                     self.esc = Esc::Text;
                 } else if c == '\u{1b}' {
-                    self.esc = Esc::OscTerminator;
+                    self.esc = Esc::Terminating;
                 }
                 return;
             }
-            Esc::OscTerminator => {
+            Esc::Terminating => {
                 if c == '\\' {
                     self.esc = Esc::Text;
                 } else {
@@ -214,31 +224,48 @@ impl Cleaner {
         }
         match c {
             '\u{1b}' => self.esc = Esc::Start,
+            // The 8-bit forms: CSI, and DCS, SOS, OSC, PM, APC.
+            '\u{9b}' => {
+                self.esc = Esc::Csi;
+                self.in_sequence = 0;
+            }
+            '\u{90}' | '\u{98}' | '\u{9d}' | '\u{9e}' | '\u{9f}' => {
+                self.esc = Esc::Str;
+                self.in_sequence = 0;
+            }
             '\r' => {
                 out.push('\n');
                 self.after_cr = true;
             }
             '\n' | '\t' => out.push(c),
             c if c.is_control() => {}
+            // Invisible or direction-changing: shown as a visible mark.
+            c if invisible(c) => out.push('?'),
             c => out.push(c),
         }
     }
 }
 
 /// `"\n[… {n} characters left out …]\n"`
-fn left_out(n: usize) -> String {
+fn left_out(n: u64) -> String {
     format!("\n[… {n} characters left out …]\n")
 }
 
-/// The first part and the last part of an unbounded stream of text.
+/// The first part and the last part of an unbounded stream of text. Up to
+/// `kept` characters are held before it is known whether the output must be
+/// cut, so output that fits is never cut.
 struct Collector {
     head: String,
     head_chars: usize,
     head_cap: usize,
     tail: String,
     tail_chars: usize,
-    tail_cap: usize,
-    total: usize,
+    /// How much the tail holds while the output might still fit whole.
+    tail_hold: usize,
+    /// How much of the tail remains once the output is cut (room is left for
+    /// the notice).
+    tail_keep: usize,
+    total: u64,
 }
 
 impl Collector {
@@ -250,14 +277,15 @@ impl Collector {
             head_cap,
             tail: String::new(),
             tail_chars: 0,
-            tail_cap: kept.saturating_sub(head_cap + NOTICE_ROOM),
+            tail_hold: kept - head_cap,
+            tail_keep: kept.saturating_sub(head_cap + NOTICE_ROOM),
             total: 0,
         }
     }
 
     fn push(&mut self, text: &str) {
         let n = text.chars().count();
-        self.total += n;
+        self.total += n as u64;
         let mut rest = text;
         if self.head_chars < self.head_cap {
             let room = self.head_cap - self.head_chars;
@@ -271,52 +299,61 @@ impl Collector {
         }
         self.tail.push_str(rest);
         self.tail_chars += rest.chars().count();
-        if self.tail_chars > self.tail_cap {
-            let excess = self.tail_chars - self.tail_cap;
+        self.trim_tail(self.tail_hold);
+    }
+
+    fn trim_tail(&mut self, keep: usize) {
+        if self.tail_chars > keep {
+            let excess = self.tail_chars - keep;
             let at = self
                 .tail
                 .char_indices()
                 .nth(excess)
                 .map_or(self.tail.len(), |(i, _)| i);
             self.tail.drain(..at);
-            self.tail_chars = self.tail_cap;
+            self.tail_chars = keep;
         }
     }
 
     /// Adds `line` on a line of its own.
+    #[cfg(unix)]
     fn push_line(&mut self, line: &str) {
-        let ends_clean = match self
+        let last = self
             .tail
             .chars()
             .last()
-            .or_else(|| self.head.chars().last())
-        {
-            None => true,
-            Some(c) => c == '\n',
-        };
-        if !ends_clean {
+            .or_else(|| self.head.chars().last());
+        if last.is_some_and(|c| c != '\n') {
             self.push("\n");
         }
         self.push(line);
         self.push("\n");
     }
 
-    fn finish(self) -> String {
-        let kept = self.head_chars + self.tail_chars;
-        let mut out = self.head;
-        if self.total > kept {
-            out.push_str(&left_out(self.total - kept));
+    /// The kept text and the number of characters the command produced.
+    fn finish(mut self) -> (String, u64) {
+        let total = self.total;
+        if total > (self.head_chars + self.tail_chars) as u64 {
+            self.trim_tail(self.tail_keep);
+            let left = total - (self.head_chars + self.tail_chars) as u64;
+            self.head.push_str(&left_out(left));
         }
-        out.push_str(&self.tail);
-        out
+        self.head.push_str(&self.tail);
+        (self.head, total)
     }
 }
 
-/// Hands text to `on_output` in coalesced pieces.
+/// Hands output to `on_output` at a bounded rate: at most one call per
+/// 100 ms, each with at most 4,000 characters. When more arrived than fits,
+/// the newest characters are passed on, after a line saying how many were
+/// skipped.
 struct Relay {
+    /// The newest output not yet passed on (never more than the cap).
     pending: String,
     chars: usize,
+    skipped: u64,
     since: Option<Instant>,
+    last_call: Option<Instant>,
 }
 
 impl Relay {
@@ -324,43 +361,66 @@ impl Relay {
         Self {
             pending: String::new(),
             chars: 0,
+            skipped: 0,
             since: None,
+            last_call: None,
         }
     }
 
+    /// When the next call may be made, if there is anything to pass on.
     fn due(&self) -> Option<Instant> {
-        self.since.map(|t| t + FLUSH_EVERY)
+        if self.pending.is_empty() {
+            return None;
+        }
+        let from = self.last_call.or(self.since)?;
+        Some(from + FLUSH_EVERY)
     }
 
-    fn add(&mut self, text: &str, on_output: &(dyn Fn(&str) + Send + Sync)) {
+    /// Drops the oldest pending characters until at most `keep` remain.
+    fn drop_oldest(&mut self, keep: usize) {
+        if self.chars > keep {
+            let excess = self.chars - keep;
+            let at = self
+                .pending
+                .char_indices()
+                .nth(excess)
+                .map_or(self.pending.len(), |(i, _)| i);
+            self.pending.drain(..at);
+            self.chars = keep;
+            self.skipped += excess as u64;
+        }
+    }
+
+    fn add(&mut self, text: &str) {
         if text.is_empty() {
             return;
         }
         self.pending.push_str(text);
         self.chars += text.chars().count();
         self.since.get_or_insert_with(Instant::now);
-        while self.chars >= FLUSH_CHARS {
-            let at = self
-                .pending
-                .char_indices()
-                .nth(FLUSH_CHARS)
-                .map_or(self.pending.len(), |(i, _)| i);
-            on_output(&self.pending[..at]);
-            self.pending.drain(..at);
-            self.chars -= FLUSH_CHARS;
-        }
-        if self.pending.is_empty() {
-            self.since = None;
-        }
+        self.drop_oldest(FLUSH_CHARS);
     }
 
+    /// Makes the call now (the rate limit is the caller's business).
     fn flush(&mut self, on_output: &(dyn Fn(&str) + Send + Sync)) {
-        if !self.pending.is_empty() {
-            on_output(&self.pending);
+        if self.pending.is_empty() {
+            return;
         }
+        let mut notice = String::new();
+        while self.skipped > 0 {
+            notice = format!("[… {} characters skipped …]\n", self.skipped);
+            let room = FLUSH_CHARS.saturating_sub(notice.chars().count());
+            if self.chars <= room {
+                break;
+            }
+            self.drop_oldest(room);
+        }
+        on_output(&format!("{notice}{}", self.pending));
         self.pending.clear();
         self.chars = 0;
+        self.skipped = 0;
         self.since = None;
+        self.last_call = Some(Instant::now());
     }
 }
 
@@ -389,30 +449,76 @@ async fn pump<R: AsyncRead + Unpin>(mut pipe: R, tx: mpsc::Sender<String>) {
 // Running
 // ---------------------------------------------------------------------------
 
-fn not_run(started: Instant, message: String) -> Ran {
+fn not_run(started: Instant, message: String, stopped: bool) -> Ran {
     Ran {
         exit_code: None,
         timed_out: false,
-        stopped: false,
+        stopped,
+        total_chars: message.chars().count() as u64,
         kept: message,
         seconds: started.elapsed().as_secs_f32(),
     }
 }
 
-/// Ends everything the command started. With `graceful` (unix) the group is
-/// asked to end first and gets 500 ms; then it is killed outright. On Windows
-/// the Job Object is terminated.
-async fn stop_tree(child: &mut dyn ChildWrapper, graceful: bool) {
-    #[cfg(unix)]
+/// Kills the command's process group if the run is dropped half-way (the
+/// task is aborted, or a panic unwinds). Unix only: on Windows the Job Object
+/// is closed with the child (`KillOnDrop`), which ends everything in it.
+///
+/// How each path is covered, and why no stale pid is ever signalled:
+/// - Only the group is signalled, never the leader's pid alone. A group id
+///   cannot be reused while any member is alive; if none is alive the signal
+///   fails with ESRCH, which is harmless.
+/// - The leader is reaped only through tokio's own `Child` (never through
+///   process-wrap's group `wait`, which reaps behind tokio's back), so tokio
+///   knows when it has ended and its kill-on-drop does nothing afterwards.
+/// - Normal exit, timeout, cancel: `stop_tree` kills the group once and
+///   disarms this guard, so nothing is signalled again on drop.
+/// - Dropped or panicking mid-run: the guard is still armed and kills the
+///   group; the leader is not reaped yet, so its pid is still its own.
+#[cfg(unix)]
+struct GroupGuard(Option<i32>);
+
+#[cfg(unix)]
+impl Drop for GroupGuard {
+    fn drop(&mut self) {
+        if let Some(group) = self.0.take() {
+            kill_group(group, libc::SIGKILL);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn kill_group(group: i32, signal: i32) {
+    // SAFETY: `killpg` only sends a signal; any failure (the group is gone) is
+    // ignored on purpose.
+    unsafe {
+        libc::killpg(group, signal);
+    }
+}
+
+/// Ends everything the command started. Unix: with `graceful`, SIGTERM to the
+/// group, up to 500 ms for the leader to go, then SIGKILL to the group. The
+/// guard is disarmed first, so the group is signalled only here.
+#[cfg(unix)]
+async fn stop_tree(child: &mut dyn ChildWrapper, group: &mut GroupGuard, graceful: bool) {
+    let Some(group) = group.0.take() else {
+        return;
+    };
     if graceful {
-        let _ = child.signal(SIGTERM);
+        kill_group(group, libc::SIGTERM);
         let until = Instant::now() + TERM_GRACE;
-        while Instant::now() < until && !matches!(child.try_wait(), Ok(Some(_))) {
+        while Instant::now() < until && !matches!(child.inner_mut().try_wait(), Ok(Some(_))) {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
-    #[cfg(not(unix))]
-    let _ = graceful;
+    kill_group(group, libc::SIGKILL);
+    // Reap the leader through tokio, so its drop does not signal the pid.
+    let _ = tokio::time::timeout(Duration::from_millis(300), child.inner_mut().wait()).await;
+}
+
+/// Windows: terminate the Job Object.
+#[cfg(windows)]
+async fn stop_tree(child: &mut dyn ChildWrapper, _graceful: bool) {
     let _ = child.start_kill();
 }
 
@@ -425,7 +531,8 @@ enum End {
 /// Runs `command` in `project_root` with the given shell. Returns when it
 /// ends, when `limits.timeout` passes, or when `cancel` fires; in the last two
 /// cases the whole process tree is stopped first. `on_output` gets the text as
-/// it arrives and is never called after this returns.
+/// it arrives (see `Relay` for the rate) and is never called after this
+/// returns.
 pub async fn run(
     shell: &Shell,
     project_root: &Path,
@@ -435,6 +542,9 @@ pub async fn run(
     cancel: &CancellationToken,
 ) -> Ran {
     let started = Instant::now();
+    if cancel.is_cancelled() {
+        return not_run(started, String::new(), true);
+    }
     if !project_root.is_dir() {
         return not_run(
             started,
@@ -442,15 +552,16 @@ pub async fn run(
                 "The project folder {} does not exist, so the command was not run.",
                 project_root.display()
             ),
+            false,
         );
     }
 
-    let mut cmd = shell.command(command);
+    let mut cmd = shell.command(command, std::env::vars_os());
     cmd.current_dir(project_root);
     let mut wrap = CommandWrap::from(cmd);
     wrap.wrap(KillOnDrop);
     #[cfg(unix)]
-    wrap.wrap(ProcessGroup::leader());
+    wrap.wrap(ProcessSession);
     #[cfg(windows)]
     {
         wrap.wrap(CreationFlags(
@@ -464,9 +575,13 @@ pub async fn run(
             return not_run(
                 started,
                 format!("Could not start {}: {err}", shell.program.display()),
+                false,
             );
         }
     };
+    // The leader of its own session and group: the group id is its pid.
+    #[cfg(unix)]
+    let mut group = GroupGuard(child.id().and_then(|pid| i32::try_from(pid).ok()));
 
     let (tx, mut rx) = mpsc::channel::<String>(32);
     let mut readers = Vec::new();
@@ -507,7 +622,8 @@ pub async fn run(
             _ = &mut timeout => break End::TimedOut,
             _ = tick.tick() => {
                 if exited_at.is_none() {
-                    match child.try_wait() {
+                    // Tokio's own child: it must be the one that reaps.
+                    match child.inner_mut().try_wait() {
                         Ok(Some(st)) => {
                             status = Some(st);
                             exited_at = Some(Instant::now());
@@ -521,7 +637,7 @@ pub async fn run(
             msg = rx.recv(), if !closed => match msg {
                 Some(text) => {
                     collector.push(&text);
-                    relay.add(&text, on_output);
+                    relay.add(&text);
                 }
                 None => closed = true,
             },
@@ -529,6 +645,9 @@ pub async fn run(
     };
 
     let natural = matches!(end, End::Exited);
+    #[cfg(unix)]
+    stop_tree(&mut *child, &mut group, !natural).await;
+    #[cfg(windows)]
     stop_tree(&mut *child, !natural).await;
 
     // Whatever the stopped tree still wrote, but not for long: a grandchild
@@ -537,7 +656,7 @@ pub async fn run(
         let until = tokio::time::Instant::now() + DRAIN_AFTER_STOP;
         while let Ok(Some(text)) = tokio::time::timeout_at(until, rx.recv()).await {
             collector.push(&text);
-            relay.add(&text, on_output);
+            relay.add(&text);
         }
     }
     for reader in &readers {
@@ -558,18 +677,24 @@ pub async fn run(
         }
     }
 
+    let (kept, total_chars) = collector.finish();
     Ran {
         exit_code,
         timed_out,
         stopped,
-        kept: collector.finish(),
+        kept,
+        total_chars,
         seconds: started.elapsed().as_secs_f32(),
     }
 }
 
-/// What the model is told: how the command ended, then its output, cut in the
-/// middle when it is longer than `limits.to_model`.
+/// What the model is told: how the command ended on the first line, then
+/// `output:` and the output (cut in the middle when longer than
+/// `limits.to_model`). After a cut or long output (over 20 lines) the status
+/// is repeated on a last line, so output that imitates a status line cannot
+/// stand in for the real one.
 pub fn for_model(ran: &Ran, limits: &Limits) -> String {
+    const LONG_LINES: usize = 20;
     let status = if ran.timed_out {
         format!("stopped after {} s time limit", limits.timeout.as_secs())
     } else if ran.stopped {
@@ -579,12 +704,20 @@ pub fn for_model(ran: &Ran, limits: &Limits) -> String {
     } else {
         "ended without an exit code".to_string()
     };
+    let shown = ran.kept.chars().count();
+    let cut = ran.total_chars > shown as u64 || shown > limits.to_model;
     let body = if ran.kept.is_empty() {
         "(no output)".to_string()
     } else {
-        cut_middle(&ran.kept, limits.to_model)
+        cut_middle(&ran.kept, limits.to_model, ran.total_chars)
     };
-    let mut text = format!("{status}\n{body}");
+    let mut text = format!("{status}\noutput:\n{body}");
+    if cut || ran.kept.lines().count() > LONG_LINES {
+        if !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str(&format!("(end of output; {status})"));
+    }
     if ran.timed_out {
         text.push_str("\nCommands get no keyboard input. Use non-interactive flags.");
     }
@@ -592,10 +725,11 @@ pub fn for_model(ran: &Ran, limits: &Limits) -> String {
 }
 
 /// All of `text` when it fits in `max` characters, else its first sixth and
-/// the rest of the budget from its end, around a notice.
-fn cut_middle(text: &str, max: usize) -> String {
-    let total = text.chars().count();
-    if total <= max {
+/// the rest of the budget from its end, around a notice that counts what was
+/// left out of all `total` characters.
+fn cut_middle(text: &str, max: usize, total: u64) -> String {
+    let have = text.chars().count();
+    if have <= max {
         return text.to_string();
     }
     let head = max / 6;
@@ -603,12 +737,13 @@ fn cut_middle(text: &str, max: usize) -> String {
     let head_end = text.char_indices().nth(head).map_or(text.len(), |(i, _)| i);
     let tail_start = text
         .char_indices()
-        .nth(total - tail)
+        .nth(have - tail)
         .map_or(text.len(), |(i, _)| i);
+    let left = total.max(have as u64) - max as u64;
     format!(
         "{}{}{}",
         &text[..head_end],
-        left_out(total - max),
+        left_out(left),
         &text[tail_start..]
     )
 }
@@ -764,6 +899,47 @@ mod tests {
         assert_eq!(clean_all(&[b"a\x00b\x07c\x08d\te\x7f"]), "abcd\te");
     }
 
+    #[test]
+    fn cleaner_strips_dcs_apc_pm_and_sos_strings_even_when_split() {
+        let text = "a\x1bPdata\x1b\\b\x1b_apc\x07c\x1b^pm\x1b\\d\x1bXsos\x1b\\e".as_bytes();
+        assert_eq!(clean_all(&[text]), "abcde");
+        for cut in 1..text.len() {
+            let (a, b) = text.split_at(cut);
+            assert_eq!(clean_all(&[a, b]), "abcde", "cut at {cut}");
+        }
+    }
+
+    #[test]
+    fn cleaner_gives_up_on_an_unterminated_string() {
+        let mut text = b"before\x1b_".to_vec();
+        text.extend(std::iter::repeat_n(b'z', 5_000));
+        text.extend_from_slice(b"tail");
+        let out = clean_all(&[&text]);
+        assert!(out.starts_with("before"));
+        assert!(out.ends_with("ztail"), "{}", &out[out.len() - 20..]);
+        assert!(out.len() < 1_000, "{}", out.len());
+    }
+
+    #[test]
+    fn cleaner_strips_eight_bit_csi_and_other_c1_controls() {
+        let text = "a\u{9b}31mb\u{85}c\u{9d}0;title\u{9c}d\u{90}dcs\u{9c}e\u{80}f".as_bytes();
+        assert_eq!(clean_all(&[text]), "abcdef");
+        for cut in 1..text.len() {
+            let (a, b) = text.split_at(cut);
+            assert_eq!(clean_all(&[a, b]), "abcdef", "cut at {cut}");
+        }
+    }
+
+    #[test]
+    fn cleaner_replaces_invisible_format_characters_with_a_question_mark() {
+        let text = "a\u{200b}b\u{202e}c\u{feff}d\u{2028}e".as_bytes();
+        assert_eq!(clean_all(&[text]), "a?b?c?d?e");
+        for cut in 1..text.len() {
+            let (a, b) = text.split_at(cut);
+            assert_eq!(clean_all(&[a, b]), "a?b?c?d?e", "cut at {cut}");
+        }
+    }
+
     // ---- limits and the model's view ---------------------------------------
 
     #[test]
@@ -782,33 +958,79 @@ mod tests {
             timed_out: false,
             stopped: false,
             kept: kept.into(),
+            total_chars: kept.chars().count() as u64,
             seconds: 0.5,
         }
     }
 
     #[test]
-    fn for_model_reports_status_and_output() {
+    fn for_model_reports_status_then_labelled_output() {
         let l = limits(120);
         assert_eq!(
             for_model(&ran(Some(0), "hello\n"), &l),
-            "exit code 0\nhello\n"
+            "exit code 0\noutput:\nhello\n"
         );
-        assert_eq!(for_model(&ran(Some(2), ""), &l), "exit code 2\n(no output)");
+        assert_eq!(
+            for_model(&ran(Some(2), ""), &l),
+            "exit code 2\noutput:\n(no output)"
+        );
         let mut t = ran(None, "partial\n");
         t.timed_out = true;
         assert_eq!(
             for_model(&t, &limits(5)),
-            format!("stopped after 5 s time limit\npartial\n\n{NOTICE_LINE}")
+            format!("stopped after 5 s time limit\noutput:\npartial\n\n{NOTICE_LINE}")
         );
         let mut s = ran(None, "");
         s.stopped = true;
         let text = for_model(&s, &l);
-        assert_eq!(text, "stopped by the user\n(no output)");
+        assert_eq!(text, "stopped by the user\noutput:\n(no output)");
         assert!(
             !text.contains(NOTICE_LINE),
             "the line is only for a time-out"
         );
         assert!(!for_model(&ran(Some(1), "no input here, not a tty\n"), &l).contains(NOTICE_LINE));
+        assert_eq!(
+            for_model(&ran(None, "x\n"), &l),
+            "ended without an exit code\noutput:\nx\n"
+        );
+    }
+
+    #[test]
+    fn for_model_repeats_the_status_after_long_output() {
+        let l = limits(120);
+        let twenty = "l\n".repeat(20);
+        assert_eq!(
+            for_model(&ran(Some(0), &twenty), &l),
+            format!("exit code 0\noutput:\n{twenty}")
+        );
+        let twenty_one = "l\n".repeat(21);
+        assert_eq!(
+            for_model(&ran(Some(0), &twenty_one), &l),
+            format!("exit code 0\noutput:\n{twenty_one}(end of output; exit code 0)")
+        );
+        let no_newline = format!("{}l", "l\n".repeat(20));
+        assert_eq!(
+            for_model(&ran(Some(3), &no_newline), &l),
+            format!("exit code 3\noutput:\n{no_newline}\n(end of output; exit code 3)")
+        );
+        let mut t = ran(None, &twenty_one);
+        t.timed_out = true;
+        let text = for_model(&t, &limits(5));
+        assert!(text.contains("\n(end of output; stopped after 5 s time limit)\n"));
+        assert!(text.ends_with(NOTICE_LINE));
+    }
+
+    #[test]
+    fn output_cannot_imitate_the_status_line() {
+        let l = limits(120);
+        let text = for_model(&ran(Some(1), "exit code 0\nall tests passed\n"), &l);
+        assert!(
+            text.starts_with("exit code 1\noutput:\nexit code 0\n"),
+            "{text}"
+        );
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[0], "exit code 1");
+        assert_eq!(lines[1], "output:");
     }
 
     #[test]
@@ -818,7 +1040,11 @@ mod tests {
             .map(|i| char::from(b'a' + (i % 26) as u8))
             .collect();
         let text = for_model(&ran(Some(0), &kept), &l);
-        let body = text.strip_prefix("exit code 0\n").unwrap();
+        let body = text
+            .strip_prefix("exit code 0\noutput:\n")
+            .unwrap()
+            .strip_suffix("\n(end of output; exit code 0)")
+            .unwrap();
         let notice = "\n[… 18000 characters left out …]\n";
         assert_eq!(body.chars().count(), 12_000 + notice.chars().count());
         assert!(body.starts_with(&kept[..2_000]));
@@ -828,8 +1054,69 @@ mod tests {
         let exact: String = "x".repeat(12_000);
         assert_eq!(
             for_model(&ran(Some(0), &exact), &l),
-            format!("exit code 0\n{exact}")
+            format!("exit code 0\noutput:\n{exact}")
         );
+    }
+
+    #[test]
+    fn the_notice_counts_what_was_left_out_of_the_whole_output() {
+        // `kept` was already cut from a million characters.
+        let kept: String = "k".repeat(199_900);
+        let mut r = ran(Some(0), &kept);
+        r.total_chars = 1_000_000;
+        let text = for_model(&r, &limits(120));
+        assert!(
+            text.contains("[… 988000 characters left out …]"),
+            "{}",
+            &text[..200]
+        );
+        assert!(text.ends_with("(end of output; exit code 0)"));
+    }
+
+    // ---- bounded collection ---------------------------------------------------
+
+    fn collect(chars: usize) -> (String, u64) {
+        let mut c = Collector::new(200_000);
+        let piece: String = "a".repeat(10_000);
+        let mut left = chars;
+        while left > 0 {
+            let n = left.min(10_000);
+            c.push(&piece[..n]);
+            left -= n;
+        }
+        c.finish()
+    }
+
+    #[test]
+    fn exactly_the_kept_size_comes_back_whole_and_one_more_is_cut() {
+        let (whole, total) = collect(200_000);
+        assert_eq!(whole.chars().count(), 200_000);
+        assert!(!whole.contains("left out"));
+        assert_eq!(total, 200_000);
+        let (almost, _) = collect(199_950);
+        assert_eq!(almost.chars().count(), 199_950);
+        assert!(!almost.contains("left out"));
+        let (cut, total) = collect(200_001);
+        assert_eq!(total, 200_001);
+        assert!(cut.contains("characters left out"));
+        assert!(cut.chars().count() <= 200_000, "{}", cut.chars().count());
+        assert!(cut.starts_with(&"a".repeat(50_000)));
+    }
+
+    #[test]
+    fn collection_stays_bounded_and_counts_everything() {
+        let mut c = Collector::new(1_000);
+        for _ in 0..1_000 {
+            c.push(&"é".repeat(100));
+        }
+        assert!(c.head.chars().count() + c.tail.chars().count() <= 1_000);
+        let (text, total) = c.finish();
+        assert_eq!(total, 100_000);
+        assert!(text.chars().count() <= 1_000);
+        assert!(text.contains(&format!(
+            "{} characters left out",
+            100_000 - 250 - (1_000 - 250 - NOTICE_ROOM)
+        )));
     }
 
     // ---- real processes -----------------------------------------------------
@@ -951,7 +1238,7 @@ mod tests {
         );
         assert_eq!(
             for_model(&r, &limits(120)),
-            "stopped by the user\n(no output)"
+            "stopped by the user\noutput:\n(no output)"
         );
     }
 
@@ -1035,11 +1322,11 @@ mod tests {
         assert!(r.kept.trim_end().ends_with("line99999"));
         assert!(r.kept.contains("characters left out"));
         let text = for_model(&r, &limits(60));
-        let notice_room = 60;
-        assert!(text.chars().count() <= "exit code 0\n".len() + 12_000 + notice_room);
+        assert_eq!(r.total_chars, 1_000_000);
+        assert!(text.contains("[… 988000 characters left out …]"));
+        assert!(text.chars().count() <= "exit code 0\noutput:\n".len() + 12_000 + 64 + 40);
         assert!(text.contains("line00000"));
-        assert!(text.trim_end().ends_with("line99999"));
-        assert!(text.contains("characters left out"));
+        assert!(text.contains("line99999\n(end of output; exit code 0)"));
     }
 
     #[tokio::test]
@@ -1075,19 +1362,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_api_key_is_not_in_the_commands_environment() {
+    async fn the_fixed_environment_reaches_the_command() {
         let shell = detect();
         let dir = tempfile::tempdir().unwrap();
-        // SAFETY: no other test reads or writes this variable.
-        unsafe { std::env::set_var("OPENROUTER_API_KEY", "sk-test-not-a-real-key") };
         let cmd = pick(
             &shell,
-            "echo \"key=[$OPENROUTER_API_KEY] term=[$TERM] nocolor=[$NO_COLOR]\"",
-            "\"key=[$env:OPENROUTER_API_KEY] term=[$env:TERM] nocolor=[$env:NO_COLOR]\"",
+            "echo \"term=[$TERM] nocolor=[$NO_COLOR] pager=[$PAGER]\"",
+            "\"term=[$env:TERM] nocolor=[$env:NO_COLOR] pager=[$env:PAGER]\"",
         );
         let r = go(&shell, dir.path(), cmd, &limits(long(20))).await;
-        unsafe { std::env::remove_var("OPENROUTER_API_KEY") };
-        assert_eq!(r.kept.trim(), "key=[] term=[dumb] nocolor=[1]");
+        assert_eq!(r.kept.trim(), "term=[dumb] nocolor=[1] pager=[cat]");
     }
 
     #[tokio::test]
@@ -1146,7 +1430,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn on_output_coalesces_a_burst_into_few_calls_of_at_most_4000_characters() {
+    async fn a_burst_reaches_on_output_in_calls_of_at_most_4000_characters() {
         let shell = detect();
         let dir = tempfile::tempdir().unwrap();
         let cmd = pick(
@@ -1168,7 +1452,135 @@ mod tests {
         assert_eq!(r.exit_code, Some(0));
         assert!(calls.iter().all(|c| c.chars().count() <= 4_000));
         assert!(calls.len() < 200, "{} calls", calls.len());
-        assert_eq!(calls.concat(), r.kept);
+        assert!(calls.last().unwrap().ends_with("line01999\n"));
+    }
+
+    #[tokio::test]
+    async fn endless_output_is_passed_on_at_a_bounded_rate() {
+        let shell = detect();
+        let dir = tempfile::tempdir().unwrap();
+        let cmd = pick(
+            &shell,
+            "yes xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "while ($true) { 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' }",
+        );
+        let limit = if slow() { 5 } else { 2 };
+        let calls: Mutex<Vec<(Instant, usize, bool)>> = Mutex::new(Vec::new());
+        let r = run(
+            &shell,
+            dir.path(),
+            cmd,
+            &limits(limit),
+            &|chunk| {
+                calls.lock().unwrap().push((
+                    Instant::now(),
+                    chunk.chars().count(),
+                    chunk.starts_with("[… "),
+                ))
+            },
+            &CancellationToken::new(),
+        )
+        .await;
+        let calls = calls.into_inner().unwrap();
+        assert!(r.timed_out);
+        let max_calls = limit as usize * 10 + 5;
+        assert!(calls.len() <= max_calls, "{} calls", calls.len());
+        assert!(calls.iter().all(|(_, n, _)| *n <= 4_000));
+        let total: usize = calls.iter().map(|(_, n, _)| n).sum();
+        assert!(total <= max_calls * 4_000, "{total} characters");
+        // At most one call per 100 ms (the last one may come early).
+        for pair in calls[..calls.len().saturating_sub(1)].windows(2) {
+            assert!(
+                pair[1].0.duration_since(pair[0].0) >= Duration::from_millis(90),
+                "calls too close together"
+            );
+        }
+        if !slow() {
+            assert!(
+                calls.iter().any(|(_, _, skipped)| *skipped),
+                "no skipped notice"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_skipped_notice_names_the_count_and_fits_the_cap() {
+        let mut relay = Relay::new();
+        let calls: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let sink = |c: &str| calls.lock().unwrap().push(c.to_string());
+        relay.add(&"a".repeat(3_000));
+        relay.add(&"b".repeat(3_000));
+        relay.flush(&sink);
+        let calls = calls.into_inner().unwrap();
+        assert_eq!(calls.len(), 1);
+        let text = &calls[0];
+        assert!(text.starts_with("[… "), "{}", &text[..30]);
+        let (notice, rest) = text.split_once('\n').unwrap();
+        assert!(notice.ends_with(" characters skipped …]"));
+        assert!(text.chars().count() <= 4_000);
+        assert!(rest.ends_with('b') && rest.starts_with('a'));
+        let skipped: usize = notice.split_whitespace().nth(1).unwrap().parse().unwrap();
+        assert_eq!(skipped + rest.chars().count(), 6_000);
+    }
+
+    #[tokio::test]
+    async fn a_token_cancelled_before_the_start_runs_nothing() {
+        let shell = detect();
+        let dir = tempfile::tempdir().unwrap();
+        let cmd = pick(&shell, "echo hi > marker", "'hi' | Set-Content marker");
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let r = run(&shell, dir.path(), cmd, &limits(20), &|_| {}, &cancel).await;
+        assert!(r.stopped && !r.timed_out);
+        assert_eq!(r.exit_code, None);
+        assert!(!dir.path().join("marker").exists());
+        assert!(r.seconds < 1.0);
+    }
+
+    #[tokio::test]
+    async fn dropping_the_run_mid_way_still_ends_the_whole_tree() {
+        let shell = detect();
+        let dir = tempfile::tempdir().unwrap();
+        let cmd = match shell.family {
+            ShellFamily::Posix => {
+                std::fs::write(
+                    dir.path().join("child.sh"),
+                    "echo $$ > pid.txt\nexec sleep 30\n",
+                )
+                .unwrap();
+                "sh ./child.sh & wait"
+            }
+            ShellFamily::PowerShell => {
+                "$p = Start-Process -NoNewWindow -PassThru powershell -ArgumentList '-NoProfile','-Command','Set-Content -Path pid.txt -Value $PID; Start-Sleep 60'; $p.WaitForExit()"
+            }
+        };
+        let lim = limits(120);
+        let cancel = CancellationToken::new();
+        let file = dir.path().join("pid.txt");
+        let pid = {
+            let running = run(&shell, dir.path(), cmd, &lim, &|_| {}, &cancel);
+            tokio::select! {
+                _ = running => panic!("the command should still be running"),
+                pid = wait_for_pid_file(&file) => pid,
+            }
+        };
+        assert!(wait_gone(pid).await, "grandchild {pid} is still running");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_command_has_no_controlling_terminal() {
+        let shell = detect();
+        let dir = tempfile::tempdir().unwrap();
+        let started = Instant::now();
+        let r = go(&shell, dir.path(), "read x < /dev/tty", &limits(20)).await;
+        assert!(!r.timed_out);
+        assert!(
+            matches!(r.exit_code, Some(code) if code != 0),
+            "{:?}",
+            r.exit_code
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[cfg(unix)]

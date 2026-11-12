@@ -279,6 +279,7 @@ dependencies = [
  "grep-searcher",
  "ignore",
  "keyring",
+ "libc",
  "process-wrap",
  "rand 0.9.5",
  "reqwest 0.12.28",
