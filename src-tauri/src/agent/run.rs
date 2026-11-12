@@ -40,12 +40,12 @@ const FLUSH_EVERY: Duration = Duration::from_millis(100);
 const FLUSH_CHARS: usize = 4_000;
 /// How long output is still collected after the child exited, waiting for the
 /// pipes to close, before the rest of its tree is stopped.
-pub(super) const EXIT_GRACE: Duration = Duration::from_secs(1);
+const EXIT_GRACE: Duration = Duration::from_secs(1);
 /// How long output is still collected after the tree was stopped.
-pub(super) const DRAIN_AFTER_STOP: Duration = Duration::from_millis(300);
+const DRAIN_AFTER_STOP: Duration = Duration::from_millis(300);
 /// On unix, how long the tree gets to end after SIGTERM before SIGKILL.
 #[cfg(unix)]
-pub(super) const TERM_GRACE: Duration = Duration::from_millis(500);
+const TERM_GRACE: Duration = Duration::from_millis(500);
 /// Longest escape sequence given up on as a sequence (so an unterminated one
 /// cannot swallow the rest of the output).
 const MAX_SEQUENCE: usize = 4_096;
@@ -118,7 +118,7 @@ enum Esc {
 /// character across chunks, no ANSI escape sequences, no control characters
 /// except newline and tab, and every line ending as `\n`.
 #[derive(Default)]
-pub(super) struct Cleaner {
+struct Cleaner {
     /// An incomplete character at the end of the last chunk.
     carry: Vec<u8>,
     esc: Esc,
@@ -127,7 +127,7 @@ pub(super) struct Cleaner {
 }
 
 impl Cleaner {
-    pub(super) fn feed(&mut self, bytes: &[u8]) -> String {
+    fn feed(&mut self, bytes: &[u8]) -> String {
         let mut buf = std::mem::take(&mut self.carry);
         buf.extend_from_slice(bytes);
         let mut out = String::with_capacity(buf.len());
@@ -159,7 +159,7 @@ impl Cleaner {
     }
 
     /// The end of the stream: a character cut off by it is one replacement.
-    pub(super) fn finish(&mut self) -> String {
+    fn finish(&mut self) -> String {
         if self.carry.is_empty() {
             String::new()
         } else {
@@ -247,7 +247,7 @@ impl Cleaner {
 }
 
 /// `"\n[… {n} characters left out …]\n"`
-pub(super) fn left_out(n: u64) -> String {
+fn left_out(n: u64) -> String {
     format!("\n[… {n} characters left out …]\n")
 }
 
@@ -316,7 +316,6 @@ impl Collector {
     }
 
     /// Adds `line` on a line of its own.
-    #[cfg(unix)]
     fn push_line(&mut self, line: &str) {
         let last = self
             .tail
@@ -425,7 +424,7 @@ impl Relay {
 }
 
 /// Reads one pipe to its end (or until the receiver is gone).
-pub(super) async fn pump<R: AsyncRead + Unpin>(mut pipe: R, tx: mpsc::Sender<String>) {
+async fn pump<R: AsyncRead + Unpin>(mut pipe: R, tx: mpsc::Sender<String>) {
     let mut cleaner = Cleaner::default();
     let mut buf = vec![0u8; 16 * 1024];
     loop {
@@ -530,8 +529,19 @@ impl Drop for GroupGuard {
     }
 }
 
+/// Windows has no group to signal: the Job Object ends with the child.
+#[cfg(windows)]
+pub(super) struct GroupGuard;
+
+#[cfg(windows)]
+impl GroupGuard {
+    pub(super) fn new(_group: Option<i32>) -> Self {
+        Self
+    }
+}
+
 #[cfg(unix)]
-pub(super) fn kill_group(group: i32, signal: i32) {
+fn kill_group(group: i32, signal: i32) {
     // SAFETY: `killpg` only sends a signal; any failure (the group is gone) is
     // ignored on purpose.
     unsafe {
@@ -544,7 +554,7 @@ pub(super) fn kill_group(group: i32, signal: i32) {
 /// group id cannot be reused until `stop_tree` has signalled the group and
 /// tokio's child has reaped it. On Windows the exit status is taken here.
 #[cfg(unix)]
-pub(super) fn leader_ended(child: &mut dyn ChildWrapper, _status: &mut Option<ExitStatus>) -> bool {
+fn leader_ended(child: &mut dyn ChildWrapper, _status: &mut Option<ExitStatus>) -> bool {
     let Some(pid) = child.id() else {
         // Already reaped (not expected): nothing left to wait for.
         return true;
@@ -566,7 +576,7 @@ pub(super) fn leader_ended(child: &mut dyn ChildWrapper, _status: &mut Option<Ex
 }
 
 #[cfg(windows)]
-pub(super) fn leader_ended(child: &mut dyn ChildWrapper, status: &mut Option<ExitStatus>) -> bool {
+fn leader_ended(child: &mut dyn ChildWrapper, status: &mut Option<ExitStatus>) -> bool {
     match child.inner_mut().try_wait() {
         Ok(Some(st)) => {
             *status = Some(st);
@@ -584,7 +594,7 @@ pub(super) fn leader_ended(child: &mut dyn ChildWrapper, status: &mut Option<Exi
 /// still kills the group; the leader is reaped (through tokio) only after the
 /// group was signalled.
 #[cfg(unix)]
-pub(super) async fn stop_tree(
+async fn stop_tree(
     child: &mut dyn ChildWrapper,
     group: &mut GroupGuard,
     graceful: bool,
@@ -609,15 +619,167 @@ pub(super) async fn stop_tree(
 
 /// Windows: terminate the Job Object.
 #[cfg(windows)]
-pub(super) async fn stop_tree(child: &mut dyn ChildWrapper, _graceful: bool) -> Option<ExitStatus> {
+async fn stop_tree(child: &mut dyn ChildWrapper, _graceful: bool) -> Option<ExitStatus> {
     let _ = child.start_kill();
     None
 }
 
-enum End {
+/// Where a driven command's output goes.
+pub(super) trait Sink: Send {
+    fn text(&mut self, text: &str);
+    /// When `flush` should be called next, if anything is waiting.
+    fn due(&self) -> Option<Instant> {
+        None
+    }
+    fn flush(&mut self) {}
+}
+
+/// How `drive` ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum End {
+    /// The command ended by itself (and its pipes closed, or the grace passed).
     Exited,
     TimedOut,
     Cancelled,
+}
+
+pub(super) struct Driven {
+    pub end: End,
+    /// The command's own process had ended before the stop began, whatever
+    /// the reason `end` gives.
+    pub exited_first: bool,
+    /// The command's own exit status, when it could be collected.
+    pub status: Option<ExitStatus>,
+}
+
+/// The one loop that runs a spawned command: reads both pipes (cleaned) into
+/// `sink`, watches for the leader's exit (then gives the pipes `EXIT_GRACE`
+/// to close), and ends on exit, `timeout` (none: never) or `cancel`. Then the
+/// whole tree is stopped (SIGTERM, 500 ms, SIGKILL unless it exited by itself),
+/// the leader reaped, and what the tree still wrote collected for a moment.
+pub(super) async fn drive(
+    child: &mut dyn ChildWrapper,
+    group: &mut GroupGuard,
+    cancel: &CancellationToken,
+    timeout: Option<Duration>,
+    sink: &mut dyn Sink,
+) -> Driven {
+    let (tx, mut rx) = mpsc::channel::<String>(32);
+    let mut readers = Vec::new();
+    if let Some(pipe) = child.stdout().take() {
+        readers.push(tokio::spawn(pump(pipe, tx.clone())));
+    }
+    if let Some(pipe) = child.stderr().take() {
+        readers.push(tokio::spawn(pump(pipe, tx.clone())));
+    }
+    drop(tx);
+
+    let timeout = async {
+        match timeout {
+            Some(limit) => tokio::time::sleep(limit).await,
+            None => std::future::pending().await,
+        }
+    };
+    tokio::pin!(timeout);
+    let mut tick = tokio::time::interval(Duration::from_millis(20));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut status: Option<ExitStatus> = None;
+    let mut exited_at: Option<Instant> = None;
+    let mut closed = false;
+
+    let end = loop {
+        if let Some(at) = exited_at
+            && (closed || at.elapsed() >= EXIT_GRACE)
+        {
+            break End::Exited;
+        }
+        let flush_due = sink.due();
+        let flush = async {
+            match flush_due {
+                Some(at) => tokio::time::sleep_until(at.into()).await,
+                None => std::future::pending().await,
+            }
+        };
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => break End::Cancelled,
+            _ = &mut timeout => break End::TimedOut,
+            _ = tick.tick() => {
+                if exited_at.is_none() {
+                    // Unix: only looks; the leader is reaped after the
+                    // group has been signalled (see `stop_tree`).
+                    if leader_ended(&mut *child, &mut status) {
+                        exited_at = Some(Instant::now());
+                    }
+                }
+            }
+            _ = flush => sink.flush(),
+            msg = rx.recv(), if !closed => match msg {
+                Some(text) => sink.text(&text),
+                None => closed = true,
+            },
+        }
+    };
+
+    let natural = matches!(end, End::Exited);
+    #[cfg(unix)]
+    let reaped = stop_tree(&mut *child, group, !natural).await;
+    #[cfg(windows)]
+    let reaped = {
+        let _ = &group;
+        stop_tree(&mut *child, !natural).await
+    };
+    status = status.or(reaped);
+
+    // Whatever the stopped tree still wrote, but not for long: a grandchild
+    // that holds the pipes open must not hold this up.
+    if !closed {
+        let until = tokio::time::Instant::now() + DRAIN_AFTER_STOP;
+        while let Ok(Some(text)) = tokio::time::timeout_at(until, rx.recv()).await {
+            sink.text(&text);
+        }
+    }
+    for reader in &readers {
+        reader.abort();
+    }
+    Driven {
+        end,
+        exited_first: exited_at.is_some(),
+        status,
+    }
+}
+
+/// `killed by signal N` for a status that has a signal instead of a code.
+pub(super) fn signal_note(status: &ExitStatus) -> Option<String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        status.signal().map(|sig| format!("killed by signal {sig}"))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = status;
+        None
+    }
+}
+
+struct RunSink<'a> {
+    collector: Collector,
+    relay: Relay,
+    on_output: &'a (dyn Fn(&str) + Send + Sync),
+}
+
+impl Sink for RunSink<'_> {
+    fn text(&mut self, text: &str) {
+        self.collector.push(text);
+        self.relay.add(text);
+    }
+    fn due(&self) -> Option<Instant> {
+        self.relay.due()
+    }
+    fn flush(&mut self) {
+        self.relay.flush(self.on_output);
+    }
 }
 
 /// Starts `command` in `project_root`: its own session (unix) or Job Object
@@ -678,97 +840,38 @@ pub async fn run(
         Err(message) => return not_run(started, message, false),
     };
     // The leader of its own session and group: the group id is its pid.
-    #[cfg(unix)]
     let mut group = GroupGuard::new(child.id().and_then(|pid| i32::try_from(pid).ok()));
 
-    let (tx, mut rx) = mpsc::channel::<String>(32);
-    let mut readers = Vec::new();
-    if let Some(pipe) = child.stdout().take() {
-        readers.push(tokio::spawn(pump(pipe, tx.clone())));
-    }
-    if let Some(pipe) = child.stderr().take() {
-        readers.push(tokio::spawn(pump(pipe, tx.clone())));
-    }
-    drop(tx);
-
-    let mut collector = Collector::new(limits.kept);
-    let mut relay = Relay::new();
-    let timeout = tokio::time::sleep(limits.timeout);
-    tokio::pin!(timeout);
-    let mut tick = tokio::time::interval(Duration::from_millis(20));
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let mut status: Option<ExitStatus> = None;
-    let mut exited_at: Option<Instant> = None;
-    let mut closed = false;
-
-    let end = loop {
-        if let Some(at) = exited_at
-            && (closed || at.elapsed() >= EXIT_GRACE)
-        {
-            break End::Exited;
-        }
-        let flush_due = relay.due();
-        let flush = async {
-            match flush_due {
-                Some(at) => tokio::time::sleep_until(at.into()).await,
-                None => std::future::pending().await,
-            }
-        };
-        tokio::select! {
-            biased;
-            _ = cancel.cancelled() => break End::Cancelled,
-            _ = &mut timeout => break End::TimedOut,
-            _ = tick.tick() => {
-                if exited_at.is_none() {
-                    // Unix: only looks; the leader is reaped after the
-                    // group has been signalled (see `stop_tree`).
-                    if leader_ended(&mut *child, &mut status) {
-                        exited_at = Some(Instant::now());
-                    }
-                }
-            }
-            _ = flush => relay.flush(on_output),
-            msg = rx.recv(), if !closed => match msg {
-                Some(text) => {
-                    collector.push(&text);
-                    relay.add(&text);
-                }
-                None => closed = true,
-            },
-        }
+    let mut sink = RunSink {
+        collector: Collector::new(limits.kept),
+        relay: Relay::new(),
+        on_output,
     };
-
-    let natural = matches!(end, End::Exited);
-    #[cfg(unix)]
-    let reaped = stop_tree(&mut *child, &mut group, !natural).await;
-    #[cfg(windows)]
-    let reaped = stop_tree(&mut *child, !natural).await;
-    status = status.or(reaped);
-
-    // Whatever the stopped tree still wrote, but not for long: a grandchild
-    // that holds the pipes open must not hold this up.
-    if !closed {
-        let until = tokio::time::Instant::now() + DRAIN_AFTER_STOP;
-        while let Ok(Some(text)) = tokio::time::timeout_at(until, rx.recv()).await {
-            collector.push(&text);
-            relay.add(&text);
-        }
-    }
-    for reader in &readers {
-        reader.abort();
-    }
+    let driven = drive(
+        &mut *child,
+        &mut group,
+        cancel,
+        Some(limits.timeout),
+        &mut sink,
+    )
+    .await;
+    let RunSink {
+        mut collector,
+        mut relay,
+        ..
+    } = sink;
     relay.flush(on_output);
 
+    let end = driven.end;
+    let natural = matches!(end, End::Exited);
     let (timed_out, stopped) = (matches!(end, End::TimedOut), matches!(end, End::Cancelled));
     let mut exit_code = None;
-    if natural && let Some(st) = status {
+    if natural && let Some(st) = driven.status {
         exit_code = st.code();
-        #[cfg(unix)]
-        if exit_code.is_none() {
-            use std::os::unix::process::ExitStatusExt;
-            if let Some(sig) = st.signal() {
-                collector.push_line(&format!("killed by signal {sig}"));
-            }
+        if exit_code.is_none()
+            && let Some(note) = signal_note(&st)
+        {
+            collector.push_line(&note);
         }
     }
 

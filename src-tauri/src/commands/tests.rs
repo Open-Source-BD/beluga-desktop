@@ -835,8 +835,8 @@ async fn a_reply_that_goes_silent_fails_as_a_network_error() {
     assert_eq!(r.error.map(|e| e.kind), Some("network".to_string()));
 }
 
-#[tokio::test]
-async fn production_timeouts_match_the_ruling() {
+#[test]
+fn production_timeouts_match_the_ruling() {
     let t = HttpTimeouts::PRODUCTION;
     assert_eq!(t.connect, Duration::from_secs(15));
     assert_eq!(t.read, Duration::from_secs(60));

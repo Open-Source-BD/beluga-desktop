@@ -12,13 +12,18 @@
 //! characters (the newest when more arrived, after a first line saying how
 //! many were skipped). The text kept for the user is the whole ring.
 //!
-//! Process handling is `run`'s: the shared shell, scrubbed environment,
-//! output cleaner and spawn; on macOS and Linux its own session with SIGTERM
+//! Process handling is `run`'s (`run::spawn` and `run::drive`, the same loop
+//! foreground commands use): the shared shell, scrubbed environment, output
+//! cleaner and spawn; on macOS and Linux its own session with SIGTERM
 //! to the group, SIGKILL after 500 ms, the leader reaped only after the group
 //! was signalled; on Windows a Job Object. When the command's own process
 //! exits, whatever it left running in its group (or job) is stopped too, so a
 //! command that starts a server in the background of its shell and returns
 //! ends that server with it.
+//!
+//! A finished command stays listed (with its output) until it is one of more
+//! than `MAX_FINISHED` finished commands of its chat: the oldest finished is
+//! then dropped and its output freed. Reading never removes it.
 //!
 //! Stopping is deliberate on every path: `stop`, `stop_chat` and `stop_all`
 //! each return within about two seconds; the app calls `stop_all` when it
@@ -33,20 +38,20 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::ExitStatus;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use process_wrap::tokio::ChildWrapper;
 use serde::Serialize;
 use serde_json::json;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::watch;
 use tokio::task::AbortHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::run::{DRAIN_AFTER_STOP, EXIT_GRACE};
 #[cfg(unix)]
-use super::run::{GroupGuard, GroupSlot};
+use super::run::GroupSlot;
+use super::run::{Driven, End, GroupGuard, Sink, drive, signal_note};
 use super::shell::Shell;
 use crate::state::EventSink;
 
@@ -56,6 +61,10 @@ const MAX_RUNNING: usize = 4;
 const KEEP: usize = 200_000;
 /// Characters returned by one `output` call, notice included.
 const READ_MAX: usize = 12_000;
+/// Finished commands kept per chat (the most recently finished).
+const MAX_FINISHED: usize = 8;
+/// How long `start` waits for a command that fails at once.
+const EARLY_EXIT: Duration = Duration::from_millis(250);
 /// A stop that has not finished by now is forced.
 const STOP_WITHIN: Duration = Duration::from_secs(2);
 /// The event the interface refreshes its list on; the payload is the chat id.
@@ -125,6 +134,14 @@ impl Ring {
     }
 
     /// Everything kept.
+    pub(crate) fn has_text(&self) -> bool {
+        self.chars > 0
+    }
+
+    pub(crate) fn ends_with_newline(&self) -> bool {
+        self.buf.ends_with('\n')
+    }
+
     pub(crate) fn all(&self) -> String {
         self.buf.clone()
     }
@@ -159,6 +176,20 @@ struct State {
     ring: Ring,
     running: bool,
     exit_code: Option<i32>,
+    /// Order in which commands finished (all chats); `None` while running.
+    finished_seq: Option<u64>,
+}
+
+static FINISHED: AtomicU64 = AtomicU64::new(1);
+
+impl State {
+    fn finish(&mut self, exit_code: Option<i32>) {
+        if self.running {
+            self.running = false;
+            self.exit_code = exit_code;
+            self.finished_seq = Some(FINISHED.fetch_add(1, Ordering::Relaxed));
+        }
+    }
 }
 
 struct Shared {
@@ -192,7 +223,7 @@ impl Ctl {
         #[cfg(unix)]
         self.slot.kill();
         self.abort.abort();
-        self.shared.state().running = false;
+        self.shared.state().finish(None);
     }
 
     /// Asks the supervisor to stop the tree and waits for it, forcing the end
@@ -201,10 +232,11 @@ impl Ctl {
         let was_running = self.shared.state().running;
         self.stop.cancel();
         let mut done = self.done.clone();
-        if tokio::time::timeout(STOP_WITHIN, done.wait_for(|d| *d))
-            .await
-            .is_err()
-        {
+        // Too slow, or the supervisor is gone without finishing (a panic).
+        if !matches!(
+            tokio::time::timeout(STOP_WITHIN, done.wait_for(|d| *d)).await,
+            Ok(Ok(_))
+        ) {
             self.kill_now();
         }
         was_running
@@ -243,14 +275,14 @@ struct Chat {
 }
 
 pub struct Background {
-    chats: Mutex<HashMap<String, Chat>>,
+    chats: Arc<Mutex<HashMap<String, Chat>>>,
     events: Arc<dyn EventSink>,
 }
 
 impl Background {
     pub fn new(events: Arc<dyn EventSink>) -> Self {
         Self {
-            chats: Mutex::new(HashMap::new()),
+            chats: Arc::new(Mutex::new(HashMap::new())),
             events,
         }
     }
@@ -278,7 +310,7 @@ impl Background {
                 root.display()
             ));
         }
-        let info = {
+        let id = {
             let mut chats = self.chats();
             let chat = chats.entry(chat_id.to_string()).or_default();
             if chat.commands.iter().filter(|c| c.running()).count() >= MAX_RUNNING {
@@ -292,22 +324,22 @@ impl Background {
                     ring: Ring::new(KEEP),
                     running: true,
                     exit_code: None,
+                    finished_seq: None,
                 }),
             });
             let stop = CancellationToken::new();
             let (done_tx, done_rx) = watch::channel(false);
-            #[cfg(unix)]
             let group = GroupGuard::new(child.id().and_then(|pid| i32::try_from(pid).ok()));
             #[cfg(unix)]
             let slot = group.slot();
             let task = tokio::spawn(supervise(Supervised {
                 child,
-                #[cfg(unix)]
                 group,
                 shared: shared.clone(),
                 stop: stop.clone(),
                 done: done_tx,
                 events: self.events.clone(),
+                chats: self.chats.clone(),
                 chat_id: chat_id.to_string(),
             }));
             let entry = Entry {
@@ -323,21 +355,28 @@ impl Background {
                     slot,
                 },
             };
-            let info = entry.info();
+            let id = entry.id.clone();
             chat.commands.push(entry);
-            info
+            id
         };
+        // A command that fails at once is finished by the time this returns.
+        let waited = tokio::time::Instant::now() + EARLY_EXIT;
+        while tokio::time::Instant::now() < waited
+            && self.list(chat_id).iter().any(|i| i.id == id && i.running)
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let info = self.list(chat_id).into_iter().find(|i| i.id == id);
         self.changed(chat_id);
-        Ok(info)
+        info.ok_or_else(|| Self::unknown(&id))
     }
 
     fn unknown(id: &str) -> String {
         format!("There is no background command {id} in this chat.")
     }
 
-    /// What the command wrote since the last call. A command that has ended is
-    /// dropped from the list by the read that reports it (its text is the last
-    /// the model sees).
+    /// What the command wrote since the last call (nothing, once it has ended
+    /// and been read). The state and exit code are always current.
     pub fn output(&self, chat_id: &str, id: &str) -> Result<BgRead, String> {
         let mut chats = self.chats();
         let chat = chats.get_mut(chat_id).ok_or_else(|| Self::unknown(id))?;
@@ -346,18 +385,12 @@ impl Background {
             .iter()
             .position(|c| c.id == id)
             .ok_or_else(|| Self::unknown(id))?;
-        let read = {
-            let mut st = chat.commands[at].ctl.shared.state();
-            BgRead {
-                new_text: st.ring.take_new(READ_MAX),
-                running: st.running,
-                exit_code: st.exit_code,
-            }
-        };
-        if !read.running {
-            chat.commands.remove(at);
-        }
-        Ok(read)
+        let mut st = chat.commands[at].ctl.shared.state();
+        Ok(BgRead {
+            new_text: st.ring.take_new(READ_MAX),
+            running: st.running,
+            exit_code: st.exit_code,
+        })
     }
 
     /// All the output kept for the user, whether read or not.
@@ -422,7 +455,7 @@ impl Background {
 
 impl Drop for Background {
     fn drop(&mut self) {
-        let chats = self.chats.get_mut().unwrap_or_else(|e| e.into_inner());
+        let chats = self.chats();
         for entry in chats.values().flat_map(|c| c.commands.iter()) {
             entry.ctl.kill_now();
         }
@@ -442,102 +475,100 @@ fn now_secs() -> i64 {
 
 struct Supervised {
     child: Box<dyn ChildWrapper>,
-    #[cfg(unix)]
     group: GroupGuard,
     shared: Arc<Shared>,
     stop: CancellationToken,
     done: watch::Sender<bool>,
     events: Arc<dyn EventSink>,
+    chats: Arc<Mutex<HashMap<String, Chat>>>,
     chat_id: String,
 }
 
-enum End {
-    Exited,
-    Stopped,
+/// Collected output goes into the command's ring.
+struct RingSink<'a>(&'a Shared);
+
+impl Sink for RingSink<'_> {
+    fn text(&mut self, text: &str) {
+        self.0.state().ring.push(text);
+    }
+}
+
+/// Marks the command finished however the supervisor ends, a panic or an
+/// abort included, and keeps only the newest finished commands of the chat.
+struct Finisher {
+    shared: Arc<Shared>,
+    chats: Arc<Mutex<HashMap<String, Chat>>>,
+    chat_id: String,
+}
+
+impl Finisher {
+    fn finish(&self, exit_code: Option<i32>) {
+        self.shared.state().finish(exit_code);
+        let mut chats = self.chats.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(chat) = chats.get_mut(&self.chat_id) else {
+            return;
+        };
+        let mut finished: Vec<(u64, String)> = chat
+            .commands
+            .iter()
+            .filter_map(|e| Some((e.ctl.shared.state().finished_seq?, e.id.clone())))
+            .collect();
+        if finished.len() > MAX_FINISHED {
+            finished.sort();
+            let drop_ids: Vec<&String> = finished[..finished.len() - MAX_FINISHED]
+                .iter()
+                .map(|(_, id)| id)
+                .collect();
+            chat.commands.retain(|e| !drop_ids.contains(&&e.id));
+        }
+    }
+}
+
+impl Drop for Finisher {
+    fn drop(&mut self) {
+        self.finish(None);
+    }
 }
 
 /// Owns the process: collects its output until it exits or is stopped, then
 /// ends its whole tree and records how it ended.
 async fn supervise(mut s: Supervised) {
-    let (tx, mut rx) = mpsc::channel::<String>(32);
-    let mut readers = Vec::new();
-    if let Some(pipe) = s.child.stdout().take() {
-        readers.push(tokio::spawn(super::run::pump(pipe, tx.clone())));
-    }
-    if let Some(pipe) = s.child.stderr().take() {
-        readers.push(tokio::spawn(super::run::pump(pipe, tx.clone())));
-    }
-    drop(tx);
-
-    let mut tick = tokio::time::interval(Duration::from_millis(20));
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let mut status: Option<ExitStatus> = None;
-    let mut exited_at: Option<Instant> = None;
-    let mut closed = false;
-    let end = loop {
-        if let Some(at) = exited_at
-            && (closed || at.elapsed() >= EXIT_GRACE)
-        {
-            break End::Exited;
-        }
-        tokio::select! {
-            biased;
-            _ = s.stop.cancelled() => break End::Stopped,
-            _ = tick.tick() => {
-                if exited_at.is_none() && super::run::leader_ended(&mut *s.child, &mut status) {
-                    exited_at = Some(Instant::now());
-                }
-            }
-            msg = rx.recv(), if !closed => match msg {
-                Some(text) => s.shared.state().ring.push(&text),
-                None => closed = true,
-            },
-        }
+    let finisher = Finisher {
+        shared: s.shared.clone(),
+        chats: s.chats.clone(),
+        chat_id: s.chat_id.clone(),
     };
+    let Driven {
+        end,
+        exited_first,
+        status,
+    } = drive(
+        &mut *s.child,
+        &mut s.group,
+        &s.stop,
+        None,
+        &mut RingSink(&s.shared),
+    )
+    .await;
 
-    let natural = matches!(end, End::Exited);
-    #[cfg(unix)]
-    let reaped = super::run::stop_tree(&mut *s.child, &mut s.group, !natural).await;
-    #[cfg(windows)]
-    let reaped = super::run::stop_tree(&mut *s.child, !natural).await;
-    status = status.or(reaped);
-
-    if !closed {
-        let until = tokio::time::Instant::now() + DRAIN_AFTER_STOP;
-        while let Ok(Some(text)) = tokio::time::timeout_at(until, rx.recv()).await {
-            s.shared.state().ring.push(&text);
-        }
-    }
-    for reader in &readers {
-        reader.abort();
-    }
-
+    // The leader's own code counts whenever it ended by itself before the
+    // stop began, even if the stop came during the exit grace.
     let mut exit_code = None;
-    #[cfg_attr(not(unix), allow(unused_mut))]
-    let mut note: Option<String> = None;
-    if natural && let Some(st) = status {
+    if exited_first && let Some(st) = status {
         exit_code = st.code();
-        #[cfg(unix)]
-        if exit_code.is_none() {
-            use std::os::unix::process::ExitStatusExt;
-            if let Some(sig) = st.signal() {
-                note = Some(format!("killed by signal {sig}\n"));
+        if exit_code.is_none()
+            && let Some(note) = signal_note(&st)
+        {
+            let mut state = s.shared.state();
+            if state.ring.has_text() && !state.ring.ends_with_newline() {
+                state.ring.push("\n");
             }
+            state.ring.push(&format!("{note}\n"));
         }
     }
-    {
-        let mut st = s.shared.state();
-        if let Some(note) = note {
-            if !st.ring.all().ends_with('\n') && st.ring.total > 0 {
-                st.ring.push("\n");
-            }
-            st.ring.push(&note);
-        }
-        st.exit_code = exit_code;
-        st.running = false;
-    }
+    finisher.finish(exit_code);
     let _ = s.done.send(true);
-    if natural {
+    if matches!(end, End::Exited) {
         s.events.emit(CHANGED_EVENT, json!(s.chat_id));
     }
 }
@@ -654,6 +685,16 @@ mod tests {
     }
 
     #[test]
+    fn ring_knows_whether_it_ends_with_a_newline() {
+        let mut r = Ring::new(10);
+        assert!(!r.ends_with_newline());
+        r.push("a\n");
+        assert!(r.ends_with_newline());
+        r.push("b");
+        assert!(!r.ends_with_newline());
+    }
+
+    #[test]
     fn ring_counts_characters_not_bytes() {
         let mut r = Ring::new(4);
         r.push("é✓é✓é");
@@ -739,24 +780,42 @@ mod tests {
         );
     }
 
+    async fn wait_finished(bg: &Background, chat: &str, id: &str) {
+        let t = Instant::now();
+        loop {
+            if bg.list(chat).iter().any(|i| i.id == id && !i.running) {
+                return;
+            }
+            assert!(
+                t.elapsed() < Duration::from_secs(long(20)),
+                "{id} never ended"
+            );
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+    }
+
     #[tokio::test]
-    async fn a_finished_command_is_listed_until_read_once_and_its_id_is_not_reused() {
+    async fn a_finished_command_stays_listed_and_a_second_read_is_empty_with_the_code() {
         let (bg, _ev, dir) = setup();
         let shell = detect();
-        bg.start("c1", &shell, dir.path(), "echo hi").await.unwrap();
-        // Wait for the end without reading.
-        let t = Instant::now();
-        while bg.list("c1")[0].running {
-            assert!(t.elapsed() < Duration::from_secs(long(20)));
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        let listed = bg.list("c1");
-        assert_eq!(listed.len(), 1);
-        assert!(!listed[0].running && listed[0].exit_code == Some(0));
-        let r = bg.output("c1", "bg1").unwrap();
-        assert!(!r.running && r.new_text.contains("hi"));
-        assert!(bg.list("c1").is_empty(), "read once after finishing");
-        assert!(bg.output("c1", "bg1").is_err());
+        bg.start("c1", &shell, dir.path(), "echo hi; exit 2")
+            .await
+            .unwrap();
+        wait_finished(&bg, "c1", "bg1").await;
+        let first = bg.output("c1", "bg1").unwrap();
+        assert!(!first.running && first.exit_code == Some(2));
+        assert!(first.new_text.contains("hi"));
+        let second = bg.output("c1", "bg1").unwrap();
+        assert_eq!(
+            second,
+            BgRead {
+                new_text: String::new(),
+                running: false,
+                exit_code: Some(2)
+            }
+        );
+        assert_eq!(bg.list("c1").len(), 1, "reading does not remove it");
+        assert!(bg.kept("c1", "bg1").unwrap().contains("hi"));
         let again = bg
             .start("c1", &shell, dir.path(), "echo again")
             .await
@@ -764,6 +823,144 @@ mod tests {
         assert_eq!(again.id, "bg2", "ids are never reused");
         let other = bg.start("c2", &shell, dir.path(), "echo x").await.unwrap();
         assert_eq!(other.id, "bg1", "ids are per chat");
+    }
+
+    #[tokio::test]
+    async fn only_the_eight_most_recently_finished_commands_are_kept() {
+        let (bg, _ev, dir) = setup();
+        let shell = detect();
+        let mut first = None;
+        for n in 1..=12 {
+            let info = bg
+                .start("c1", &shell, dir.path(), &format!("echo out{n}"))
+                .await
+                .unwrap();
+            if n == 1 {
+                first = Some(Arc::downgrade(&bg.chats()["c1"].commands[0].ctl.shared));
+            }
+            wait_finished(&bg, "c1", &info.id).await;
+        }
+        let listed = bg.list("c1");
+        let ids: Vec<_> = listed.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["bg5", "bg6", "bg7", "bg8", "bg9", "bg10", "bg11", "bg12"]
+        );
+        assert!(listed.iter().all(|i| !i.running));
+        assert!(bg.kept("c1", "bg4").is_err());
+        assert!(bg.output("c1", "bg1").is_err());
+        assert!(bg.kept("c1", "bg5").unwrap().contains("out5"));
+        let weak = first.unwrap();
+        let t = Instant::now();
+        while weak.upgrade().is_some() {
+            assert!(
+                t.elapsed() < Duration::from_secs(5),
+                "the output was not freed"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        // Running commands do not count toward the eight, nor the finished toward four.
+        for _ in 0..4 {
+            bg.start("c1", &shell, dir.path(), ticker(&shell))
+                .await
+                .unwrap();
+        }
+        assert_eq!(bg.list("c1").len(), 12);
+        assert_eq!(
+            bg.start("c1", &shell, dir.path(), ticker(&shell))
+                .await
+                .unwrap_err(),
+            FIFTH
+        );
+        bg.stop_all().await;
+    }
+
+    // Unix only: PowerShell takes longer than the early-exit wait to start.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_command_that_fails_at_once_is_already_finished_when_start_returns() {
+        let (bg, _ev, dir) = setup();
+        let shell = detect();
+        // Shell start-up can exceed the short wait on a loaded machine; one of
+        // a few tries must come back finished.
+        let mut seen = None;
+        for _ in 0..4 {
+            let info = bg
+                .start("c1", &shell, dir.path(), "no-such-command-zzq-beluga")
+                .await
+                .unwrap();
+            if !info.running {
+                seen = Some(info);
+                break;
+            }
+        }
+        let info = seen.expect("never finished within the early-exit wait");
+        assert!(matches!(info.exit_code, Some(c) if c != 0));
+        let r = bg.output("c1", &info.id).unwrap();
+        assert!(!r.running && r.exit_code == info.exit_code);
+        assert!(
+            !r.new_text.trim().is_empty(),
+            "the error text is there at once"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_command_still_running_after_a_moment_returns_as_running() {
+        let (bg, _ev, dir) = setup();
+        let shell = detect();
+        let t = Instant::now();
+        let info = bg
+            .start("c1", &shell, dir.path(), ticker(&shell))
+            .await
+            .unwrap();
+        assert!(info.running && info.exit_code.is_none());
+        assert!(t.elapsed() < Duration::from_secs(long(5)));
+        bg.stop_all().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_stop_during_the_exit_grace_keeps_the_real_exit_code() {
+        let (bg, _ev, dir) = setup();
+        let shell = detect();
+        // The shell exits with 5 at once; its child keeps the pipes open.
+        bg.start("c1", &shell, dir.path(), "sleep 30 & exit 5")
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert!(bg.list("c1")[0].running, "still inside the exit grace");
+        bg.stop("c1", "bg1").await.unwrap();
+        let r = bg.output("c1", "bg1").unwrap();
+        assert!(!r.running);
+        assert_eq!(r.exit_code, Some(5));
+    }
+
+    #[tokio::test]
+    async fn a_supervisor_that_dies_leaves_a_finished_entry_and_no_process() {
+        let (bg, _ev, dir) = setup();
+        let shell = detect();
+        let c = with_grandchild(&shell, dir.path());
+        bg.start("c1", &shell, dir.path(), c).await.unwrap();
+        let pid = wait_for_pid_file(&dir.path().join("pid.txt")).await;
+        bg.chats()["c1"].commands[0].ctl.abort.abort();
+        let t = Instant::now();
+        while bg.list("c1")[0].running {
+            assert!(t.elapsed() < Duration::from_secs(5), "still marked running");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let t = Instant::now();
+        bg.stop("c1", "bg1").await.unwrap();
+        assert!(t.elapsed() < Duration::from_secs(2));
+        assert!(wait_gone(pid).await);
+        let r = bg.output("c1", "bg1").unwrap();
+        assert!(!r.running && r.exit_code.is_none());
+        // It no longer counts toward the four.
+        for _ in 0..4 {
+            bg.start("c1", &shell, dir.path(), ticker(&shell))
+                .await
+                .unwrap();
+        }
+        bg.stop_all().await;
     }
 
     #[tokio::test]
