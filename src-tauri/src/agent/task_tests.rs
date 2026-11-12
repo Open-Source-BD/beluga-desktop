@@ -2718,5 +2718,104 @@ async fn a_free_rate_limit_with_requests_left_is_still_waited_out() {
     assert_eq!(*f.outside.waits.lock().unwrap(), [2]);
 }
 
+// ---------------------------------------------------------------------------
+// Quitting the app
+// ---------------------------------------------------------------------------
+
+/// A command whose grandchild writes its pid to `file`, then sleeps.
+fn grandchild(file: &str) -> String {
+    match detect().family {
+        crate::agent::rules::ShellFamily::Posix => {
+            format!("sh -c 'echo $$ > {file}; exec sleep 60' & wait")
+        }
+        crate::agent::rules::ShellFamily::PowerShell => format!(
+            "$p = Start-Process -NoNewWindow -PassThru powershell -ArgumentList '-NoProfile','-Command','Set-Content -Path {file} -Value $PID; Start-Sleep 60'; $p.WaitForExit()"
+        ),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn quitting_stops_the_running_task_and_its_commands_and_starts_nothing_new() {
+    use crate::agent::test_support::{wait_for_pid_file, wait_gone};
+    let third = pick(
+        &detect(),
+        "echo started > third.txt; sleep 60",
+        "Set-Content -Path third.txt -Value started; Start-Sleep 60",
+    );
+    let f = fx(vec![
+        calls(
+            "",
+            vec![call(
+                "c1",
+                "run_command",
+                json!({"command": grandchild("bg.pid"), "background": true}),
+            )],
+        ),
+        calls(
+            "",
+            vec![
+                call(
+                    "c2",
+                    "run_command",
+                    json!({"command": grandchild("fg.pid")}),
+                ),
+                call(
+                    "c3",
+                    "run_command",
+                    json!({"command": third, "background": true}),
+                ),
+            ],
+        ),
+        say("never sent"),
+    ]);
+    let quit = async {
+        f.answer_cards(vec![Answer::Once, Answer::Once]).await;
+        let bg = wait_for_pid_file(&f.path("bg.pid")).await;
+        let fg = wait_for_pid_file(&f.path("fg.pid")).await;
+        let token = f.state.turns().get(&f.chat).unwrap().cancel.clone();
+        let started = std::time::Instant::now();
+        f.state.shut_down().await;
+        (bg, fg, token, started.elapsed())
+    };
+    let (r, (bg, fg, token, took)) = tokio::join!(f.send("start both"), quit);
+    assert!(took < Duration::from_secs(5), "the quit took {took:?}");
+    assert_eq!(r.status, TurnStatus::Interrupted, "{r:?}");
+    assert_eq!(r.reason.as_deref(), Some("stopped"));
+    assert!(
+        wait_gone(fg).await,
+        "the foreground command {fg} still runs"
+    );
+    assert!(
+        wait_gone(bg).await,
+        "the background command {bg} still runs"
+    );
+    assert!(f.state.background.list(&f.chat).is_empty());
+    // The call after the stopped one never ran, and no request followed.
+    assert_eq!(
+        f.shape(),
+        [
+            "user",
+            "assistant[run_command]",
+            "tool:ok",
+            "assistant[run_command,run_command]",
+            "tool:error",
+            "tool:not_run"
+        ]
+    );
+    assert_eq!(f.cards(), 2);
+    assert_eq!(f.requests().len(), 2);
+    assert!(!f.path("third.txt").exists());
+    // The cancelled turn can start no background command any more.
+    assert!(
+        f.state
+            .background
+            .start(&f.chat, &detect(), f.project.path(), third, &token)
+            .await
+            .is_err()
+    );
+    assert!(f.state.background.list(&f.chat).is_empty());
+    assert!(!f.path("third.txt").exists());
+}
+
 #[path = "interface_tests.rs"]
 mod interface;

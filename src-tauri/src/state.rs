@@ -452,6 +452,40 @@ impl AppState {
     pub fn pending_key(&self) -> MutexGuard<'_, Option<HeldKey>> {
         lock(&self.pending_key)
     }
+
+    /// What a normal quit does before the process goes, within four seconds
+    /// in all. The process exits without dropping the futures still running,
+    /// so nothing else would end a foreground command on macOS and Linux.
+    /// 1. Every running turn is cancelled, as Stop does: a foreground command
+    ///    is stopped with its children and the task stores its last rows.
+    /// 2. Each of those chats' task locks is waited for (about two seconds
+    ///    at most) and then kept, so nothing more is stored. A cancelled turn
+    ///    can start no background command: the dispatcher and
+    ///    `Background::start` refuse a cancelled turn.
+    /// 3. Every chat's background commands are stopped.
+    pub async fn shut_down(&self) {
+        const ALL: Duration = Duration::from_secs(4);
+        const TASKS: Duration = Duration::from_secs(2);
+        let started = tokio::time::Instant::now();
+        let chats: Vec<String> = self
+            .turns()
+            .iter()
+            .map(|(chat, turn)| {
+                turn.cancel.cancel();
+                chat.clone()
+            })
+            .collect();
+        let mut held = Vec::new();
+        let _ = tokio::time::timeout(TASKS, async {
+            for chat in &chats {
+                held.push(self.task_locks.hold(chat).await);
+            }
+        })
+        .await;
+        let left = ALL.saturating_sub(started.elapsed());
+        let _ = tokio::time::timeout(left, self.background.stop_all()).await;
+        drop(held);
+    }
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {

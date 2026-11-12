@@ -104,25 +104,19 @@ pub fn run() {
             // closed window is not a quit on macOS, so neither is used. The
             // runtime is still alive here, so the stop can be awaited.
             if let tauri::RunEvent::Exit = event {
-                stop_background_commands(app);
+                shut_down(app);
             }
         });
 }
 
-/// Ends every chat's background commands before the process goes, waiting
-/// for the stops (each is bounded to about two seconds).
-fn stop_background_commands(app: &tauri::AppHandle) {
+/// Stops every running task and every chat's commands before the process
+/// goes, within four seconds (`AppState::shut_down`).
+fn shut_down(app: &tauri::AppHandle) {
     let Some(state) = app.try_state::<Arc<state::AppState>>() else {
         return;
     };
     let state = state.inner().clone();
-    tauri::async_runtime::block_on(async move {
-        let _ = tokio::time::timeout(
-            std::time::Duration::from_secs(4),
-            state.background.stop_all(),
-        )
-        .await;
-    });
+    tauri::async_runtime::block_on(async move { state.shut_down().await });
 }
 
 /// The bundled skill tree: `<resource dir>/skills` in a built app. A dev run
