@@ -110,6 +110,17 @@ fn real(p: &std::path::Path) -> String {
     s.strip_prefix(r"\\?\").map(str::to_string).unwrap_or(s)
 }
 
+/// The folder string the app stores when the user picks `p` in the folder
+/// dialog (`commands/folder.rs` `real_folder`): the canonical path as is,
+/// which on Windows keeps the `\\?\` prefix and the long names.
+fn picked(p: &std::path::Path) -> String {
+    std::fs::canonicalize(p)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string()
+}
+
 fn fx(steps: Vec<Step>) -> Fx {
     let data = tempfile::tempdir().unwrap();
     let project = tempfile::tempdir().unwrap();
@@ -1691,7 +1702,7 @@ async fn closing_the_folder_while_a_card_waits_reads_nothing_more() {
 async fn changing_the_folder_while_a_card_waits_reads_nothing_in_either_folder() {
     let other = tempfile::tempdir().unwrap();
     std::fs::write(other.path().join("a.txt"), "hello there\n").unwrap();
-    folder_changed_while_a_card_waits(Some(real(other.path()))).await;
+    folder_changed_while_a_card_waits(Some(picked(other.path()))).await;
 }
 
 #[tokio::test]
