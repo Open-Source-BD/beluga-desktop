@@ -9,14 +9,15 @@ use tokio::process::Command;
 
 use super::rules::ShellFamily;
 
-/// Variables removed from a command's environment. The first is the app's own
-/// key; the rest make a non-interactive shell run or change code before the
+/// Variables removed from a command's environment. The first two are the
+/// app's own key and the file a key may be read from; the rest make a non-interactive shell run or change code before the
 /// command the user approved. Every variable starting with `BASH_FUNC_`
 /// (exported bash functions, which can replace any command) is removed too.
 /// Loader and language-option variables (`LD_PRELOAD`, `NODE_OPTIONS`, ...) are
 /// left alone: a developer's environment sets them on purpose.
 pub const SCRUBBED: &[&str] = &[
     "OPENROUTER_API_KEY",
+    "OPENROUTER_API_KEY_FILE",
     "BASH_ENV",
     "ENV",
     "PROMPT_COMMAND",
@@ -321,6 +322,7 @@ mod tests {
         assert_eq!(term[0].1.as_deref(), Some("dumb"));
         for name in [
             "OPENROUTER_API_KEY",
+            "OPENROUTER_API_KEY_FILE",
             "BASH_ENV",
             "ENV",
             "PROMPT_COMMAND",
@@ -337,6 +339,22 @@ mod tests {
             assert!(!SCRUBBED.contains(&name));
         }
         assert_eq!(FIXED_ENV.len(), 5, "nothing else is added");
+    }
+
+    #[test]
+    fn the_key_file_variable_is_not_passed_to_commands() {
+        let parent = [
+            ("OPENROUTER_API_KEY_FILE", "/home/u/.key"),
+            ("KEEP_ME", "1"),
+        ];
+        let envs = envs_of(&posix().command("true", os(&parent)));
+        assert!(
+            !envs
+                .iter()
+                .any(|(k, v)| k == "OPENROUTER_API_KEY_FILE" && v.is_some()),
+            "{envs:?}"
+        );
+        assert!(envs.iter().any(|(k, v)| k == "KEEP_ME" && v.is_some()));
     }
 
     #[cfg(unix)]
