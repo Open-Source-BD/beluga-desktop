@@ -8,7 +8,7 @@ use std::sync::Mutex;
 
 use serde::Serialize;
 
-use super::archive::{Limits, download_github_archive};
+use super::archive::{FetchError, Limits, download_github_archive};
 use super::pack::{PackSpec, copy_pack, tree_checksum};
 use super::staging::{Stage, swap_into};
 use crate::engine::UiError;
@@ -20,6 +20,12 @@ pub const NEEDS_WARNING: &str = "claude-red";
 
 pub const DOWNLOAD_FAILED: &str =
     "Could not download from GitHub. Check your connection and the link.";
+const GITHUB_UNREACHABLE: &str = "Could not reach GitHub. Check your connection and try again.";
+const GITHUB_NOT_FOUND: &str = "GitHub could not find that repository or commit. Check the link, and that the repository is public.";
+const GITHUB_RATE_LIMITED: &str =
+    "GitHub is limiting requests right now. Try again in a few minutes.";
+const COULD_NOT_UNPACK: &str =
+    "The download from GitHub could not be unpacked. It may be too large or have too many files.";
 pub const CHECKSUM_MISMATCH: &str =
     "The downloaded pack did not match its recorded checksum, so it was not installed.";
 const COULD_NOT_INSTALL: &str = "Could not install that pack on this computer.";
@@ -28,6 +34,17 @@ pub const NOT_INSTALLED: &str = "Only packs you installed can be removed.";
 
 fn other(message: &str) -> UiError {
     UiError::other(message)
+}
+
+/// What the user is told when fetching from GitHub failed.
+pub fn fetch_failed(e: &FetchError) -> UiError {
+    other(match e {
+        FetchError::Network => GITHUB_UNREACHABLE,
+        FetchError::NotFound => GITHUB_NOT_FOUND,
+        FetchError::RateLimited => GITHUB_RATE_LIMITED,
+        FetchError::Unpack(_) => COULD_NOT_UNPACK,
+        FetchError::Other(_) => DOWNLOAD_FAILED,
+    })
 }
 
 /// A pack id usable as one folder name: `[A-Za-z0-9._-]`, not `.` or `..`.
@@ -92,7 +109,7 @@ pub async fn install_pack(
         &Limits::default(),
     )
     .await
-    .map_err(|_| other(DOWNLOAD_FAILED))?;
+    .map_err(|e| fetch_failed(&e))?;
     let pack = stage.join("pack");
     let (owned_spec, owned_pack) = (spec.clone(), pack.clone());
     let checksum = tokio::task::spawn_blocking(move || {

@@ -420,7 +420,6 @@ async fn a_github_failure_has_the_exact_copy_and_leaves_nothing() {
     let server = MockServer::start().await;
     mock_get(&server, "/repos/o/r", ResponseTemplate::new(404)).await;
     let h = signed_in(&server.uri());
-    let download = err("Could not download from GitHub. Check your connection and the link.");
     let r = install::preview_add(
         &h.state,
         AddSource::Github {
@@ -428,9 +427,10 @@ async fn a_github_failure_has_the_exact_copy_and_leaves_nothing() {
         },
     )
     .await;
-    assert_eq!(r, Err(download.clone()));
+    assert_eq!(r, Err(err(NOT_FOUND)));
+    assert!(staging_is_empty(&h));
 
-    // A hostile archive fails the same way and writes nothing.
+    // A hostile archive cannot be unpacked and writes nothing.
     let server = MockServer::start().await;
     github(&server, hostile_targz("top/../../escaped.md")).await;
     let h = signed_in(&server.uri());
@@ -441,9 +441,147 @@ async fn a_github_failure_has_the_exact_copy_and_leaves_nothing() {
         },
     )
     .await;
-    assert_eq!(r, Err(download));
+    assert_eq!(r, Err(err(UNPACK)));
     assert!(staging_is_empty(&h));
     assert!(!skills_dir(&h).join("escaped.md").exists());
+}
+
+const UNREACHABLE: &str = "Could not reach GitHub. Check your connection and try again.";
+const NOT_FOUND: &str = "GitHub could not find that repository or commit. Check the link, and that the repository is public.";
+const RATE_LIMITED: &str = "GitHub is limiting requests right now. Try again in a few minutes.";
+const UNPACK: &str =
+    "The download from GitHub could not be unpacked. It may be too large or have too many files.";
+const DOWNLOAD_FAILED: &str = "Could not download from GitHub. Check your connection and the link.";
+
+/// A base URL nothing answers on: a local port that was just closed.
+async fn unreachable() -> String {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    format!("http://127.0.0.1:{port}")
+}
+
+async fn preview_github(base: &str) -> Result<Option<AddPreview>, UiError> {
+    let h = signed_in(base);
+    let r = install::preview_add(
+        &h.state,
+        AddSource::Github {
+            url: "https://github.com/o/r".into(),
+        },
+    )
+    .await;
+    assert!(staging_is_empty(&h));
+    r
+}
+
+#[tokio::test]
+async fn a_github_add_says_what_went_wrong() {
+    assert_eq!(
+        preview_github(&unreachable().await).await,
+        Err(err(UNREACHABLE))
+    );
+    for (status, want) in [
+        (404, NOT_FOUND),
+        (403, RATE_LIMITED),
+        (429, RATE_LIMITED),
+        (500, DOWNLOAD_FAILED),
+    ] {
+        // On the API request.
+        let server = MockServer::start().await;
+        mock_get(&server, "/repos/o/r", ResponseTemplate::new(status)).await;
+        assert_eq!(
+            preview_github(&server.uri()).await,
+            Err(err(want)),
+            "{status}"
+        );
+        // On the archive download.
+        let server = MockServer::start().await;
+        mock_get(
+            &server,
+            "/repos/o/r",
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"default_branch": "main"})),
+        )
+        .await;
+        mock_get(
+            &server,
+            "/repos/o/r/commits/main",
+            ResponseTemplate::new(200).set_body_string(SHA),
+        )
+        .await;
+        mock_get(
+            &server,
+            &format!("/o/r/tar.gz/{SHA}"),
+            ResponseTemplate::new(status),
+        )
+        .await;
+        assert_eq!(
+            preview_github(&server.uri()).await,
+            Err(err(want)),
+            "archive {status}"
+        );
+    }
+    // Too many files to unpack.
+    let server = MockServer::start().await;
+    let names: Vec<String> = (0..50_001).map(|i| format!("top/f{i}")).collect();
+    let entries: Vec<(&str, &[u8])> = names.iter().map(|n| (n.as_str(), &b""[..])).collect();
+    github(&server, targz(&entries)).await;
+    assert_eq!(preview_github(&server.uri()).await, Err(err(UNPACK)));
+}
+
+#[tokio::test]
+async fn an_extra_pack_install_says_what_went_wrong() {
+    let server = MockServer::start().await;
+    let h = harness_full(
+        &server.uri(),
+        Arc::new(SessionStore::default()),
+        HttpTimeouts::PRODUCTION,
+        None,
+    );
+    let mut spec = vercel_spec(&h);
+    spec.checksum = pack_archive_checksum(&spec);
+    let install = |base: String, spec: PackSpec| {
+        let state = Arc::clone(&h.state);
+        async move {
+            packs::install_pack(
+                &state.github_http,
+                &base,
+                &spec,
+                &state.skills_dir(),
+                &Mutex::new(()),
+            )
+            .await
+        }
+    };
+    assert_eq!(
+        install(unreachable().await, spec.clone()).await,
+        Err(err(UNREACHABLE))
+    );
+    for (status, want) in [
+        (404, NOT_FOUND),
+        (403, RATE_LIMITED),
+        (429, RATE_LIMITED),
+        (502, DOWNLOAD_FAILED),
+    ] {
+        let server = MockServer::start().await;
+        mock_get(
+            &server,
+            &format!("/{}/tar.gz/{}", spec.repo, spec.commit),
+            ResponseTemplate::new(status),
+        )
+        .await;
+        assert_eq!(
+            install(server.uri(), spec.clone()).await,
+            Err(err(want)),
+            "{status}"
+        );
+    }
+    let server = MockServer::start().await;
+    serve_pack(&server, &spec, hostile_targz("top/../../../escaped.md")).await;
+    assert_eq!(install(server.uri(), spec.clone()).await, Err(err(UNPACK)));
+    assert!(staging_is_empty(&h));
+    assert!(!skills_dir(&h).join("packs/vercel").exists());
 }
 
 // ---- limits ----
@@ -895,12 +1033,7 @@ async fn a_failed_install_leaves_no_partial_folder() {
         &Mutex::new(()),
     )
     .await;
-    assert_eq!(
-        r,
-        Err(err(
-            "Could not download from GitHub. Check your connection and the link."
-        ))
-    );
+    assert_eq!(r, Err(err(UNPACK)));
     assert!(staging_is_empty(&h));
     assert!(!skills_dir(&h).join("packs/vercel").exists());
     assert!(!h._dir.path().join("escaped.md").exists());
@@ -1281,4 +1414,39 @@ fn the_production_github_client_allows_only_the_three_github_hosts_over_https() 
             "https://codeload.github.com"
         ]
     );
+}
+
+/// Installs each extra pack from github.com through the production path into
+/// a temporary folder, checking its recorded checksum. Uses the network, so
+/// it runs only when asked:
+/// `cargo test --manifest-path src-tauri/Cargo.toml -- --ignored real_extra_packs --nocapture`.
+/// Nothing from a pack is executed; its files are only copied and hashed.
+#[tokio::test]
+#[ignore = "downloads the extra packs from github.com"]
+async fn real_extra_packs_install_from_github() {
+    let lock = crate::skills::pack::load_lock(include_str!("../../../skills.lock.json")).unwrap();
+    let http = HttpClients::new(HttpTimeouts::PRODUCTION).unwrap().github;
+    let codeload = crate::state::GithubBases::production().codeload;
+    let mut failures = Vec::new();
+    for spec in lock.iter().filter(|p| !p.bundled) {
+        let dir = tempfile::tempdir().unwrap();
+        let r = packs::install_pack(&http, &codeload, spec, dir.path(), &Mutex::new(())).await;
+        match r {
+            Ok(()) => {
+                let m = read_manifest(&dir.path().join("packs").join(&spec.id)).unwrap();
+                println!(
+                    "{}: installed, {} skills, {} skipped, checksum {}",
+                    spec.id,
+                    m.skills.len(),
+                    m.skipped.len(),
+                    m.checksum
+                );
+            }
+            Err(e) => {
+                println!("{}: {}", spec.id, e.message);
+                failures.push(spec.id.clone());
+            }
+        }
+    }
+    assert!(failures.is_empty(), "failed: {failures:?}");
 }

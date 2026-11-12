@@ -5,6 +5,7 @@
 //! actually read, and nothing is ever made executable.
 
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -27,6 +28,53 @@ impl Default for Limits {
     }
 }
 
+/// Why fetching from GitHub failed; each kind gets its own message for the user.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FetchError {
+    /// No answer: offline, a name or TLS failure, a timeout, a cut connection.
+    Network,
+    /// 404: the repository, branch or commit is missing or not public.
+    NotFound,
+    /// 403 or 429: GitHub is limiting requests.
+    RateLimited,
+    /// The download arrived but could not be unpacked (too large, too many
+    /// files, an unsafe name, a file that could not be written).
+    Unpack(String),
+    /// Anything else (another status, a refused redirect, a bad reply).
+    Other(String),
+}
+
+impl std::fmt::Display for FetchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FetchError::Network => f.write_str("could not reach the download server"),
+            FetchError::NotFound => f.write_str("that repository or commit was not found"),
+            FetchError::RateLimited => f.write_str("GitHub is limiting requests"),
+            FetchError::Unpack(e) | FetchError::Other(e) => f.write_str(e),
+        }
+    }
+}
+
+impl FetchError {
+    /// The kind of an unsuccessful HTTP status.
+    pub fn from_status(status: reqwest::StatusCode) -> FetchError {
+        match status.as_u16() {
+            404 => FetchError::NotFound,
+            403 | 429 => FetchError::RateLimited,
+            n => FetchError::Other(format!("GitHub answered {n}")),
+        }
+    }
+
+    /// The kind of a failed request: a refused redirect is not a network failure.
+    pub fn from_request(e: &reqwest::Error) -> FetchError {
+        if e.is_redirect() {
+            FetchError::Other("a redirect was refused".to_string())
+        } else {
+            FetchError::Network
+        }
+    }
+}
+
 const MAX_PATH_BYTES: usize = 4096;
 /// Most bytes of header and metadata (long names, PAX data) read between two
 /// entries.
@@ -40,10 +88,71 @@ fn excerpt(raw: &str) -> String {
         .collect()
 }
 
+/// True for a name Windows cannot create: a reserved device name (`CON`,
+/// `PRN`, `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`, any case, with or
+/// without an extension) or a name ending in a dot or a space.
+fn windows_unsafe(name: &str) -> bool {
+    if name.ends_with('.') || name.ends_with(' ') {
+        return true;
+    }
+    let stem = name.split('.').next().unwrap_or(name).trim_end_matches(' ');
+    let stem = stem.to_ascii_uppercase();
+    match stem.as_bytes() {
+        b"CON" | b"PRN" | b"AUX" | b"NUL" => true,
+        [b'C', b'O', b'M', d] | [b'L', b'P', b'T', d] => (b'1'..=b'9').contains(d),
+        _ => false,
+    }
+}
+
+/// The paths written so far in one unpack, compared ignoring letter case,
+/// so an archive unpacks to the same tree on every file system: the first
+/// of two paths that differ only in case wins, and a path whose folders
+/// differ only in case from earlier ones is skipped.
+#[derive(Default)]
+struct WrittenPaths {
+    /// Lower-cased path to (exact path, is a folder).
+    seen: HashMap<String, (String, bool)>,
+}
+
+impl WrittenPaths {
+    /// Records `parts` and its folders and returns true when they may be
+    /// written; false means skip the entry.
+    fn claim(&mut self, parts: &[String], is_dir: bool) -> bool {
+        let mut exact = String::new();
+        for (i, part) in parts.iter().enumerate() {
+            if i > 0 {
+                exact.push('/');
+            }
+            exact.push_str(part);
+            let last = i + 1 == parts.len();
+            if let Some((was, was_dir)) = self.seen.get(&exact.to_lowercase()) {
+                // A folder seen again is fine when it is the same folder.
+                if !(*was_dir && *was == exact && (!last || is_dir)) {
+                    return false;
+                }
+            }
+        }
+        let mut exact = String::new();
+        for (i, part) in parts.iter().enumerate() {
+            if i > 0 {
+                exact.push('/');
+            }
+            exact.push_str(part);
+            let dir = i + 1 < parts.len() || is_dir;
+            self.seen
+                .entry(exact.to_lowercase())
+                .or_insert_with(|| (exact.clone(), dir));
+        }
+        true
+    }
+}
+
 /// Validates an archive entry path and returns its components. `Ok(None)`
 /// means there is nothing to write: the entry names the archive root, or a
-/// component contains `:` (unsafe on Windows, so skipped everywhere along
-/// with its descendants). Backslashes count as separators on every platform.
+/// component contains `:` or is a name Windows cannot create (see
+/// `windows_unsafe`); such entries are skipped on every platform, with
+/// their descendants, so the result is the same everywhere. Backslashes
+/// count as separators on every platform.
 fn validate_path(raw: &str) -> Result<Option<Vec<String>>, String> {
     let bad = || format!("archive entry has an unsafe path: \"{}\"", excerpt(raw));
     if raw.contains('\0') {
@@ -60,7 +169,7 @@ fn validate_path(raw: &str) -> Result<Option<Vec<String>>, String> {
             "" | "." => {}
             ".." => return Err(bad()),
             c => {
-                skip |= c.contains(':');
+                skip |= c.contains(':') || windows_unsafe(c);
                 parts.push(c.to_string());
             }
         }
@@ -166,6 +275,7 @@ pub fn unpack_tar_gz(reader: impl Read, dest: &Path, limits: &Limits) -> Result<
         .map_err(|e| format!("could not read archive: {e}"))?;
     let mut count = 0usize;
     let mut total = 0u64;
+    let mut written = WrittenPaths::default();
     let mut entries = entries;
     loop {
         // Only headers and metadata are read while the window is limited;
@@ -184,7 +294,8 @@ pub fn unpack_tar_gz(reader: impl Read, dest: &Path, limits: &Limits) -> Result<
         let is_dir = ty == tar::EntryType::Directory;
         let is_file = ty == tar::EntryType::Regular || ty == tar::EntryType::Continuous;
         // Validate every entry, even ones we skip, so a hostile name aborts.
-        let parts = parts_from_bytes(&entry.path_bytes())?;
+        let parts = parts_from_bytes(&entry.path_bytes())?
+            .filter(|parts| (is_dir || is_file) && written.claim(parts, is_dir));
         match parts {
             Some(parts) if is_dir => {
                 std::fs::create_dir_all(dest_for(dest, &parts))
@@ -220,6 +331,7 @@ pub fn unpack_zip(path: &Path, dest: &Path, limits: &Limits) -> Result<(), Strin
     }
     std::fs::create_dir_all(dest).map_err(|e| format!("could not create folder: {e}"))?;
     let mut total = 0u64;
+    let mut written = WrittenPaths::default();
     for i in 0..archive.len() {
         let mut entry = archive
             .by_index(i)
@@ -232,6 +344,9 @@ pub fn unpack_zip(path: &Path, dest: &Path, limits: &Limits) -> Result<(), Strin
         let kind = entry.unix_mode().map(|m| m & 0o170000);
         let is_dir = entry.is_dir() || raw.ends_with('\\') || kind == Some(0o040000);
         let is_file = matches!(kind, None | Some(0) | Some(0o100000));
+        if !(is_dir || is_file) || !written.claim(&parts, is_dir) {
+            continue;
+        }
         if is_dir {
             std::fs::create_dir_all(&target)
                 .map_err(|e| format!("could not create folder: {e}"))?;
@@ -259,8 +374,9 @@ pub async fn download_github_archive(
     commit: &str,
     dest: &Path,
     limits: &Limits,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, FetchError> {
     use futures_util::StreamExt;
+    let unpack = FetchError::Unpack;
 
     let mut repo_parts = repo.split('/');
     let repo_ok = matches!(
@@ -268,9 +384,11 @@ pub async fn download_github_archive(
         (Some(a), Some(b), None) if safe_segment(a) && safe_segment(b)
     );
     if !repo_ok || !safe_segment(commit) {
-        return Err("that repository or commit name is not valid".to_string());
+        return Err(FetchError::Other(
+            "that repository or commit name is not valid".to_string(),
+        ));
     }
-    std::fs::create_dir_all(dest).map_err(|e| format!("could not create folder: {e}"))?;
+    std::fs::create_dir_all(dest).map_err(|e| unpack(format!("could not create folder: {e}")))?;
 
     let url = format!(
         "{}/{repo}/tar.gz/{commit}",
@@ -280,30 +398,27 @@ pub async fn download_github_archive(
         .get(url)
         .send()
         .await
-        .map_err(|_| "could not reach the download server".to_string())?;
+        .map_err(|e| FetchError::from_request(&e))?;
     let status = resp.status();
-    if status == reqwest::StatusCode::NOT_FOUND {
-        return Err("that repository or commit was not found".to_string());
-    }
     if !status.is_success() {
-        return Err(format!("the download failed (status {})", status.as_u16()));
+        return Err(FetchError::from_status(status));
     }
 
     let mut tmp = tempfile::NamedTempFile::new_in(dest)
-        .map_err(|e| format!("could not create a temporary file: {e}"))?;
+        .map_err(|e| unpack(format!("could not create a temporary file: {e}")))?;
     let mut stream = resp.bytes_stream();
     let mut received: u64 = 0;
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|_| "the download was interrupted".to_string())?;
+        let chunk = chunk.map_err(|_| FetchError::Network)?;
         received += chunk.len() as u64;
         if received > limits.max_total_bytes {
-            return Err("the download is too large".to_string());
+            return Err(unpack("the download is too large".to_string()));
         }
         tmp.write_all(&chunk)
-            .map_err(|e| format!("could not write the download: {e}"))?;
+            .map_err(|e| unpack(format!("could not write the download: {e}")))?;
     }
     tmp.flush()
-        .map_err(|e| format!("could not write the download: {e}"))?;
+        .map_err(|e| unpack(format!("could not write the download: {e}")))?;
 
     let tmp_path = tmp.into_temp_path();
     let src = tmp_path.to_path_buf();
@@ -315,22 +430,23 @@ pub async fn download_github_archive(
         unpack_tar_gz(flate2::read::GzDecoder::new(f), &dest_owned, &limits_owned)
     })
     .await
-    .map_err(|_| "unpacking was interrupted".to_string())?;
+    .map_err(|_| unpack("unpacking was interrupted".to_string()))?;
     tmp_path
         .close()
-        .map_err(|e| format!("could not remove the temporary file: {e}"))?;
-    unpacked?;
+        .map_err(|e| unpack(format!("could not remove the temporary file: {e}")))?;
+    unpacked.map_err(unpack)?;
 
+    let one_top = || unpack("the archive must contain exactly one top-level folder".to_string());
     let mut tops = std::fs::read_dir(dest)
-        .map_err(|e| format!("could not read folder: {e}"))?
+        .map_err(|e| unpack(format!("could not read folder: {e}")))?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("could not read folder: {e}"))?;
+        .map_err(|e| unpack(format!("could not read folder: {e}")))?;
     if tops.len() != 1 {
-        return Err("the archive must contain exactly one top-level folder".to_string());
+        return Err(one_top());
     }
     let top = tops.remove(0);
     if !top.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-        return Err("the archive must contain exactly one top-level folder".to_string());
+        return Err(one_top());
     }
     Ok(top.path())
 }
@@ -767,6 +883,160 @@ mod tests {
         assert_eq!(validate_path("top/a:b").unwrap(), None);
     }
 
+    // ---- names Windows cannot create, and names differing only in case ----
+
+    /// Entry names that must be skipped on every platform, and siblings that must not.
+    const WINDOWS_SKIPPED: [&str; 14] = [
+        "top/CON",
+        "top/aux.md",
+        "top/Nul.txt",
+        "top/com1.json",
+        "top/LPT9",
+        "top/prn.tar.gz",
+        "top/coN/x.md",
+        "top/trail./x.md",
+        "top/space /x.md",
+        "top/file.md.",
+        "top/file.md ",
+        "top/...",
+        "top/lpt1 .md",
+        "top/AUX",
+    ];
+    const WINDOWS_KEPT: [&str; 4] = [
+        "top/com10.md",
+        "top/console.md",
+        "top/nul-ish.md",
+        "top/ok.md",
+    ];
+
+    fn kept_tree() -> Vec<String> {
+        let mut v: Vec<String> = std::iter::once("top".to_string())
+            .chain(WINDOWS_KEPT.iter().map(|s| s.to_string()))
+            .collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn tar_windows_reserved_and_trailing_dot_or_space_names_are_skipped() {
+        let (p, dest) = sandbox();
+        let mut b = tar::Builder::new(Vec::new());
+        for n in WINDOWS_SKIPPED.iter().chain(WINDOWS_KEPT.iter()) {
+            tar_raw(&mut b, n, b"x");
+        }
+        untar(finish_gz(b), &dest, &limits()).unwrap();
+        assert_eq!(tree(&dest), kept_tree());
+        only_dest(p.path());
+    }
+
+    #[test]
+    fn zip_windows_reserved_and_trailing_dot_or_space_names_are_skipped() {
+        let (p, dest) = sandbox();
+        let entries: Vec<(&str, &[u8])> = WINDOWS_SKIPPED
+            .iter()
+            .chain(WINDOWS_KEPT.iter())
+            .map(|n| (*n, &b"x"[..]))
+            .collect();
+        unzip(&zip_bytes(&entries), &dest, &limits()).unwrap();
+        assert_eq!(tree(&dest), kept_tree());
+        only_dest(p.path());
+    }
+
+    #[test]
+    fn windows_unsafe_names() {
+        for n in [
+            "CON",
+            "con",
+            "Con.md",
+            "aux.tar.gz",
+            "NUL",
+            "prn.txt",
+            "COM1",
+            "com9.md",
+            "LPT1",
+            "lpt9.x",
+            "a.",
+            "a ",
+            "...",
+            "nul .md",
+        ] {
+            assert!(windows_unsafe(n), "{n}");
+        }
+        for n in [
+            "CONSOLE",
+            "con-x.md",
+            "COM0",
+            "COM10",
+            "LPT0",
+            "lpt10.md",
+            "a.md",
+            ".git",
+            "a b",
+            "auxiliary",
+        ] {
+            assert!(!windows_unsafe(n), "{n}");
+        }
+    }
+
+    const CASE_ENTRIES: [(&str, &[u8]); 7] = [
+        ("top/A.md", b"first"),
+        ("top/a.md", b"second"),
+        ("top/Dir/x.md", b"x"),
+        ("top/dir/y.md", b"y"),
+        ("top/Dir/z.md", b"z"),
+        ("top/Dir/X.MD", b"X"),
+        ("top/ok.md", b"ok"),
+    ];
+    const CASE_TREE: [&str; 6] = [
+        "top",
+        "top/A.md",
+        "top/Dir",
+        "top/Dir/x.md",
+        "top/Dir/z.md",
+        "top/ok.md",
+    ];
+
+    #[test]
+    fn tar_paths_differing_only_in_case_keep_the_first() {
+        let (p, dest) = sandbox();
+        let mut b = tar::Builder::new(Vec::new());
+        for (n, d) in CASE_ENTRIES {
+            tar_raw(&mut b, n, d);
+        }
+        untar(finish_gz(b), &dest, &limits()).unwrap();
+        assert_eq!(tree(&dest), CASE_TREE);
+        assert_eq!(std::fs::read(dest.join("top/A.md")).unwrap(), b"first");
+        assert_eq!(std::fs::read(dest.join("top/Dir/x.md")).unwrap(), b"x");
+        only_dest(p.path());
+    }
+
+    #[test]
+    fn zip_paths_differing_only_in_case_keep_the_first() {
+        let (p, dest) = sandbox();
+        unzip(&zip_bytes(&CASE_ENTRIES), &dest, &limits()).unwrap();
+        assert_eq!(tree(&dest), CASE_TREE);
+        assert_eq!(std::fs::read(dest.join("top/A.md")).unwrap(), b"first");
+        only_dest(p.path());
+    }
+
+    #[test]
+    fn a_folder_entry_repeated_or_after_its_files_is_fine() {
+        let (_p, dest) = sandbox();
+        let mut b = tar::Builder::new(Vec::new());
+        let mut h = tar::Header::new_gnu();
+        h.set_entry_type(tar::EntryType::Directory);
+        h.set_size(0);
+        b.append_data(&mut h, "top/", &b""[..]).unwrap();
+        tar_raw(&mut b, "top/a.md", b"a");
+        let mut h = tar::Header::new_gnu();
+        h.set_entry_type(tar::EntryType::Directory);
+        h.set_size(0);
+        b.append_data(&mut h, "top/", &b""[..]).unwrap();
+        tar_raw(&mut b, "top/b.md", b"b");
+        untar(finish_gz(b), &dest, &limits()).unwrap();
+        assert_eq!(tree(&dest), ["top", "top/a.md", "top/b.md"]);
+    }
+
     fn tar_long_name(b: &mut tar::Builder<Vec<u8>>, name: &[u8]) {
         let mut data = name.to_vec();
         data.push(0);
@@ -879,8 +1149,8 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(err.contains("not found"), "{err}");
-        assert!(!err.contains("secret body"));
+        assert_eq!(err, FetchError::NotFound);
+        assert!(!err.to_string().contains("secret body"));
     }
 
     #[tokio::test]
@@ -906,7 +1176,10 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(err.contains("too large"), "{err}");
+        assert!(
+            matches!(&err, FetchError::Unpack(e) if e.contains("too large")),
+            "{err:?}"
+        );
         assert_eq!(std::fs::read_dir(dest.path()).unwrap().count(), 0);
     }
 
@@ -921,7 +1194,7 @@ mod tests {
             .mount(&server)
             .await;
         let dest = tempfile::tempdir().unwrap();
-        assert!(
+        assert!(matches!(
             download_github_archive(
                 &reqwest::Client::new(),
                 &server.uri(),
@@ -930,8 +1203,49 @@ mod tests {
                 dest.path(),
                 &limits(),
             )
-            .await
-            .is_err()
+            .await,
+            Err(FetchError::Unpack(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn download_failures_have_their_kind() {
+        let dest = tempfile::tempdir().unwrap();
+        let get = |base: String| {
+            let dest = dest.path().join("d");
+            async move {
+                download_github_archive(
+                    &reqwest::Client::new(),
+                    &base,
+                    "owner/repo",
+                    "abc123",
+                    &dest,
+                    &limits(),
+                )
+                .await
+            }
+        };
+        for (status, want) in [
+            (403, FetchError::RateLimited),
+            (429, FetchError::RateLimited),
+            (500, FetchError::Other("GitHub answered 500".into())),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(status))
+                .mount(&server)
+                .await;
+            assert_eq!(get(server.uri()).await, Err(want), "{status}");
+        }
+        // A local port that was just closed.
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        assert_eq!(
+            get(format!("http://127.0.0.1:{port}")).await,
+            Err(FetchError::Network)
         );
     }
 }

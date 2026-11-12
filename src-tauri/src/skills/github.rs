@@ -2,6 +2,7 @@
 //! link to one commit through the GitHub API. Requests carry the app's name
 //! as `User-Agent` and never any credential.
 
+use super::archive::FetchError;
 use super::library::valid_rel_path;
 use crate::brand::APP_NAME;
 
@@ -80,9 +81,8 @@ pub fn parse_github_url(url: &str) -> Option<GithubLink> {
 }
 
 /// GETs `url` with the app's name as `User-Agent` and no credential, reading
-/// at most `MAX_API_BYTES`. The error says what went wrong, for logs and
-/// tests; the user sees one fixed message.
-async fn get_small(http: &reqwest::Client, url: &str, accept: &str) -> Result<Vec<u8>, String> {
+/// at most `MAX_API_BYTES`. The error's kind decides the message the user sees.
+async fn get_small(http: &reqwest::Client, url: &str, accept: &str) -> Result<Vec<u8>, FetchError> {
     use futures_util::StreamExt;
     let resp = http
         .get(url)
@@ -90,28 +90,29 @@ async fn get_small(http: &reqwest::Client, url: &str, accept: &str) -> Result<Ve
         .header(reqwest::header::ACCEPT, accept)
         .send()
         .await
-        .map_err(|_| "could not reach GitHub".to_string())?;
+        .map_err(|e| FetchError::from_request(&e))?;
     if !resp.status().is_success() {
-        return Err(format!("GitHub answered {}", resp.status().as_u16()));
+        return Err(FetchError::from_status(resp.status()));
     }
     let mut body = Vec::new();
     let mut stream = resp.bytes_stream();
     while let Some(chunk) = stream.next().await {
-        body.extend_from_slice(&chunk.map_err(|_| "the reply was interrupted".to_string())?);
+        body.extend_from_slice(&chunk.map_err(|_| FetchError::Network)?);
         if body.len() > MAX_API_BYTES {
-            return Err("the reply is too large".to_string());
+            return Err(FetchError::Other("the reply is too large".to_string()));
         }
     }
     Ok(body)
 }
 
 /// The commit SHA the link points at, resolving the default branch first
-/// when the link names no ref. `Err` describes the failure.
+/// when the link names no ref. `Err` says what kind of failure it was.
 pub async fn resolve_commit(
     http: &reqwest::Client,
     api_base: &str,
     link: &GithubLink,
-) -> Result<String, String> {
+) -> Result<String, FetchError> {
+    let bad = |e: &str| FetchError::Other(e.to_string());
     let base = format!(
         "{}/repos/{}/{}",
         api_base.trim_end_matches('/'),
@@ -123,12 +124,12 @@ pub async fn resolve_commit(
         None => {
             let body = get_small(http, &base, "application/vnd.github+json").await?;
             let v: serde_json::Value = serde_json::from_slice(&body)
-                .map_err(|_| "the repository reply is not valid".to_string())?;
+                .map_err(|_| bad("the repository reply is not valid"))?;
             let branch = v["default_branch"]
                 .as_str()
-                .ok_or("the repository has no default branch")?;
+                .ok_or_else(|| bad("the repository has no default branch"))?;
             if !safe_segment(branch) {
-                return Err("the default branch name is not supported".to_string());
+                return Err(bad("the default branch name is not supported"));
             }
             branch.to_string()
         }
@@ -140,13 +141,13 @@ pub async fn resolve_commit(
     )
     .await?;
     let sha = String::from_utf8(body)
-        .map_err(|_| "the commit reply is not text".to_string())?
+        .map_err(|_| bad("the commit reply is not text"))?
         .trim()
         .to_ascii_lowercase();
     if sha.len() == 40 && sha.chars().all(|c| c.is_ascii_hexdigit()) {
         Ok(sha)
     } else {
-        Err("the commit reply is not a SHA".to_string())
+        Err(bad("the commit reply is not a SHA"))
     }
 }
 

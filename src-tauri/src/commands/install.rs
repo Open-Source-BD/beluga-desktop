@@ -177,10 +177,9 @@ pub async fn preview_add(s: &AppState, source: AddSource) -> Result<Option<AddPr
             if listed_in_lock(s, &link) {
                 return Err(UiError::other(ALREADY_LISTED));
             }
-            let failed = || UiError::other(packs::DOWNLOAD_FAILED);
             let sha = resolve_commit(&s.github_http, &s.github.api, &link)
                 .await
-                .map_err(|_| failed())?;
+                .map_err(|e| packs::fetch_failed(&e))?;
             let stage = new_stage()?;
             let downloaded = download_github_archive(
                 &s.github_http,
@@ -191,9 +190,12 @@ pub async fn preview_add(s: &AppState, source: AddSource) -> Result<Option<AddPr
                 &Limits::default(),
             )
             .await;
-            let Ok(mut root) = downloaded else {
-                discard(Some(stage)).await;
-                return Err(failed());
+            let mut root = match downloaded {
+                Ok(root) => root,
+                Err(e) => {
+                    discard(Some(stage)).await;
+                    return Err(packs::fetch_failed(&e));
+                }
             };
             let name = match &link.sub_path {
                 Some(sub) => {
