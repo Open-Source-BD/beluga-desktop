@@ -2,22 +2,28 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { chatState, deactivateSkill, type ActiveSkill } from "../../lib/ipc";
 
 /**
- * The chat's active skills and folder for the model in use. Refreshed when the chat or
- * model changes and on `refresh(chatId)`, which a caller uses after activating
- * a skill or when a turn ends.
+ * The selected chat's active skills and folder for the model in use. Refreshed when the
+ * chat or model changes and on `refresh(chatId)`, which a caller uses after activating
+ * a skill or when a turn ends. A result for a chat that is no longer the selected one,
+ * or one overtaken by a later request for the same chat, is ignored.
  */
 export function useChatState(chatId: string | null, modelId: string | null) {
   const [held, setHeld] = useState<{ id: string; skills: ActiveSkill[]; folder: string | null } | null>(null);
   const modelRef = useRef(modelId);
   modelRef.current = modelId;
+  const chatRef = useRef(chatId);
+  chatRef.current = chatId;
   const seq = useRef(0);
+  const latest = useRef(new Map<string, number>());
 
   const refresh = useCallback(async (id: string, model: string | null = modelRef.current) => {
     if (!model) return;
     const mine = ++seq.current;
+    latest.current.set(id, mine);
     try {
       const s = await chatState(id, model);
-      if (seq.current === mine) setHeld({ id, skills: s.active_skills, folder: s.folder });
+      if (latest.current.get(id) !== mine || chatRef.current !== id) return;
+      setHeld({ id, skills: s.active_skills, folder: s.folder });
     } catch {
       // Chips are a convenience; keep what is shown.
     }

@@ -345,3 +345,48 @@ describe("Shell queued message safety", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });
+
+describe("Shell background chat", () => {
+  const CHAT_B = { id: "c2", title: "Other chat", model_id: "test/model", updated_at: 0 };
+  const B_STATE = {
+    active_skills: [{ id: "pk:skill", name: "skill", too_long: false, acts_on_computer: false, unavailable: false }],
+    folder: "/work/app",
+    compacted: false,
+  };
+
+  it("a reply ending in another chat leaves the selected chat's chips and folder alone", async () => {
+    ipc.listChats.mockResolvedValue([CHAT, CHAT_B]);
+    ipc.chatState.mockImplementation(async (id: string) => (id === "c2" ? B_STATE : EMPTY_STATE));
+    render(<Shell />);
+    await openChat();
+    const settle = await startReply();
+    await userEvent.click(await screen.findByText("Other chat"));
+    expect(await screen.findByText("skill")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Close folder" })).toBeInTheDocument();
+    settle(done);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByText("skill")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close folder" })).toBeInTheDocument();
+    await userEvent.click(screen.getByText("Login page"));
+    await waitFor(() => expect(screen.queryByText("skill")).toBeNull());
+    expect(await screen.findByRole("button", { name: "Open a folder" })).toBeInTheDocument();
+  });
+
+  it("a slow answer for the chat you left does not replace the chat you selected", async () => {
+    ipc.listChats.mockResolvedValue([CHAT, CHAT_B]);
+    let releaseA!: () => void;
+    ipc.chatState.mockImplementation((id: string) =>
+      id === "c1"
+        ? new Promise((r) => { releaseA = () => r(EMPTY_STATE); })
+        : Promise.resolve(B_STATE),
+    );
+    render(<Shell />);
+    await openChat();
+    await waitFor(() => expect(ipc.chatState).toHaveBeenCalledWith("c1", "test/model"));
+    await userEvent.click(await screen.findByText("Other chat"));
+    expect(await screen.findByText("skill")).toBeInTheDocument();
+    await act(async () => releaseA());
+    expect(screen.getByText("skill")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close folder" })).toBeInTheDocument();
+  });
+});
