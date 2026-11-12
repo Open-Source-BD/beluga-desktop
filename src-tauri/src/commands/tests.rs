@@ -1785,6 +1785,32 @@ async fn a_summary_is_sent_as_a_system_message_and_older_messages_are_not() {
 }
 
 #[test]
+fn the_length_limit_measures_the_whole_skill_file_that_is_sent() {
+    let f = skills_fx("http://unused.invalid", &[("fat", 10), ("edge", 10)], &[]);
+    let s = &f.h.state;
+    let dir = |name: &str| f._skills.path().join("skills/p/skills").join(name);
+    // A short body under a frontmatter that makes the file too long.
+    let fat = format!(
+        "---\nname: fat\ndescription: {}\n---\nShort.",
+        "d".repeat(60_000)
+    );
+    std::fs::write(dir("fat").join("SKILL.md"), &fat).unwrap();
+    // Exactly at the limit, counted in characters, not bytes.
+    let head = "---\nname: edge\ndescription: d\n---\n";
+    let edge = format!("{head}{}", "\u{e9}".repeat(60_000 - chars(head)));
+    assert_eq!(chars(&edge), 60_000);
+    std::fs::write(dir("edge").join("SKILL.md"), &edge).unwrap();
+
+    let chat = chats::create_chat(s, BIG).unwrap();
+    assert_eq!(
+        chat_state::activate_skill(s, &chat.id, "p:fat", BIG),
+        Err(other("This skill is too long to run in a chat."))
+    );
+    chat_state::activate_skill(s, &chat.id, "p:edge", BIG).unwrap();
+    assert_eq!(active_ids(&f.h, &chat.id), ["p:edge"]);
+}
+
+#[test]
 fn activate_refuses_a_fourth_an_over_long_an_off_a_broken_and_an_unknown_skill() {
     let f = skills_fx(
         "http://unused.invalid",

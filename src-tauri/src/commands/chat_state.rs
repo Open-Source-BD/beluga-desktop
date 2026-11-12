@@ -203,13 +203,14 @@ pub fn activate_skill(
         return state(s, chat_id, model_id);
     }
     let view = skill_view(s, skill_id);
-    if available_body(s, view.as_ref()).is_none() {
+    let Some(text) = available_body(s, view.as_ref()) else {
         return Err(UiError::other(NOT_AVAILABLE));
-    }
+    };
     if ids.len() >= MAX_ACTIVE_SKILLS {
         return Err(UiError::other(TOO_MANY));
     }
-    if view.is_some_and(|v| v.body_chars as usize > MAX_BODY_CHARS) {
+    // The whole SKILL.md, frontmatter included, is what a turn sends.
+    if chars(&text) > MAX_BODY_CHARS {
         return Err(UiError::other(TOO_LONG_TO_RUN));
     }
     ids.push(skill_id.to_string());
