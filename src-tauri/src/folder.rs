@@ -47,6 +47,18 @@ pub(crate) fn walk_with(
     max_files: usize,
     include_hidden: bool,
 ) -> (Vec<FileEntry>, bool) {
+    walk_skipping(base, max_files, include_hidden, None)
+}
+
+/// `walk_with`, never entering or listing `skip` (a real path) when it is
+/// below `base`.
+pub(crate) fn walk_skipping(
+    base: &Path,
+    max_files: usize,
+    include_hidden: bool,
+    skip: Option<&Path>,
+) -> (Vec<FileEntry>, bool) {
+    let skip = skip.map(Path::to_path_buf);
     let walker = ignore::WalkBuilder::new(base)
         .hidden(!include_hidden)
         .git_ignore(true)
@@ -57,10 +69,15 @@ pub(crate) fn walk_with(
         .ignore(false)
         .follow_links(false)
         .sort_by_file_name(|a, b| a.cmp(b))
-        .filter_entry(|e| {
-            !(e.depth() > 0
+        .filter_entry(move |e| {
+            let skipped = e.depth() > 0
                 && e.file_type().is_some_and(|t| t.is_dir())
-                && SKIPPED_DIRS.contains(&e.file_name().to_string_lossy().as_ref()))
+                && SKIPPED_DIRS.contains(&e.file_name().to_string_lossy().as_ref());
+            let kept_out = e.depth() > 0
+                && skip
+                    .as_deref()
+                    .is_some_and(|s| crate::agent::paths::is_within(e.path(), s));
+            !(skipped || kept_out)
         })
         .build();
     let mut entries = Vec::new();

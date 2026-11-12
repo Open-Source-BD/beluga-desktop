@@ -30,6 +30,8 @@ pub fn is_secret(shown: &str) -> bool {
         || matches!(
             name.as_str(),
             ".npmrc" | ".netrc" | ".pypirc" | ".git-credentials"
+                // The app's key file, and the live check's local key file.
+                | "key" | ".beluga-live-key"
         )
 }
 
@@ -58,6 +60,22 @@ mod tests {
             "aws/credentials",
         ] {
             assert!(is_secret(p), "{p} should be secret");
+        }
+    }
+
+    #[test]
+    fn the_apps_key_file_names_are_secret() {
+        for p in [
+            "key",
+            "Library/Application Support/app/key",
+            "KEY",
+            ".beluga-live-key",
+            "sub/.Beluga-Live-Key",
+        ] {
+            assert!(is_secret(p), "{p} should be secret");
+        }
+        for p in ["keys", "key.txt", "monkey", "src/key/index.ts", "keyboard"] {
+            assert!(!is_secret(p), "{p} should not be secret");
         }
     }
 

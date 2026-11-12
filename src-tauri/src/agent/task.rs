@@ -132,7 +132,13 @@ pub fn project_for(s: &AppState, chat_id: &str, model_id: &str) -> Option<Projec
         return None;
     }
     let folder = s.store.folder(chat_id).ok()??;
-    Project::open(&folder).ok()
+    open_project(s, &folder).ok()
+}
+
+/// The chat's folder as a project that keeps out of the app's own data
+/// folder (its database, key file and skills).
+fn open_project(s: &AppState, folder: &str) -> Result<Project, String> {
+    Project::open(folder).map(|p| p.keeping_out(&s.data_dir))
 }
 
 fn status_text(status: ToolStatus) -> &'static str {
@@ -315,7 +321,7 @@ pub async fn run_task(
         .folder(chat_id)
         .ok()
         .flatten()
-        .map(|f| Project::open(&f))
+        .map(|f| open_project(s, &f))
     {
         Some(Ok(project)) => {
             let system = system_text(&project);

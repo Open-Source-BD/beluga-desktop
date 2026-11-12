@@ -89,7 +89,7 @@ Read this before you point project work at a folder you care about. Beluga asks 
 **What Beluga guarantees**
 
 - No command runs and no file changes without an approval you gave: once, by a rule you saved, or "all edits in this chat".
-- The file tools never read or write outside the folder you opened (apart from reading the files of a skill you have installed). They refuse; they do not ask. The check uses the real resolved path, so `..`, absolute paths, drive and network paths and links that leave the folder do not work.
+- The file tools never read or write outside the folder you opened (apart from reading the files of a skill you have installed). They refuse; they do not ask. The check uses the real resolved path, so `..`, absolute paths, drive and network paths and links that leave the folder do not work. They also never read, list, search or write Beluga's own data folder (its database, key file and installed skills), even when the folder you opened contains it.
 - A card shows the whole command and the real path, not a shortened or relative version.
 - Your OpenRouter key is never given to the model or to a command's environment.
 - Files that usually hold secrets (`.env`, private keys, `.npmrc`, credential files, and anything inside `.git`) ask before they are read, and the file tools cannot change them at all.

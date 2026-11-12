@@ -2719,6 +2719,75 @@ async fn a_free_rate_limit_with_requests_left_is_still_waited_out() {
 }
 
 // ---------------------------------------------------------------------------
+// The app's own data folder
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_project_holding_the_apps_data_folder_never_reads_lists_searches_or_writes_it() {
+    let f = fx(vec![
+        calls(
+            "",
+            vec![
+                call("c1", "read_file", json!({"path": "app/key"})),
+                call("c2", "read_file", json!({"path": "app/chats.db"})),
+                call("c3", "list_dir", json!({"path": "app"})),
+                call("c4", "search", json!({"pattern": "sk-or-"})),
+                call("c5", "find_files", json!({"pattern": "*.txt"})),
+                call(
+                    "c6",
+                    "write_file",
+                    json!({"path": "app/new.txt", "content": "x"}),
+                ),
+                call(
+                    "c7",
+                    "edit_file",
+                    json!({"path": "app/key", "old_text": "sk", "new_text": "x"}),
+                ),
+                call("c8", "read_file", json!({"path": "mine.txt"})),
+            ],
+        ),
+        say("done"),
+    ]);
+    // The data folder is `<temp>/app`; the project is `<temp>`.
+    let data = f.state.data_dir.clone();
+    std::fs::write(data.join("key"), "sk-or-v1-FILEKEY123\n").unwrap();
+    std::fs::write(data.join("chats.db"), "sk-or-v1-FILEKEY123 in the db\n").unwrap();
+    let parent = data.parent().unwrap().to_path_buf();
+    std::fs::write(parent.join("mine.txt"), "sk-or-v1-mine\n").unwrap();
+    let root = real(&parent);
+    f.state.store.approve_folder(&root).unwrap();
+    f.state.store.set_folder(&f.chat, Some(&root)).unwrap();
+
+    assert_eq!(f.send("look around").await.status, TurnStatus::Done);
+    let results: HashMap<String, StoredMessage> = f
+        .rows()
+        .into_iter()
+        .filter(|m| m.kind == "tool")
+        .map(|m| (m.tool_call_id.clone().unwrap(), m))
+        .collect();
+    for m in results.values() {
+        assert!(
+            !m.text.contains("FILEKEY"),
+            "{}: {}",
+            m.text,
+            m.tool_call_id.as_deref().unwrap()
+        );
+    }
+    for id in ["c1", "c2", "c3", "c6", "c7"] {
+        let m = &results[id];
+        assert_eq!(m.tool_meta.as_ref().unwrap().status, "error", "{id}");
+        assert_eq!(m.text, crate::agent::paths::PRIVATE, "{id}");
+    }
+    assert!(results["c4"].text.contains("mine.txt:1:sk-or-v1-mine"));
+    assert!(!results["c4"].text.contains("app/"));
+    assert!(results["c5"].text.contains("mine.txt"));
+    assert!(!results["c5"].text.contains("app/"));
+    assert!(results["c8"].text.contains("sk-or-v1-mine"));
+    assert_eq!(f.cards(), 0);
+    assert!(!data.join("new.txt").exists());
+}
+
+// ---------------------------------------------------------------------------
 // Quitting the app
 // ---------------------------------------------------------------------------
 

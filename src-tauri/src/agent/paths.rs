@@ -4,7 +4,8 @@
 //! so nothing here trusts them. A path is first normalised to plain name
 //! segments, then checked on the real, resolved path by `Path::components`
 //! (`Path::starts_with`), never by string prefix. `~` is never expanded: it is
-//! an ordinary directory name. Every refusal is one of two fixed messages.
+//! an ordinary directory name. Every refusal is one of three fixed messages;
+//! the third (`PRIVATE`) is for the app's own data folder.
 //!
 //! Time of check versus time of use: these functions return a path that was
 //! valid at the moment they ran. A caller that writes must call `for_write`
@@ -26,11 +27,16 @@ use std::path::{Component, Path, PathBuf};
 
 pub const OUTSIDE: &str = "That path is outside the project folder.";
 pub const UNUSABLE: &str = "That path cannot be used.";
+pub const PRIVATE: &str = "That path is in the app's own data folder, so it cannot be used.";
 
 /// The canonical folder of a chat.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Project {
     pub root: PathBuf,
+    /// The app's own data folder (its database, key file and installed
+    /// skills), real path. Nothing in it is read, listed, searched or
+    /// written, even when the project folder contains it.
+    private: Option<PathBuf>,
 }
 
 /// A resolved path. `shown` is relative to the root with forward slashes
@@ -110,13 +116,68 @@ fn shown_of(root: &Path, real: &Path) -> String {
         .unwrap_or_default()
 }
 
+/// `path` is `folder` or inside it, compared by component; names ignore
+/// case on macOS and Windows.
+pub(crate) fn is_within(path: &Path, folder: &Path) -> bool {
+    let same = |a: &std::ffi::OsStr, b: &std::ffi::OsStr| {
+        if cfg!(any(target_os = "macos", windows)) {
+            a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+        } else {
+            a == b
+        }
+    };
+    let mut inner = path.components();
+    folder.components().all(|f| {
+        inner
+            .next()
+            .is_some_and(|c| same(c.as_os_str(), f.as_os_str()))
+    })
+}
+
 impl Project {
+    /// The same project, refusing every path in the app's data folder
+    /// `data_dir`, by its real path. Should the folder not exist yet, its
+    /// nearest existing ancestor is resolved and the rest kept as given.
+    pub fn keeping_out(self, data_dir: &Path) -> Project {
+        let mut missing = Vec::new();
+        let mut at = data_dir;
+        let private = loop {
+            if let Ok(real) = std::fs::canonicalize(at) {
+                break missing.iter().rev().fold(real, |p, name| p.join(name));
+            }
+            match (at.parent(), at.file_name()) {
+                (Some(parent), Some(name)) => {
+                    missing.push(name.to_os_string());
+                    at = parent;
+                }
+                _ => break data_dir.to_path_buf(),
+            }
+        };
+        Project {
+            private: Some(private),
+            ..self
+        }
+    }
+
+    /// `real` (a real path) is the app's data folder or inside it.
+    pub fn is_private(&self, real: &Path) -> bool {
+        self.private.as_deref().is_some_and(|d| is_within(real, d))
+    }
+
+    /// The app's data folder, for walks to skip.
+    pub fn private(&self) -> Option<&Path> {
+        self.private.as_deref()
+    }
+
     /// Opens a folder: it must exist and be a directory.
     pub fn open(folder: &str) -> Result<Project, String> {
         const GONE: &str = "The project folder is missing or is not a folder.";
         let root = std::fs::canonicalize(folder).map_err(|_| GONE.to_string())?;
         if root.is_dir() {
-            Ok(Project { root })
+            Ok(Project {
+                root,
+                private: None,
+            })
         } else {
             Err(GONE.to_string())
         }
@@ -137,6 +198,9 @@ impl Project {
         };
         if !real.starts_with(&self.root) {
             return Err(OUTSIDE.to_string());
+        }
+        if self.is_private(&real) {
+            return Err(PRIVATE.to_string());
         }
         let shown = shown_of(&self.root, &real);
         Ok(InProject { real, shown })
@@ -185,6 +249,9 @@ impl Project {
                     // Nothing from here on exists; the names are plain.
                     let mut real = cur.clone();
                     real.extend(&segs[i..]);
+                    if self.is_private(&real) {
+                        return Err(PRIVATE.to_string());
+                    }
                     let shown = shown_of(&self.root, &real);
                     return Ok(InProject { real, shown });
                 }
@@ -193,6 +260,9 @@ impl Project {
             let real = std::fs::canonicalize(&next).map_err(|_| UNUSABLE.to_string())?;
             if !real.starts_with(&self.root) {
                 return Err(OUTSIDE.to_string());
+            }
+            if self.is_private(&real) {
+                return Err(PRIVATE.to_string());
             }
             // A link (or a Windows junction, which resolves elsewhere) is
             // never written through, even when it points inside.
@@ -676,6 +746,85 @@ mod tests {
                 r.shown
             );
         }
+    }
+
+    /// A project folder holding the app's data folder `app` with its key
+    /// file and database.
+    fn project_with_data() -> (tempfile::TempDir, Project) {
+        let d = tempfile::tempdir().unwrap();
+        fs::create_dir_all(d.path().join("app/skills")).unwrap();
+        fs::write(d.path().join("app/key"), "sk-or-v1-FILEKEY123").unwrap();
+        fs::write(d.path().join("app/chats.db"), "db").unwrap();
+        fs::write(d.path().join("mine.txt"), "x").unwrap();
+        let p = Project::open(d.path().to_str().unwrap())
+            .unwrap()
+            .keeping_out(&d.path().join("app"));
+        (d, p)
+    }
+
+    #[test]
+    fn the_apps_data_folder_is_refused_for_reading_and_writing() {
+        let (d, p) = project_with_data();
+        let abs = d.path().join("app").join("key");
+        for given in [
+            "app",
+            "app/",
+            "app/key",
+            "./app/chats.db",
+            "app\\key",
+            "app/skills",
+            abs.to_str().unwrap(),
+        ] {
+            assert_eq!(p.existing(given).unwrap_err(), PRIVATE, "read {given}");
+        }
+        for given in [
+            "app/key",
+            "app/chats.db",
+            "app/new.txt",
+            "app/new/deeper.txt",
+        ] {
+            assert_eq!(p.for_write(given).unwrap_err(), PRIVATE, "write {given}");
+        }
+        assert!(!d.path().join("app/new.txt").exists());
+        // The rest of the project is unaffected.
+        assert_eq!(p.existing("mine.txt").unwrap().shown, "mine.txt");
+        assert_eq!(p.existing(".").unwrap().shown, "");
+        assert_eq!(p.for_write("mine.txt").unwrap().shown, "mine.txt");
+        assert_eq!(p.for_write("apps/x.txt").unwrap().shown, "apps/x.txt");
+        assert!(!p.is_private(&p.root));
+    }
+
+    #[test]
+    fn the_apps_data_folder_in_another_case_is_refused_where_names_ignore_case() {
+        let (d, p) = project_with_data();
+        if !case_insensitive(d.path()) {
+            eprintln!("skipped: this file system is case-sensitive");
+            return;
+        }
+        assert_eq!(p.existing("APP/KEY").unwrap_err(), PRIVATE);
+        assert_eq!(p.for_write("App/Key").unwrap_err(), PRIVATE);
+        assert_eq!(p.for_write("APP/fresh.txt").unwrap_err(), PRIVATE);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_into_the_apps_data_folder_is_refused() {
+        use std::os::unix::fs::symlink;
+        let (d, p) = project_with_data();
+        symlink(d.path().join("app/key"), d.path().join("innocent")).unwrap();
+        symlink(d.path().join("app"), d.path().join("door")).unwrap();
+        assert_eq!(p.existing("innocent").unwrap_err(), PRIVATE);
+        assert_eq!(p.existing("door/chats.db").unwrap_err(), PRIVATE);
+        assert!(p.for_write("door/new.txt").is_err());
+    }
+
+    #[test]
+    fn a_project_without_a_data_folder_is_unaffected() {
+        let (_d, p) = project();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let p = p.keeping_out(elsewhere.path());
+        assert_eq!(p.existing("src/a.ts").unwrap().shown, "src/a.ts");
+        assert_eq!(p.for_write("src/n.ts").unwrap().shown, "src/n.ts");
     }
 
     #[cfg(windows)]

@@ -225,3 +225,5 @@ Decisions the designer made during the build that change what this document says
 **Search.** `find_files` and `search` include hidden files and folders (except `.git`); a search pattern for file names with no slash matches at any depth.
 
 **The model's instructions.** The project folder's name is reduced to letters, digits, space, `-`, `_` and `.` before it is put in the system message.
+
+**The app's own data folder.** The file tools refuse every path whose real path is in the app's data folder (its database, key file and installed skills), and `find_files` and `search` never enter it, even when the project folder contains it. A file named `key` or `.beluga-live-key` is a secret file wherever it is.

@@ -10,7 +10,7 @@ use super::paths::{InProject, Project};
 use super::read::{clean, fail, folder_arg, ok, optional_str, required_str, summary_text};
 use super::secrets::is_secret;
 use super::{ToolOutcome, ToolStatus};
-use crate::folder::{FileEntry, MAX_READ_BYTES, MAX_WALKED_FILES, walk_with};
+use crate::folder::{FileEntry, MAX_READ_BYTES, MAX_WALKED_FILES, walk_skipping};
 
 /// Most paths one `find_files` call returns.
 const MAX_FOUND: usize = 200;
@@ -79,9 +79,10 @@ fn folder_base(project: &Project, args: &Value) -> Result<InProject, String> {
     Ok(found)
 }
 
-/// Files below `base` that are not secret: (path below base, entry).
-fn candidate_files(base: &InProject) -> (Vec<FileEntry>, bool) {
-    let (entries, cut) = walk_with(&base.real, MAX_WALKED_FILES, true);
+/// Files below `base` that are not secret: (path below base, entry). The
+/// app's data folder is never entered.
+fn candidate_files(project: &Project, base: &InProject) -> (Vec<FileEntry>, bool) {
+    let (entries, cut) = walk_skipping(&base.real, MAX_WALKED_FILES, true, project.private());
     let files = entries
         .into_iter()
         .filter(|e| !e.is_dir)
@@ -108,7 +109,7 @@ pub fn find_files(project: &Project, args: &Value) -> ToolOutcome {
         Ok(b) => b,
         Err(e) => return fail(e, found_none(0)),
     };
-    let (files, cut) = candidate_files(&base);
+    let (files, cut) = candidate_files(project, &base);
     let matches: Vec<String> = files
         .iter()
         .filter(|e| matcher.is_match(&e.path))
@@ -205,7 +206,7 @@ pub fn search(project: &Project, args: &Value) -> ToolOutcome {
     };
     // (display path, real path, bytes) of every file to search.
     let (targets, cut): (Vec<(String, std::path::PathBuf, u64)>, bool) = if base.real.is_dir() {
-        let (files, cut) = candidate_files(&base);
+        let (files, cut) = candidate_files(project, &base);
         let targets = files
             .into_iter()
             .filter(|e| filter.as_ref().is_none_or(|g| g.is_match(&e.path)))
@@ -303,6 +304,30 @@ mod tests {
         let path = t.path().join(rel);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, body).unwrap();
+    }
+
+    #[test]
+    fn the_apps_data_folder_is_never_walked_found_or_searched() {
+        let (t, p) = setup();
+        let p = p.keeping_out(&t.path().join(".local/share/app"));
+        put(&t, ".local/share/app/key", "sk-or-v1-FILEKEY123\n");
+        put(&t, ".local/share/app/chats.txt", "sk-or-v1-FILEKEY123\n");
+        put(&t, ".local/share/other/x.txt", "sk-or-v1-elsewhere\n");
+        put(&t, "mine.txt", "sk-or-v1-mine\n");
+        let found = find_files(&p, &json!({"pattern": "*"}));
+        assert_eq!(found.text, ".local/share/other/x.txt\nmine.txt");
+        let hits = search(&p, &json!({"pattern": "sk-or-"}));
+        assert_eq!(
+            hits.text,
+            ".local/share/other/x.txt:1:sk-or-v1-elsewhere\nmine.txt:1:sk-or-v1-mine"
+        );
+        for path in [".local/share/app", ".local/share/app/key"] {
+            let o = search(&p, &json!({"pattern": "sk-or-", "path": path}));
+            assert_eq!(o.status, ToolStatus::Error, "{path}");
+            assert!(!o.text.contains("FILEKEY"), "{path}: {}", o.text);
+            let o = find_files(&p, &json!({"pattern": "*", "path": path}));
+            assert_eq!(o.status, ToolStatus::Error, "{path}");
+        }
     }
 
     #[test]
