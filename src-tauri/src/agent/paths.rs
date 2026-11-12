@@ -58,6 +58,31 @@ fn invisible(c: char) -> bool {
         | 0x1D173..=0x1D17A | 0xE0001 | 0xE0020..=0xE007F)
 }
 
+/// The purely lexical check that runs before any file-system call on a
+/// model-given path. Canonicalizing a network name would open a connection to
+/// a server the model chose (and could leak the user's credentials), so:
+/// - a path whose first two characters are both a slash or backslash, in any
+///   mix (`//`, `\\`, `/\`, `\/`), is refused on every system (Windows reads
+///   `/` as `\` in a prefix), as is any path starting with a single `\`;
+/// - a path whose parsed prefix is anything but a plain drive (UNC, verbatim,
+///   device) is refused.
+fn refuse_network_forms(given: &str) -> Result<(), String> {
+    let mut chars = given.chars();
+    let sep = |c: Option<char>| matches!(c, Some('/' | '\\'));
+    let first = chars.next();
+    if first == Some('\\') || (sep(first) && sep(chars.next())) {
+        return Err(UNUSABLE.to_string());
+    }
+    let prefix = match Path::new(given).components().next() {
+        Some(Component::Prefix(p)) => Some(p.kind()),
+        _ => None,
+    };
+    if prefix.is_some_and(|k| !matches!(k, std::path::Prefix::Disk(_))) {
+        return Err(UNUSABLE.to_string());
+    }
+    Ok(())
+}
+
 /// A name that is safe on every system: no `:` (drive or stream), no control
 /// characters, no trailing space or dot (Windows drops them, so `.. ` would
 /// become `..`), and not a device name.
@@ -189,10 +214,7 @@ impl Project {
         if given.is_empty() || given.contains('\0') {
             return Err(UNUSABLE.to_string());
         }
-        // `\\server\share`, `//server/share`, `\\?\C:\x`, a rooted `\x`.
-        if given.starts_with(['\\']) || given.starts_with("//") {
-            return Err(UNUSABLE.to_string());
-        }
+        refuse_network_forms(given)?;
         let path = Path::new(given);
         let segs: Vec<String> = if path.is_absolute() {
             self.absolute_segments(given, path)?
@@ -320,7 +342,6 @@ mod tests {
             "",
             "   ",
             "a\0b",
-            "C:\\x",
             "C:x",
             "\\\\server\\share\\x",
             "//server/share/x",
@@ -335,6 +356,28 @@ mod tests {
             assert_eq!(p.existing(given).unwrap_err(), BAD, "read {given:?}");
             assert_eq!(p.for_write(given).unwrap_err(), BAD, "write {given:?}");
         }
+    }
+
+    #[test]
+    fn two_leading_separators_in_any_mix_are_refused_before_the_disk() {
+        let (_d, p) = project();
+        for given in [
+            "//server/share/x",
+            "\\\\server\\share\\x",
+            "/\\server\\share\\x",
+            "\\/server/share/x",
+            "/\\?\\C:\\x",
+            "\\/.\\pipe\\x",
+            "//",
+            "/\\",
+        ] {
+            // The lexical check runs first and alone: no file-system call.
+            assert_eq!(refuse_network_forms(given).unwrap_err(), BAD, "{given}");
+            assert_eq!(p.existing(given).unwrap_err(), BAD, "read {given}");
+            assert_eq!(p.for_write(given).unwrap_err(), BAD, "write {given}");
+        }
+        assert!(refuse_network_forms("/home/x").is_ok());
+        assert!(refuse_network_forms("src/a.ts").is_ok());
     }
 
     #[test]
@@ -667,6 +710,35 @@ mod tests {
             ] {
                 assert_eq!(p.existing(given).unwrap_err(), BAD, "read {given}");
                 assert_eq!(p.for_write(given).unwrap_err(), BAD, "write {given}");
+            }
+        }
+
+        #[test]
+        fn mixed_separator_network_forms_are_refused() {
+            let (_d, p) = project();
+            for given in [
+                "/\\server\\share\\x",
+                "\\/server\\share\\x",
+                "/\\?\\C:\\x",
+                "/\\.\\pipe\\x",
+            ] {
+                assert_eq!(refuse_network_forms(given).unwrap_err(), BAD, "{given}");
+                assert_eq!(p.existing(given).unwrap_err(), BAD, "read {given}");
+                assert_eq!(p.for_write(given).unwrap_err(), BAD, "write {given}");
+            }
+        }
+
+        #[test]
+        fn only_a_plain_drive_prefix_passes_the_lexical_check() {
+            assert!(refuse_network_forms("C:\\x").is_ok());
+            assert!(refuse_network_forms("c:/x").is_ok());
+            for given in [
+                "\\\\?\\C:\\x",
+                "\\\\.\\pipe\\x",
+                "\\\\s\\h\\x",
+                "\\\\?\\UNC\\s\\h\\x",
+            ] {
+                assert_eq!(refuse_network_forms(given).unwrap_err(), BAD, "{given}");
             }
         }
 
