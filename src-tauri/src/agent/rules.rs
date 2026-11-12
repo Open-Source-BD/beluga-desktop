@@ -81,6 +81,23 @@ const NEVER_PROGRAMS: &[Group] = &[
         &[
             "env",
             "rustup",
+            "coproc",
+            "caffeinate",
+            "arch",
+            "xcrun",
+            "flock",
+            "systemd-run",
+            "pkexec",
+            "runas",
+            "ltrace",
+            "dtruss",
+            "gdb",
+            "lldb",
+            "expect",
+            "rake",
+            "invoke",
+            "tox",
+            "nox",
             "xargs",
             "npx",
             "pnpx",
@@ -328,6 +345,69 @@ const NEVER_RULES: &[Group] = &[
         ],
     ),
     (
+        "more runners, history-rewriting and publishing sub-commands, and account sub-commands",
+        &[
+            "poetry run",
+            "pipenv run",
+            "pdm run",
+            "hatch run",
+            "uv run",
+            "bundle exec",
+            "dotnet exec",
+            "mix run",
+            "composer exec",
+            "rails runner",
+            "rails console",
+            "yarn rebuild",
+            "yarn rb",
+            "nx run",
+            "nx exec",
+            "turbo run",
+            "lerna run",
+            "lerna exec",
+            "git maintenance",
+            "git bisect",
+            "git hook",
+            "git difftool",
+            "git mergetool",
+            "git send-email",
+            "git prune",
+            "git reflog",
+            "git daemon",
+            "git instaweb",
+            "git svn",
+            "git p4",
+            "git archive",
+            "git bundle",
+            "git fast-import",
+            "git credential",
+            "cargo x",
+            "cargo xtask",
+            "cargo make",
+            "cargo watch",
+            "cargo script",
+            "npm version",
+            "npm edit",
+            "npm unpublish",
+            "npm deprecate",
+            "npm owner",
+            "npm access",
+            "npm token",
+            "npm login",
+            "npm adduser",
+            "npm link",
+            "npm pkg",
+            "gh api",
+            "gh repo",
+            "gh secret",
+            "gh auth",
+            "gh extension",
+            "gh codespace",
+            "gh ssh-key",
+            "gh gpg-key",
+        ],
+    ),
+    (
         "aliases and abbreviations of the script runners, and commands that run scripts",
         &[
             "npm rum",
@@ -350,15 +430,16 @@ const NEVER_RULES: &[Group] = &[
 /// Programs whose second word is a sub-command; the rule key is
 /// `"{program} {sub}"`.
 const SUBCOMMAND_PROGRAMS: &[&str] = &[
-    "git", "npm", "pnpm", "yarn", "bun", "cargo", "go", "dotnet", "pip", "pip3", "poetry", "uv",
-    "docker", "podman", "kubectl", "gh", "brew", "apt", "apt-get", "composer", "bundle", "rails",
-    "mix", "gradle", "gradlew", "mvn", "deno",
+    // Programs that are also on the never-program list (pip, bun, uv, docker,
+    // brew, apt, mvn, ...) are not listed here: they are unreachable by design.
+    "git", "npm", "pnpm", "yarn", "cargo", "go", "dotnet", "poetry", "gh", "composer", "bundle",
+    "rails", "mix", "pipenv", "pdm", "hatch", "nx", "turbo", "lerna",
 ];
 
 /// The package runners accept abbreviations and aliases of `run` and `exec`
 /// (`npm rum`, `npm run-s`, `npm exe`, `npm x`); none of them is ever a rule.
 fn runner_alias(program: &str, sub: &str) -> bool {
-    matches!(program, "npm" | "pnpm" | "yarn" | "bun")
+    matches!(program, "npm" | "pnpm" | "yarn")
         && !sub.is_empty()
         && ("run".starts_with(sub)
             || matches!(sub, "rum" | "urn")
@@ -695,8 +776,8 @@ fn spec_for(key: &str) -> Option<Spec> {
             flags: &["--stat", "--name-only"],
             ..NONE
         },
-        "npm install" | "npm ci" | "pnpm install" | "yarn install" | "bun install" | "npm test"
-        | "pnpm test" | "yarn test" | "bun test" | "pip install" | "pip3 install" => Spec {
+        "npm install" | "npm ci" | "pnpm install" | "yarn install" | "npm test" | "pnpm test"
+        | "yarn test" => Spec {
             pos: Pos::None,
             ..NONE
         },
@@ -762,8 +843,26 @@ fn value_ok(kind: Val, v: &str) -> bool {
 fn path_ok(p: &str) -> bool {
     !p.starts_with('/')
         && !p.contains('@')
-        && p.split('/').all(|c| c != ".." && !c.starts_with('-'))
+        && p.split('/').all(segment_ok)
         && !super::secrets::is_secret(p)
+}
+
+/// Windows drops a trailing dot from a path segment (`.git./config` is
+/// `.git/config`) and treats device names as devices (`aux.txt`, `COM1`).
+fn segment_ok(c: &str) -> bool {
+    if c == ".." || c.starts_with('-') || (c.ends_with('.') && c != ".") {
+        return false;
+    }
+    let stem = c.split('.').next().unwrap_or("").to_ascii_uppercase();
+    let numbered = |prefix: &str| {
+        stem.strip_prefix(prefix)
+            .is_some_and(|n| matches!(n.as_bytes(), [b'1'..=b'9']))
+    };
+    !(matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || numbered("COM")
+        || numbered("LPT"))
 }
 
 fn args_ok(spec: &Spec, args: &[&str]) -> bool {
@@ -1110,6 +1209,82 @@ mod tests {
             root(),
             &["mytool".to_string()]
         ));
+    }
+
+    #[test]
+    fn windows_path_tricks_are_refused_for_positionals() {
+        // Trailing dots are dropped by Windows path normalisation.
+        for c in [
+            "cat .git./config",
+            "cat server.pem.",
+            "cat x.key.",
+            "cat .npmrc.",
+            "cat .netrc.",
+            "cat .pypirc.",
+            "head -n 5 server.pem.",
+            "git diff .git./config",
+            "foo a./b",
+        ] {
+            for fam in [P, W] {
+                assert_eq!(rule_of(c, fam), None, "{c:?} ({fam:?})");
+            }
+        }
+        // Device names, with or without an extension, in any case.
+        for c in [
+            "cat CON",
+            "cat con",
+            "cat PRN",
+            "cat AUX",
+            "cat NUL",
+            "cat COM1",
+            "cat com9",
+            "cat LPT1",
+            "cat lpt9",
+            "cat aux.txt",
+            "cat Nul.log",
+            "cat src/con",
+            "cat a/COM3.x/b",
+            "foo nul",
+        ] {
+            for fam in [P, W] {
+                assert_eq!(rule_of(c, fam), None, "{c:?} ({fam:?})");
+            }
+        }
+        // Not over-reaching.
+        matched(
+            P,
+            &[
+                ("cat .", "cat"),
+                ("cat ./a.txt", "cat"),
+                ("cat console.log", "cat"),
+                ("cat COM10", "cat"),
+                ("cat a.b", "cat"),
+            ],
+        );
+    }
+
+    #[test]
+    fn round_three_never_lists() {
+        let programs = "coproc caffeinate arch xcrun flock systemd-run pkexec doas runas chroot nice ionice stdbuf setsid script expect strace ltrace dtruss gdb lldb rake invoke tox nox";
+        for p in programs.split(' ') {
+            assert!(is_never_program(p), "{p}");
+            for fam in [P, W] {
+                nothing(fam, &[&format!("{p} x")]);
+            }
+        }
+        let rules = "poetry run|pipenv run|pdm run|hatch run|uv run|bundle exec|dotnet exec|mix run|composer exec|rails runner|rails console|yarn rebuild|yarn rb|nx run|nx exec|turbo run|lerna run|lerna exec|git maintenance|git bisect|git hook|git difftool|git mergetool|git send-email|git prune|git reflog|git daemon|git instaweb|git svn|git p4|git archive|git bundle|git fast-import|git credential|cargo x|cargo xtask|cargo make|cargo watch|cargo script|npm version|npm edit|npm unpublish|npm deprecate|npm owner|npm access|npm token|npm login|npm adduser|npm link|npm pkg|gh api|gh repo|gh secret|gh auth|gh extension|gh codespace|gh ssh-key|gh gpg-key";
+        for r in rules.split('|') {
+            assert!(is_never_rule(r), "{r}");
+            for fam in [P, W] {
+                for cmd in [r.to_string(), format!("{r} x")] {
+                    nothing(fam, &[&cmd]);
+                }
+            }
+        }
+        // Task runners with a verb are sub-command programs, so the verb rules apply.
+        for ok in ["nx build", "turbo build", "lerna ls"] {
+            assert_eq!(rule_of(ok, P).as_deref(), Some(ok), "{ok}");
+        }
     }
 
     #[test]
