@@ -23,10 +23,14 @@ struct Partial {
     id: Option<String>,
     name: Option<String>,
     arguments: String,
-    cut: bool,
 }
 
-/// Joins fragments into whole calls. Fragments of one call share an index;
+/// Joins fragments into whole calls.
+///
+/// Limits: a 33rd call is refused (and `overflowed()` turns true) while calls
+/// already collected keep receiving their fragments and come back whole. If
+/// the byte limit trips, any call may be missing its tail, so `finish()`
+/// returns no calls at all and `overflowed()` is true. Fragments of one call share an index;
 /// a fragment with a different id or name than the call so far starts a new
 /// call, so providers that send every call at index 0 still work.
 #[derive(Default)]
@@ -37,11 +41,12 @@ pub struct Collector {
     current: HashMap<u32, usize>,
     bytes: usize,
     overflowed: bool,
+    byte_limit_hit: bool,
 }
 
 impl Collector {
     pub fn push(&mut self, fragment: Fragment) {
-        if self.overflowed {
+        if self.byte_limit_hit {
             return;
         }
         let id = fragment.id.filter(|s| !s.is_empty());
@@ -65,7 +70,6 @@ impl Collector {
                     id: None,
                     name: None,
                     arguments: String::new(),
-                    cut: false,
                 });
                 self.current.insert(fragment.index, self.calls.len() - 1);
                 self.calls.len() - 1
@@ -79,7 +83,7 @@ impl Collector {
             slot.name = name;
         }
         if self.bytes + fragment.arguments.len() > MAX_ARGUMENT_BYTES {
-            slot.cut = true;
+            self.byte_limit_hit = true;
             self.overflowed = true;
             return;
         }
@@ -94,13 +98,16 @@ impl Collector {
     }
 
     /// The calls in the order they appeared, with ids unique within the
-    /// reply. A call with no id gets `call_{index}`; a call with no name, or
-    /// whose arguments were cut by the byte limit, is dropped.
+    /// reply. A call with no id gets `call_{index}`; a call with no name is
+    /// dropped. After a byte-limit trip nothing is returned.
     pub fn finish(self) -> Vec<ToolCall> {
+        if self.byte_limit_hit {
+            return Vec::new();
+        }
         let kept: Vec<Partial> = self
             .calls
             .into_iter()
-            .filter(|p| p.name.is_some() && !p.cut)
+            .filter(|p| p.name.is_some())
             .collect();
         let taken: HashSet<String> = kept.iter().filter_map(|p| p.id.clone()).collect();
         let mut seen: HashSet<String> = HashSet::new();
@@ -134,11 +141,7 @@ pub fn parse_arguments(raw: &str) -> Result<Value, String> {
         return Ok(Value::Object(Default::default()));
     }
     if let Ok(v) = serde_json::from_str::<Value>(raw) {
-        return if v.is_null() {
-            Ok(Value::Object(Default::default()))
-        } else {
-            into_object(v)
-        };
+        return into_object(v);
     }
     let repaired = remove_trailing_commas(strip_fence(raw.trim()));
     match serde_json::from_str::<Value>(&repaired) {
@@ -159,7 +162,9 @@ pub fn parse_arguments(raw: &str) -> Result<Value, String> {
 }
 
 fn into_object(v: Value) -> Result<Value, String> {
-    if v.is_object() {
+    if v.is_null() {
+        Ok(Value::Object(Default::default()))
+    } else if v.is_object() {
         Ok(v)
     } else {
         Err("the arguments must be a JSON object".to_string())
@@ -239,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn ordered_by_index_missing_id_and_name() {
+    fn calls_come_out_in_first_appearance_order_with_synthesised_ids_and_nameless_dropped() {
         let mut c = Collector::default();
         c.push(part(2, None, Some("b"), "{}"));
         c.push(part(0, None, Some("a"), "{}"));
@@ -344,18 +349,34 @@ mod tests {
     }
 
     #[test]
-    fn arguments_over_a_million_bytes_overflow_and_drop_the_cut_call() {
+    fn the_byte_limit_returns_no_calls_and_reports_overflow() {
         let mut c = Collector::default();
-        c.push(part(0, Some("ok"), Some("n"), "{}"));
+        c.push(part(0, Some("a"), Some("n"), "{\"a\":\"b\""));
         let big = "x".repeat(600_000);
         c.push(part(1, Some("big"), Some("n"), &big));
         assert!(!c.overflowed());
         c.push(part(1, None, None, &big));
         assert!(c.overflowed());
+        // Call a is still open and loses its tail: it must not come back cut.
+        c.push(part(0, None, None, ",\"c\":\"d\"}"));
         c.push(part(2, Some("late"), Some("n"), "{}"));
+        assert!(c.finish().is_empty());
+    }
+
+    #[test]
+    fn a_33rd_call_is_refused_while_the_32nd_still_completes() {
+        let mut c = Collector::default();
+        for i in 0..31 {
+            c.push(part(i, Some(&format!("c{i}")), Some("n"), "{}"));
+        }
+        c.push(part(31, Some("c31"), Some("n"), "{\"a\":"));
+        c.push(part(32, Some("c32"), Some("n"), "{}"));
+        assert!(c.overflowed());
+        c.push(part(31, None, None, "\"b\"}"));
         let calls = c.finish();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].id, "ok");
+        assert_eq!(calls.len(), 32);
+        assert_eq!(calls[31].id, "c31");
+        assert_eq!(calls[31].arguments, "{\"a\":\"b\"}");
     }
 
     #[test]
@@ -368,6 +389,7 @@ mod tests {
         );
         assert_eq!(parse_arguments("{\"a\":true").unwrap(), json!({"a": true}));
         assert_eq!(parse_arguments("null").unwrap(), json!({}));
+        assert_eq!(parse_arguments("```json\nnull\n```").unwrap(), json!({}));
     }
 
     #[test]
