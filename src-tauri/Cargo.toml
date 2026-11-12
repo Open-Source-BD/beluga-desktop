@@ -58,6 +58,7 @@ globset = "0.4.21"
 grep-searcher = "0.1.17"
 grep-regex = "0.1.14"
 grep-matcher = "0.1.9"
+similar = "3"
 
 [dev-dependencies]
 wiremock = "0.6"

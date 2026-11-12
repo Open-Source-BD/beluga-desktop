@@ -30,6 +30,7 @@ pub struct ToolOutcome {
     pub detail: Option<String>,
 }
 
+pub mod change;
 pub mod paths;
 pub mod plan;
 pub mod read;
