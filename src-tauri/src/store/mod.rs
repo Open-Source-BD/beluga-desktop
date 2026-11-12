@@ -1,6 +1,7 @@
 //! Local SQLite store for chats, messages and usage. All timestamps are UTC
 //! unix seconds.
 
+mod agent;
 mod chat_state;
 mod chats;
 mod migrate;
@@ -29,6 +30,25 @@ pub struct StoredAttachment {
     pub data_base64: String,
 }
 
+/// A tool call the model made, as stored on its assistant row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredToolCall {
+    pub id: String,
+    pub name: String,
+    /// The arguments as raw JSON text, exactly as the model wrote them.
+    pub arguments: String,
+}
+
+/// What the interface needs to show a tool result as a trail line.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolMeta {
+    pub name: String,
+    /// `"ok"`, `"error"`, `"declined"` or `"not_run"`.
+    pub status: String,
+    pub summary: String,
+    pub detail: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct StoredMessage {
     pub id: String,
@@ -37,10 +57,15 @@ pub struct StoredMessage {
     pub attachments: Vec<StoredAttachment>,
     pub interrupted: bool,
     pub created_at: i64,
-    /// `"message"` or `"note"`.
+    /// `"message"`, `"note"` or `"tool"` (a tool result, role `"tool"`).
     pub kind: String,
     /// Position in the store's insertion order (the `messages.seq` column).
     pub seq: i64,
+    /// Calls made by an assistant row; empty for every other row.
+    pub tool_calls: Vec<StoredToolCall>,
+    /// On a tool result row: the id of the call it answers.
+    pub tool_call_id: Option<String>,
+    pub tool_meta: Option<ToolMeta>,
 }
 
 pub struct Store {

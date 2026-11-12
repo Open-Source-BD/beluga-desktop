@@ -1,5 +1,5 @@
 use super::{Result, Store, now};
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 use time::OffsetDateTime;
 
 /// Start of the UTC calendar month containing `at`, and of the month after.
@@ -34,11 +34,22 @@ impl Store {
         cost_usd: f64,
         at: i64,
     ) -> Result<()> {
-        self.conn().execute(
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute(
             "INSERT INTO usage (chat_id, requests, cost_usd, created_at) VALUES (?1, ?2, ?3, ?4)",
             params![chat_id, requests, cost_usd, at],
         )?;
-        Ok(())
+        // The per-day total outlives the chat the request was made in.
+        tx.execute(
+            "INSERT INTO daily_usage (day, requests, cost_usd)
+             VALUES (strftime('%Y-%m-%d', ?1, 'unixepoch'), ?2, ?3)
+             ON CONFLICT(day) DO UPDATE SET
+                 requests = requests + excluded.requests,
+                 cost_usd = cost_usd + excluded.cost_usd",
+            params![at, requests, cost_usd],
+        )?;
+        tx.commit()
     }
 
     /// Total requests and cost for one chat.
@@ -50,11 +61,26 @@ impl Store {
         )
     }
 
+    /// Requests and cost recorded on one UTC day (`YYYY-MM-DD`), counting
+    /// chats that have since been deleted.
+    pub fn day_usage(&self, day: &str) -> Result<(u32, f64)> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT requests, cost_usd FROM daily_usage WHERE day = ?1",
+                [day],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?
+            .unwrap_or((0, 0.0)))
+    }
+
     /// Spend across all chats in the UTC calendar month containing `now`.
     pub fn month_spend(&self, now: i64) -> Result<f64> {
         let (start, end) = month_bounds(now);
         self.conn().query_row(
-            "SELECT COALESCE(SUM(cost_usd), 0.0) FROM usage WHERE created_at >= ?1 AND created_at < ?2",
+            "SELECT COALESCE(SUM(cost_usd), 0.0) FROM daily_usage
+             WHERE day >= date(?1, 'unixepoch') AND day < date(?2, 'unixepoch')",
             params![start, end],
             |r| r.get(0),
         )

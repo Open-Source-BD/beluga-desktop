@@ -35,7 +35,7 @@ fn rename() {
 }
 
 #[test]
-fn delete_removes_messages_and_usage() {
+fn delete_removes_messages_and_chat_usage_but_not_recorded_spend() {
     let s = store();
     let c = s.create_chat("m/a").unwrap();
     let keep = s.create_chat("m/a").unwrap();
@@ -45,7 +45,8 @@ fn delete_removes_messages_and_usage() {
     s.delete_chat(&c.id).unwrap();
     assert!(s.get_messages(&c.id).unwrap().is_empty());
     assert_eq!(s.chat_usage(&c.id).unwrap(), (0, 0.0));
-    assert_eq!(s.month_spend(NOV_15).unwrap(), 0.25);
+    // Spend is kept per day, so deleting a chat does not lower it.
+    assert_eq!(s.month_spend(NOV_15).unwrap(), 0.75);
     let ids: Vec<_> = s.list_chats().unwrap().into_iter().map(|c| c.id).collect();
     assert_eq!(ids, vec![keep.id]);
 }
@@ -194,7 +195,7 @@ fn a_v1_database_upgrades_in_place() {
     let path = v1_file(&dir);
     assert_eq!(version(&path), 1);
     let s = Store::open(&path).unwrap();
-    assert_eq!(version(&path), 3);
+    assert_eq!(version(&path), 4);
     let chats = s.list_chats().unwrap();
     assert_eq!(chats.len(), 2);
     let a = s.get_messages("chat-a").unwrap();
@@ -233,16 +234,16 @@ fn opening_twice_is_a_no_op() {
     let path = v1_file(&dir);
     drop(Store::open(&path).unwrap());
     let s = Store::open(&path).unwrap();
-    assert_eq!(version(&path), 3);
+    assert_eq!(version(&path), 4);
     assert_eq!(s.get_messages("chat-a").unwrap().len(), 2);
 }
 
 #[test]
-fn a_new_database_is_created_at_version_3() {
+fn a_new_database_is_created_at_version_4() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("new.db");
     drop(Store::open(&path).unwrap());
-    assert_eq!(version(&path), 3);
+    assert_eq!(version(&path), 4);
     let s = Store::in_memory().unwrap();
     let c = s.create_chat("m/a").unwrap();
     assert!(s.active_skills(&c.id).unwrap().is_empty());
@@ -254,14 +255,14 @@ fn a_newer_database_is_refused_and_left_untouched() {
     let path = dir.path().join("future.db");
     rusqlite::Connection::open(&path)
         .unwrap()
-        .execute_batch("CREATE TABLE future (x INTEGER); PRAGMA user_version = 4;")
+        .execute_batch("CREATE TABLE future (x INTEGER); PRAGMA user_version = 5;")
         .unwrap();
     let err = Store::open(&path).err().expect("must be refused");
     assert_eq!(
         err.to_string(),
         "This database was made by a newer version of the app."
     );
-    assert_eq!(version(&path), 4);
+    assert_eq!(version(&path), 5);
     let conn = rusqlite::Connection::open(&path).unwrap();
     let tables: i64 = conn
         .query_row(
@@ -469,22 +470,6 @@ fn delete_from_and_fix_summary_clears_a_summary_that_described_deleted_rows_in_t
 }
 
 #[test]
-fn a_v2_database_upgrades_to_v3_and_keeps_its_chats() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = v1_file(&dir);
-    drop(Store::open(&path).unwrap());
-    // Put it back to what a version 2 build left behind.
-    let conn = rusqlite::Connection::open(&path).unwrap();
-    conn.execute_batch("DROP TABLE approved_folders; PRAGMA user_version = 2;")
-        .unwrap();
-    drop(conn);
-    let s = Store::open(&path).unwrap();
-    assert_eq!(version(&path), 3);
-    assert_eq!(s.list_chats().unwrap().len(), 2);
-    assert_eq!(s.approved_folders().unwrap(), Vec::<String>::new());
-}
-
-#[test]
 fn approved_folders_survive_reopening_the_store() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("a.db");
@@ -498,4 +483,226 @@ fn approved_folders_survive_reopening_the_store() {
     let s = Store::open(&path).unwrap();
     assert!(s.is_folder_approved("/one").unwrap());
     assert_eq!(s.approved_folders().unwrap(), vec!["/one", "/two"]);
+}
+
+// ---- schema version 4 ----
+
+const DB_V2: &str = include_str!("../../tests/fixtures/db_v2.sql");
+const DB_V3: &str = include_str!("../../tests/fixtures/db_v3.sql");
+const NOV_15_DAY: &str = "2026-11-15";
+const NOV_16_DAY: &str = "2026-11-16";
+
+fn file_from(dir: &tempfile::TempDir, sql: &str) -> std::path::PathBuf {
+    let path = dir.path().join("beluga.db");
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch(sql)
+        .unwrap();
+    path
+}
+
+fn call(id: &str) -> StoredToolCall {
+    StoredToolCall {
+        id: id.to_string(),
+        name: "read_file".to_string(),
+        arguments: "{\"path\":\"a.txt\"}".to_string(),
+    }
+}
+
+fn meta(status: &str) -> ToolMeta {
+    ToolMeta {
+        name: "read_file".to_string(),
+        status: status.to_string(),
+        summary: "Read a.txt".to_string(),
+        detail: Some("one line".to_string()),
+    }
+}
+
+#[test]
+fn a_v3_database_upgrades_to_4_and_keeps_every_chat_and_message_sendable() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = file_from(&dir, DB_V3);
+    assert_eq!(version(&path), 3);
+    let s = Store::open(&path).unwrap();
+    assert_eq!(version(&path), 4);
+    assert_eq!(s.list_chats().unwrap().len(), 2);
+    assert_eq!(s.get_messages("chat-a").unwrap().len(), 3);
+    assert_eq!(s.get_messages("chat-b").unwrap().len(), 2);
+    let sendable = s.sendable_messages("chat-a").unwrap();
+    assert_eq!(
+        sendable.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(),
+        ["Look at this", "It says hi."]
+    );
+    assert!(
+        sendable
+            .iter()
+            .all(|m| m.tool_calls.is_empty() && m.tool_call_id.is_none() && m.tool_meta.is_none())
+    );
+    assert_eq!(s.sendable_messages("chat-b").unwrap().len(), 2);
+    assert_eq!(s.folder("chat-a").unwrap().as_deref(), Some("/work/one"));
+    assert!(s.is_folder_approved("/work/one").unwrap());
+    assert!(!s.edits_allowed("chat-a").unwrap());
+    assert_eq!(s.plan("chat-a").unwrap(), "[]");
+}
+
+#[test]
+fn v1_and_v2_fixtures_upgrade_through_to_4() {
+    for sql in [DB_V1, DB_V2] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = file_from(&dir, sql);
+        let s = Store::open(&path).unwrap();
+        assert_eq!(version(&path), 4);
+        assert_eq!(s.list_chats().unwrap().len(), 2);
+        assert_eq!(s.sendable_messages("chat-b").unwrap().len(), 2);
+        assert_eq!(s.chat_usage("chat-b").unwrap(), (2, 0.5));
+        assert!(s.rules("/work/one").unwrap().is_empty());
+        assert_eq!(s.setting("anything").unwrap(), None);
+    }
+}
+
+#[test]
+fn upgrade_backfills_daily_usage_from_usage_rows_grouped_by_utc_day() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Store::open(&file_from(&dir, DB_V3)).unwrap();
+    assert_eq!(s.day_usage(NOV_15_DAY).unwrap(), (3, 0.75));
+    assert_eq!(s.day_usage(NOV_16_DAY).unwrap(), (1, 0.125));
+    assert_eq!(s.day_usage("2026-11-14").unwrap(), (0, 0.0));
+    assert_eq!(s.month_spend(NOV_15).unwrap(), 0.875);
+}
+
+#[test]
+fn deleting_a_chat_leaves_day_usage_and_month_spend_unchanged() {
+    let s = store();
+    let c = s.create_chat("m/a").unwrap();
+    s.record_usage_at(&c.id, 2, 0.5, NOV_15).unwrap();
+    s.record_usage_at(&c.id, 1, 0.25, NOV_15 + 60).unwrap();
+    assert_eq!(s.day_usage(NOV_15_DAY).unwrap(), (3, 0.75));
+    s.delete_chat(&c.id).unwrap();
+    assert_eq!(s.chat_usage(&c.id).unwrap(), (0, 0.0));
+    assert_eq!(s.day_usage(NOV_15_DAY).unwrap(), (3, 0.75));
+    assert_eq!(s.month_spend(NOV_15).unwrap(), 0.75);
+}
+
+#[test]
+fn append_assistant_stores_and_returns_tool_calls() {
+    let s = store();
+    let c = s.create_chat("m/a").unwrap();
+    let m = s
+        .append_assistant(&c.id, "Looking.", &[call("c1"), call("c2")], false)
+        .unwrap();
+    assert_eq!(m.role, "assistant");
+    assert_eq!(m.kind, "message");
+    assert_eq!(m.text, "Looking.");
+    assert_eq!(m.tool_calls, vec![call("c1"), call("c2")]);
+    let back = s.get_messages(&c.id).unwrap();
+    assert_eq!(back, vec![m]);
+    let plain = s.append_assistant(&c.id, "Done.", &[], true).unwrap();
+    assert!(plain.tool_calls.is_empty());
+    assert!(plain.interrupted);
+}
+
+#[test]
+fn append_tool_result_stores_call_id_meta_and_text() {
+    let s = store();
+    let c = s.create_chat("m/a").unwrap();
+    let r = s
+        .append_tool_result(&c.id, "c1", &meta("ok"), "file text")
+        .unwrap();
+    assert_eq!(r.role, "tool");
+    assert_eq!(r.kind, "tool");
+    assert_eq!(r.text, "file text");
+    assert_eq!(r.tool_call_id.as_deref(), Some("c1"));
+    assert_eq!(r.tool_meta, Some(meta("ok")));
+    let back = s.get_messages(&c.id).unwrap();
+    assert_eq!(back, vec![r]);
+    let json = serde_json::to_value(&back[0]).unwrap();
+    assert_eq!(json["tool_meta"]["status"], "ok");
+    assert_eq!(json["tool_meta"]["detail"], "one line");
+    assert_eq!(json["tool_call_id"], "c1");
+}
+
+#[test]
+fn sendable_messages_returns_message_and_tool_rows_in_seq_order_and_never_notes() {
+    let s = store();
+    let c = s.create_chat("m/a").unwrap();
+    s.append_message(&c.id, "user", "go", &[], false).unwrap();
+    s.append_assistant(&c.id, "", &[call("c1")], false).unwrap();
+    s.append_note(&c.id, "a note").unwrap();
+    s.append_tool_result(&c.id, "c1", &meta("ok"), "result")
+        .unwrap();
+    s.append_assistant(&c.id, "all done", &[], false).unwrap();
+    let sendable = s.sendable_messages(&c.id).unwrap();
+    assert_eq!(
+        sendable.iter().map(|m| m.kind.as_str()).collect::<Vec<_>>(),
+        ["message", "message", "tool", "message"]
+    );
+    assert!(sendable.windows(2).all(|w| w[0].seq < w[1].seq));
+    assert_eq!(s.get_messages(&c.id).unwrap().len(), 5);
+}
+
+#[test]
+fn unanswered_calls_lists_a_call_with_no_result_and_nothing_once_it_is_appended() {
+    let s = store();
+    let c = s.create_chat("m/a").unwrap();
+    s.append_message(&c.id, "user", "go", &[], false).unwrap();
+    s.append_assistant(&c.id, "", &[call("c1"), call("c2")], false)
+        .unwrap();
+    s.append_tool_result(&c.id, "c1", &meta("ok"), "r").unwrap();
+    assert_eq!(s.unanswered_calls(&c.id).unwrap(), vec![call("c2")]);
+    s.append_tool_result(&c.id, "c2", &meta("not_run"), "r")
+        .unwrap();
+    assert!(s.unanswered_calls(&c.id).unwrap().is_empty());
+}
+
+#[test]
+fn delete_from_removes_tool_rows_after_the_edited_message() {
+    let s = store();
+    let c = s.create_chat("m/a").unwrap();
+    let u = s.append_message(&c.id, "user", "go", &[], false).unwrap();
+    s.append_assistant(&c.id, "", &[call("c1")], false).unwrap();
+    s.append_tool_result(&c.id, "c1", &meta("ok"), "r").unwrap();
+    s.delete_from(&c.id, &u.id).unwrap();
+    assert!(s.get_messages(&c.id).unwrap().is_empty());
+    assert!(s.unanswered_calls(&c.id).unwrap().is_empty());
+}
+
+#[test]
+fn rules_are_per_folder_add_is_idempotent_and_removing_an_unknown_rule_is_fine() {
+    let s = store();
+    s.add_rule("/p/one", "git status").unwrap();
+    s.add_rule("/p/one", "git status").unwrap();
+    s.add_rule("/p/one", "npm test").unwrap();
+    s.add_rule("/p/two", "ls").unwrap();
+    let mut one = s.rules("/p/one").unwrap();
+    one.sort();
+    assert_eq!(one, ["git status", "npm test"]);
+    assert_eq!(s.rules("/p/two").unwrap(), ["ls"]);
+    s.remove_rule("/p/one", "never added").unwrap();
+    s.remove_rule("/p/one", "git status").unwrap();
+    assert_eq!(s.rules("/p/one").unwrap(), ["npm test"]);
+    assert_eq!(s.rules("/p/two").unwrap(), ["ls"]);
+}
+
+#[test]
+fn plan_and_edits_allowed_round_trip_and_default_off() {
+    let s = store();
+    let c = s.create_chat("m/a").unwrap();
+    assert!(!s.edits_allowed(&c.id).unwrap());
+    assert_eq!(s.plan(&c.id).unwrap(), "[]");
+    s.set_edits_allowed(&c.id, true).unwrap();
+    assert!(s.edits_allowed(&c.id).unwrap());
+    let plan = r#"[{"step":"Read","status":"done"}]"#;
+    s.set_plan(&c.id, plan).unwrap();
+    assert_eq!(s.plan(&c.id).unwrap(), plan);
+    s.set_edits_allowed(&c.id, false).unwrap();
+    assert!(!s.edits_allowed(&c.id).unwrap());
+}
+
+#[test]
+fn settings_round_trip_and_overwrite() {
+    let s = store();
+    assert_eq!(s.setting("daily_limit").unwrap(), None);
+    s.set_setting("daily_limit", "1.00").unwrap();
+    s.set_setting("daily_limit", "2.50").unwrap();
+    assert_eq!(s.setting("daily_limit").unwrap().as_deref(), Some("2.50"));
 }

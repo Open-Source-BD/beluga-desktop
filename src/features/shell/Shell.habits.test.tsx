@@ -36,7 +36,7 @@ const PAID = model({ id: "test/model", name: "Paid One" });
 const CHAT = { id: "c1", title: "Login page", model_id: "test/model", updated_at: 1 };
 const EMPTY_STATE = { active_skills: [], folder: null, compacted: false };
 const msg = (id: string, role: "user" | "assistant", text: string, seq: number): StoredMessage => ({
-  id, role, text, attachments: [], interrupted: false, created_at: 1, kind: "message", seq,
+  id, role, text, attachments: [], interrupted: false, created_at: 1, kind: "message", seq, tool_calls: [], tool_call_id: null, tool_meta: null,
 });
 const THREAD = [msg("u1", "user", "first q", 1), msg("a1", "assistant", "first a", 2), msg("u2", "user", "second q", 3), msg("a2", "assistant", "second a", 4)];
 const done: TurnResult = { status: "done", reason: null, error: null };

@@ -85,15 +85,32 @@ export interface StoredAttachment {
 
 export type AttachmentInput = StoredAttachment;
 
+export interface StoredToolCall {
+  id: string;
+  name: string;
+  /** Raw JSON text, as the model wrote it. */
+  arguments: string;
+}
+
+export interface ToolMeta {
+  name: string;
+  status: "ok" | "error" | "declined" | "not_run";
+  summary: string;
+  detail: string | null;
+}
+
 export interface StoredMessage {
   id: string;
-  role: "user" | "assistant" | "system";
+  role: "user" | "assistant" | "system" | "tool";
   text: string;
   attachments: StoredAttachment[];
   interrupted: boolean;
   created_at: number;
-  kind: "message" | "note";
+  kind: "message" | "note" | "tool";
   seq: number;
+  tool_calls: StoredToolCall[];
+  tool_call_id: string | null;
+  tool_meta: ToolMeta | null;
 }
 
 export interface ChatUsage {

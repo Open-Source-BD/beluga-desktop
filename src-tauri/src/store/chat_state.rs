@@ -146,13 +146,13 @@ impl Store {
         tx.commit()
     }
 
-    /// The messages a turn may send: no notes, and nothing before the
-    /// summary's boundary.
+    /// The messages a turn may send (messages and tool results, never
+    /// notes), and nothing before the summary's boundary.
     pub fn sendable_messages(&self, chat_id: &str) -> Result<Vec<StoredMessage>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(&format!(
             "SELECT {MESSAGE_COLUMNS} FROM messages
-             WHERE chat_id = ?1 AND kind = 'message'
+             WHERE chat_id = ?1 AND kind IN ('message', 'tool')
                AND seq >= COALESCE((SELECT sent_from_seq FROM chats WHERE id = ?1), 0)
              ORDER BY seq"
         ))?;

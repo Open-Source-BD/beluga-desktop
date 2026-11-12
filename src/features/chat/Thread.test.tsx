@@ -16,7 +16,7 @@ const base = {
   onPickModel: vi.fn(),
 };
 const asst = (text: string, interrupted = false): StoredMessage => ({
-  id: text, role: "assistant", text, attachments: [], interrupted, created_at: 1, kind: "message", seq: 1,
+  id: text, role: "assistant", text, attachments: [], interrupted, created_at: 1, kind: "message", seq: 1, tool_calls: [], tool_call_id: null, tool_meta: null,
 });
 
 describe("Thread scrolling", () => {
@@ -131,7 +131,7 @@ describe("Thread content", () => {
 describe("Thread attachments", () => {
   it("lists the names of a stored message's attachments under its text", () => {
     const m: StoredMessage = {
-      id: "u1", role: "user", text: "Look", interrupted: false, created_at: 1, kind: "message", seq: 1,
+      id: "u1", role: "user", text: "Look", interrupted: false, created_at: 1, kind: "message", seq: 1, tool_calls: [], tool_call_id: null, tool_meta: null,
       attachments: [
         { name: "notes.md", mime: "text/markdown", data_base64: "aGk=" },
         { name: "p.png", mime: "image/png", data_base64: "AAAA" },
@@ -150,7 +150,7 @@ describe("Thread notes", () => {
   it("shows a note as a quiet line, not a message bubble", () => {
     const note: StoredMessage = {
       id: "n1", role: "system", text: "Summarised above this line", attachments: [],
-      interrupted: false, created_at: 1, kind: "note", seq: 2,
+      interrupted: false, created_at: 1, kind: "note", seq: 2, tool_calls: [], tool_call_id: null, tool_meta: null,
     };
     const { container } = render(<Thread {...base} messages={[asst("hello"), note]} />);
     const line = screen.getByText("Summarised above this line");
@@ -162,7 +162,7 @@ describe("Thread notes", () => {
 
 describe("Thread edit pencil", () => {
   const user = (id: string, text: string, kind: "message" | "note" = "message"): StoredMessage => ({
-    id, role: "user", text, attachments: [], interrupted: false, created_at: 1, kind, seq: 1,
+    id, role: "user", text, attachments: [], interrupted: false, created_at: 1, kind, seq: 1, tool_calls: [], tool_call_id: null, tool_meta: null,
   });
   const msgs = [user("u1", "first"), asst("a1"), user("u2", "second"), user("n1", "a note", "note")];
 

@@ -6,7 +6,7 @@ import "./chat.css";
 import MessageActions from "./MessageActions";
 
 const message = (role: "user" | "assistant"): StoredMessage => ({
-  id: "m1", role, text: "**Source** text", attachments: [], interrupted: false, created_at: 1, kind: "message", seq: 1,
+  id: "m1", role, text: "**Source** text", attachments: [], interrupted: false, created_at: 1, kind: "message", seq: 1, tool_calls: [], tool_call_id: null, tool_meta: null,
 });
 const handlers = () => ({
   onRetry: vi.fn(),

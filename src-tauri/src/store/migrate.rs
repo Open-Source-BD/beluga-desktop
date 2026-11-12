@@ -5,7 +5,7 @@ use super::{Result, StoreError};
 use rusqlite::{Connection, TransactionBehavior};
 
 /// The schema version this build knows.
-const LATEST: i64 = 3;
+const LATEST: i64 = 4;
 
 /// Exactly the tables the 0.1.x releases created (version 1).
 const V1: &str = "
@@ -59,6 +59,34 @@ CREATE TABLE approved_folders (
 );
 ";
 
+/// Version 3 to 4: tool calls and results, saved command rules, the plan,
+/// settings and per-day usage (which outlives the chats it came from).
+const V3_TO_V4: &str = "
+ALTER TABLE messages ADD COLUMN tool_calls TEXT;
+ALTER TABLE messages ADD COLUMN tool_call_id TEXT;
+ALTER TABLE messages ADD COLUMN tool_meta TEXT;
+ALTER TABLE chats ADD COLUMN edits_allowed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE chats ADD COLUMN plan TEXT NOT NULL DEFAULT '[]';
+CREATE TABLE command_rules (
+    folder TEXT NOT NULL,
+    rule TEXT NOT NULL,
+    added_at INTEGER NOT NULL,
+    PRIMARY KEY (folder, rule)
+);
+CREATE TABLE daily_usage (
+    day TEXT PRIMARY KEY NOT NULL,
+    requests INTEGER NOT NULL,
+    cost_usd REAL NOT NULL
+);
+CREATE TABLE settings (
+    key TEXT PRIMARY KEY NOT NULL,
+    value TEXT NOT NULL
+);
+INSERT INTO daily_usage (day, requests, cost_usd)
+    SELECT strftime('%Y-%m-%d', created_at, 'unixepoch'), SUM(requests), SUM(cost_usd)
+    FROM usage GROUP BY 1;
+";
+
 fn newer_database() -> StoreError {
     StoreError::SqliteFailure(
         rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_SCHEMA),
@@ -85,6 +113,10 @@ pub(super) fn migrate(conn: &mut Connection) -> Result<()> {
     }
     if version == 2 {
         tx.execute_batch(V2_TO_V3)?;
+        version = 3;
+    }
+    if version == 3 {
+        tx.execute_batch(V3_TO_V4)?;
     }
     tx.pragma_update(None, "user_version", LATEST)?;
     tx.commit()

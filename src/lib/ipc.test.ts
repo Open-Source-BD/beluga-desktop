@@ -267,7 +267,7 @@ describe("ipc", () => {
   it("getMessages returns stored messages with their kind and seq", async () => {
     const note: ipc.StoredMessage = {
       id: "n1", role: "system", text: "Note", attachments: [],
-      interrupted: false, created_at: 1, kind: "note", seq: 7,
+      interrupted: false, created_at: 1, kind: "note", seq: 7, tool_calls: [], tool_call_id: null, tool_meta: null,
     };
     invoke.mockResolvedValueOnce([note]);
     const [m] = await ipc.getMessages("c");
