@@ -7,10 +7,10 @@ use grep_searcher::{BinaryDetection, Searcher, SearcherBuilder, Sink, SinkMatch}
 use serde_json::Value;
 
 use super::paths::{InProject, Project};
-use super::read::{fail, folder_arg, ok, optional_str, required_str};
+use super::read::{clean, fail, folder_arg, ok, optional_str, required_str, summary_text};
 use super::secrets::is_secret;
 use super::{ToolOutcome, ToolStatus};
-use crate::folder::{FileEntry, MAX_READ_BYTES, MAX_WALKED_FILES, walk};
+use crate::folder::{FileEntry, MAX_READ_BYTES, MAX_WALKED_FILES, walk_with};
 
 /// Most paths one `find_files` call returns.
 const MAX_FOUND: usize = 200;
@@ -20,29 +20,44 @@ const MAX_MATCHES: usize = 100;
 const MAX_PATTERN_CHARS: usize = 1_000;
 /// Longest line `search` returns before cutting it.
 const MAX_LINE_CHARS: usize = 500;
-/// Longest pattern shown in the one-line summary.
-const MAX_SUMMARY_PATTERN: usize = 80;
+/// Longest glob accepted.
+const MAX_GLOB_CHARS: usize = 500;
 const INCOMPLETE: &str =
     "(The folder is large, so the walk stopped early and this result is incomplete.)";
 
-/// `pattern` as text for a summary line, cut when long.
-fn short(pattern: &str) -> String {
-    if pattern.chars().count() > MAX_SUMMARY_PATTERN {
-        let head: String = pattern.chars().take(MAX_SUMMARY_PATTERN).collect();
-        format!("{head}…")
-    } else {
-        pattern.to_string()
-    }
+/// A glob. Without a `/` it matches the file name at any depth (ripgrep's
+/// rule); with one it matches the forward-slash path below the searched
+/// folder, where `*` does not cross a `/` and `**` does.
+struct Filter {
+    matcher: GlobMatcher,
+    by_name: bool,
 }
 
-/// A glob matched against the forward-slash path below the searched folder;
-/// `*` does not cross a slash.
-fn glob(pattern: &str, name: &str) -> Result<GlobMatcher, String> {
-    GlobBuilder::new(pattern)
-        .literal_separator(true)
-        .build()
-        .map(|g| g.compile_matcher())
-        .map_err(|e| format!("The argument \"{name}\" is not a valid glob: {}", e.kind()))
+impl Filter {
+    fn new(pattern: &str, name: &str) -> Result<Filter, String> {
+        if pattern.chars().count() > MAX_GLOB_CHARS {
+            return Err(format!(
+                "The argument \"{name}\" is longer than {MAX_GLOB_CHARS} characters."
+            ));
+        }
+        GlobBuilder::new(pattern)
+            .literal_separator(true)
+            .build()
+            .map(|g| Filter {
+                matcher: g.compile_matcher(),
+                by_name: !pattern.contains('/'),
+            })
+            .map_err(|e| format!("The argument \"{name}\" is not a valid glob: {}", e.kind()))
+    }
+
+    fn is_match(&self, rel: &str) -> bool {
+        let target = if self.by_name {
+            rel.rsplit('/').next().unwrap_or(rel)
+        } else {
+            rel
+        };
+        self.matcher.is_match(target)
+    }
 }
 
 /// Project-relative display path of `rel` found below `base`.
@@ -66,10 +81,15 @@ fn folder_base(project: &Project, args: &Value) -> Result<InProject, String> {
 
 /// Files below `base` that are not secret: (path below base, entry).
 fn candidate_files(base: &InProject) -> (Vec<FileEntry>, bool) {
-    let (entries, cut) = walk(&base.real, MAX_WALKED_FILES);
+    let (entries, cut) = walk_with(&base.real, MAX_WALKED_FILES, true);
     let files = entries
         .into_iter()
-        .filter(|e| !e.is_dir && !is_secret(&shown_path(base, &e.path)))
+        .filter(|e| !e.is_dir)
+        .filter(|e| {
+            let shown = shown_path(base, &e.path);
+            // `.git` is never searched, even when it is the folder given.
+            !is_secret(&shown) && !shown.split('/').any(|seg| seg == ".git")
+        })
         .collect();
     (files, cut)
 }
@@ -79,8 +99,8 @@ pub fn find_files(project: &Project, args: &Value) -> ToolOutcome {
         Ok(p) => p,
         Err(e) => return fail(e, "Found files".to_string()),
     };
-    let found_none = |n: usize| format!("Found {n} files for {}", short(pattern));
-    let matcher = match glob(pattern, "pattern") {
+    let found_none = |n: usize| format!("Found {n} files for {}", summary_text(pattern));
+    let matcher = match Filter::new(pattern, "pattern") {
         Ok(m) => m,
         Err(e) => return fail(e, found_none(0)),
     };
@@ -92,7 +112,7 @@ pub fn find_files(project: &Project, args: &Value) -> ToolOutcome {
     let matches: Vec<String> = files
         .iter()
         .filter(|e| matcher.is_match(&e.path))
-        .map(|e| shown_path(&base, &e.path))
+        .map(|e| clean(&shown_path(&base, &e.path)))
         .collect();
     let total = matches.len();
     let mut lines: Vec<String> = matches.into_iter().take(MAX_FOUND).collect();
@@ -150,16 +170,17 @@ pub fn search(project: &Project, args: &Value) -> ToolOutcome {
         Ok(p) => p,
         Err(e) => return fail(e, "Searched the project".to_string()),
     };
-    let summary = format!("Searched for \"{}\"", short(pattern));
+    let summary = format!("Searched for \"{}\"", summary_text(pattern));
     if pattern.chars().count() > MAX_PATTERN_CHARS {
         return fail(
             "The pattern is longer than 1,000 characters.".to_string(),
             summary,
         );
     }
+    let glob_text = optional_str(args, "glob").ok().flatten();
     let filter = match optional_str(args, "glob") {
         Ok(None) => None,
-        Ok(Some(g)) => match glob(g, "glob") {
+        Ok(Some(g)) => match Filter::new(g, "glob") {
             Ok(m) => Some(m),
             Err(e) => return fail(e, summary),
         },
@@ -182,24 +203,26 @@ pub fn search(project: &Project, args: &Value) -> ToolOutcome {
         Ok(b) => b,
         Err(e) => return fail(e, summary),
     };
-    // (display path, real path) of every file to search.
-    let (targets, cut): (Vec<(String, std::path::PathBuf)>, bool) = if base.real.is_dir() {
+    // (display path, real path, bytes) of every file to search.
+    let (targets, cut): (Vec<(String, std::path::PathBuf, u64)>, bool) = if base.real.is_dir() {
         let (files, cut) = candidate_files(&base);
         let targets = files
             .into_iter()
-            .filter(|e| e.bytes <= MAX_READ_BYTES)
             .filter(|e| filter.as_ref().is_none_or(|g| g.is_match(&e.path)))
             .map(|e| {
                 let mut real = base.real.clone();
                 real.extend(e.path.split('/'));
-                (shown_path(&base, &e.path), real)
+                (clean(&shown_path(&base, &e.path)), real, e.bytes)
             })
             .collect();
         (targets, cut)
     } else if is_secret(&base.shown) {
         (Vec::new(), false)
     } else {
-        (vec![(base.shown.clone(), base.real.clone())], false)
+        // Only a regular file is opened (opening a named pipe blocks).
+        let meta = std::fs::metadata(&base.real).ok().filter(|m| m.is_file());
+        let one = meta.map(|m| (clean(&base.shown), base.real.clone(), m.len()));
+        (one.into_iter().collect(), false)
     };
 
     let mut searcher = SearcherBuilder::new()
@@ -208,7 +231,12 @@ pub fn search(project: &Project, args: &Value) -> ToolOutcome {
         .build();
     let mut out: Vec<String> = Vec::new();
     let mut more = false;
-    'files: for (shown, real) in targets {
+    let mut skipped = 0usize;
+    'files: for (shown, real, bytes) in targets {
+        if bytes > MAX_READ_BYTES {
+            skipped += 1;
+            continue;
+        }
         let mut sink = Collect {
             lines: Vec::new(),
             // One more than the cap, to know whether more exist.
@@ -216,6 +244,7 @@ pub fn search(project: &Project, args: &Value) -> ToolOutcome {
             binary: false,
         };
         if searcher.search_path(&matcher, &real, &mut sink).is_err() || sink.binary {
+            skipped += 1;
             continue;
         }
         for (n, line) in sink.lines {
@@ -227,11 +256,19 @@ pub fn search(project: &Project, args: &Value) -> ToolOutcome {
         }
     }
     if out.is_empty() {
-        out.push("No matches.".to_string());
+        out.push(match glob_text {
+            Some(g) => format!("No matches. (Only files matching {g} were searched.)"),
+            None => "No matches.".to_string(),
+        });
     }
     if more {
         out.push(format!(
             "(first {MAX_MATCHES} matching lines shown; more exist)"
+        ));
+    }
+    if skipped > 0 {
+        out.push(format!(
+            "({skipped} files skipped: binary, unreadable or over 5 MB)"
         ));
     }
     if cut {
@@ -288,7 +325,9 @@ mod tests {
         put(&t, "src/deep/c.ts", "");
         put(&t, "other/z.ts", "");
         let o = find_files(&p, &json!({"pattern": "*.ts", "path": "src"}));
-        assert_eq!(o.text, "src/b.ts");
+        assert_eq!(o.text, "src/b.ts\nsrc/deep/c.ts");
+        let o = find_files(&p, &json!({"pattern": "deep/*.ts", "path": "src"}));
+        assert_eq!(o.text, "src/deep/c.ts");
         let o = find_files(&p, &json!({"pattern": "**/*.ts", "path": "src"}));
         assert_eq!(o.text, "src/b.ts\nsrc/deep/c.ts");
     }
@@ -354,7 +393,7 @@ mod tests {
         put(&t, "a.ts", "hit\n");
         put(&t, "src/b.rs", "hit\n");
         let o = search(&p, &json!({"pattern": "hit", "glob": "*.rs"}));
-        assert_eq!(o.text, "a.rs:1:hit");
+        assert_eq!(o.text, "a.rs:1:hit\nsrc/b.rs:1:hit");
         let o = search(&p, &json!({"pattern": "hit", "path": "src"}));
         assert_eq!(o.text, "src/b.rs:1:hit");
         let o = search(&p, &json!({"pattern": "hit", "path": "a.ts"}));
@@ -404,7 +443,10 @@ mod tests {
         fs::write(t.path().join("bin.dat"), b"needle\nzz\0\x01needle\n").unwrap();
         put(&t, "ok.txt", "needle\n");
         let o = search(&p, &json!({"pattern": "needle"}));
-        assert_eq!(o.text, "ok.txt:1:needle");
+        assert_eq!(
+            o.text,
+            "ok.txt:1:needle\n(1 files skipped: binary, unreadable or over 5 MB)"
+        );
     }
 
     #[test]
@@ -426,5 +468,108 @@ mod tests {
             search(&p, &json!({"pattern": "^f\\w\\d$"})).text,
             "a.txt:3:fo0"
         );
+    }
+
+    fn glob_fixture() -> (TempDir, Project) {
+        let (t, p) = setup();
+        put(&t, "a.rs", "hit\n");
+        put(&t, "src/b.rs", "hit\n");
+        put(&t, "src/deep/c.rs", "hit\n");
+        (t, p)
+    }
+
+    #[test]
+    fn a_glob_without_a_slash_matches_the_file_name_at_any_depth() {
+        let (_t, p) = glob_fixture();
+        let got = search(&p, &json!({"pattern": "hit", "glob": "*.rs"})).text;
+        assert_eq!(got, "a.rs:1:hit\nsrc/b.rs:1:hit\nsrc/deep/c.rs:1:hit");
+        let got = find_files(&p, &json!({"pattern": "c.rs"})).text;
+        assert_eq!(got, "src/deep/c.rs");
+    }
+
+    #[test]
+    fn a_glob_with_a_slash_matches_the_path_and_star_stays_in_a_folder() {
+        let (_t, p) = glob_fixture();
+        let got = search(&p, &json!({"pattern": "hit", "glob": "src/*.rs"})).text;
+        assert_eq!(got, "src/b.rs:1:hit");
+        let got = search(&p, &json!({"pattern": "hit", "glob": "**/*.rs"})).text;
+        assert_eq!(got, "a.rs:1:hit\nsrc/b.rs:1:hit\nsrc/deep/c.rs:1:hit");
+    }
+
+    #[test]
+    fn a_glob_that_matched_nothing_is_named_in_the_result() {
+        let (_t, p) = glob_fixture();
+        let o = search(&p, &json!({"pattern": "hit", "glob": "*.zzz"}));
+        assert_eq!(o.status, ToolStatus::Ok);
+        assert_eq!(
+            o.text,
+            "No matches. (Only files matching *.zzz were searched.)"
+        );
+        let o = search(&p, &json!({"pattern": "hit", "glob": "x".repeat(501)}));
+        assert_eq!(o.status, ToolStatus::Error);
+        assert!(
+            o.text.contains("\"glob\"") && o.text.contains("500"),
+            "{}",
+            o.text
+        );
+    }
+
+    #[test]
+    fn hidden_files_are_found_and_searched_except_git_and_secrets() {
+        let (t, p) = setup();
+        put(&t, ".github/workflows/ci.yml", "needle\n");
+        put(&t, ".eslintrc.json", "needle\n");
+        put(&t, ".git/config", "needle\n");
+        put(&t, ".env", "needle\n");
+        put(&t, "node_modules/x.js", "needle\n");
+        let o = find_files(&p, &json!({"pattern": "**/*"}));
+        assert_eq!(o.text, ".eslintrc.json\n.github/workflows/ci.yml");
+        let o = search(&p, &json!({"pattern": "needle"}));
+        assert_eq!(
+            o.text,
+            ".eslintrc.json:1:needle\n.github/workflows/ci.yml:1:needle"
+        );
+        let o = find_files(&p, &json!({"pattern": "*.yml", "path": ".github"}));
+        assert_eq!(o.text, ".github/workflows/ci.yml");
+        let o = find_files(&p, &json!({"pattern": "*", "path": ".git"}));
+        assert_eq!(o.text, "No files matched.");
+    }
+
+    #[test]
+    fn skipped_files_are_counted_in_one_line() {
+        let (t, p) = setup();
+        put(&t, "ok.txt", "needle\n");
+        fs::write(t.path().join("bin.dat"), b"needle\0").unwrap();
+        let big = fs::File::create(t.path().join("big.txt")).unwrap();
+        big.set_len(5_000_001).unwrap();
+        drop(big);
+        let o = search(&p, &json!({"pattern": "needle"}));
+        assert_eq!(
+            o.text,
+            "ok.txt:1:needle\n(2 files skipped: binary, unreadable or over 5 MB)"
+        );
+    }
+
+    #[test]
+    fn summaries_never_carry_raw_control_characters() {
+        let (_t, p) = setup();
+        let o = search(&p, &json!({"pattern": "a\nb\u{202e}"}));
+        assert_eq!(o.summary, "Searched for \"a?b?\"");
+        let o = find_files(&p, &json!({"pattern": "x\ny"}));
+        assert_eq!(o.summary, "Found 0 files for x?y");
+        let o = search(&p, &json!({"pattern": "é".repeat(200)}));
+        assert_eq!(o.status, ToolStatus::Ok);
+        assert!(o.summary.chars().count() < 100);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn control_characters_in_names_are_replaced_in_output() {
+        let (t, p) = setup();
+        put(&t, "a\nforged.txt", "needle\n");
+        let o = search(&p, &json!({"pattern": "needle"}));
+        assert_eq!(o.text, "a?forged.txt:1:needle");
+        let o = find_files(&p, &json!({"pattern": "*.txt"}));
+        assert_eq!(o.text, "a?forged.txt");
     }
 }

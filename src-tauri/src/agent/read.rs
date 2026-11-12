@@ -3,7 +3,7 @@
 
 use serde_json::Value;
 
-use super::paths::Project;
+use super::paths::{Project, invisible};
 use super::secrets::is_secret;
 use super::{ToolOutcome, ToolStatus};
 use crate::folder::{MAX_READ_BYTES, read_bounded};
@@ -15,6 +15,8 @@ const MAX_LINES: usize = 400;
 const MAX_CHARS: usize = 16_000;
 /// Most entries one `list_dir` call returns.
 const MAX_ENTRIES: usize = 500;
+/// Longest model-given text shown in a summary line.
+const MAX_SUMMARY_CHARS: usize = 80;
 const SKILL_PREFIX: &str = "skill:";
 
 pub(super) fn ok(text: String, summary: String) -> ToolOutcome {
@@ -73,6 +75,31 @@ pub(super) fn folder_arg(args: &Value) -> Result<&str, String> {
     })
 }
 
+/// Text from a model argument made safe to show: control and format characters
+/// become `?`.
+pub(super) fn clean(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_control() || invisible(c) {
+                '?'
+            } else {
+                c
+            }
+        })
+        .collect()
+}
+
+/// `clean`, cut to 80 characters with an ellipsis, for a summary line.
+pub(super) fn summary_text(s: &str) -> String {
+    let s = clean(s);
+    if s.chars().count() > MAX_SUMMARY_CHARS {
+        let head: String = s.chars().take(MAX_SUMMARY_CHARS).collect();
+        format!("{head}…")
+    } else {
+        s
+    }
+}
+
 /// `n` plural-aware: "1 line", "2 lines".
 fn lines_word(n: usize) -> String {
     format!("{n} line{}", if n == 1 { "" } else { "s" })
@@ -84,16 +111,39 @@ pub fn read_file(
     args: &Value,
     allow_secret: bool,
 ) -> ToolOutcome {
+    let generic = "Read a file".to_string();
     let path = match required_str(args, "path") {
         Ok(p) => p,
-        Err(e) => return fail(e, "Read a file".to_string()),
+        Err(e) => return fail(e, generic),
     };
-    let summary = format!("Read {path}");
     let (offset, limit) = match window(args) {
         Ok(w) => w,
-        Err(e) => return fail(e, summary),
+        Err(e) => return fail(e, generic),
     };
-    let bytes = match load(project, library, path, allow_secret) {
+    let (summary, loaded) = if let Some(rest) = path.strip_prefix(SKILL_PREFIX) {
+        (
+            format!("Read {}", summary_text(path)),
+            load_skill(library, rest),
+        )
+    } else {
+        match project.existing(path) {
+            Err(e) => return fail(e, generic),
+            Ok(found) => {
+                let summary = if found.shown.is_empty() {
+                    generic
+                } else {
+                    format!("Read {}", clean(&found.shown))
+                };
+                let loaded = if is_secret(&found.shown) && !allow_secret {
+                    Err("needs_approval".to_string())
+                } else {
+                    load_file(&found.real)
+                };
+                (summary, loaded)
+            }
+        }
+    };
+    let bytes = match loaded {
         Ok(b) => b,
         Err(e) => return fail(e, summary),
     };
@@ -163,40 +213,39 @@ fn window(args: &Value) -> Result<(usize, usize), String> {
     ))
 }
 
-/// The bytes behind a model-given path, or the message to return.
-fn load(
-    project: &Project,
-    library: &Library,
-    path: &str,
-    allow_secret: bool,
-) -> Result<Vec<u8>, String> {
-    if let Some(rest) = path.strip_prefix(SKILL_PREFIX) {
-        // The skill id may contain a colon, so split at the first slash.
-        let (id, file) = rest
-            .split_once('/')
-            .ok_or_else(|| "A skill path looks like skill:{id}/{file}.".to_string())?;
-        return library.skill_file(id, file).map_err(|e| e.message);
+/// A file of a skill: the id may contain a colon, so split at the first slash.
+fn load_skill(library: &Library, rest: &str) -> Result<Vec<u8>, String> {
+    let (id, file) = rest
+        .split_once('/')
+        .ok_or_else(|| "A skill path looks like skill:{id}/{file}.".to_string())?;
+    library.skill_file(id, file).map_err(|e| e.message)
+}
+
+/// The bytes of the regular file at `real`. A path that is not a regular file
+/// is refused by `stat` before it is opened (opening a named pipe blocks), and
+/// again on the open handle.
+fn load_file(real: &std::path::Path) -> Result<Vec<u8>, String> {
+    const UNREADABLE: &str = "That file could not be read.";
+    const BIG: &str = "That file is larger than 5 MB, so it cannot be read.";
+    match std::fs::metadata(real) {
+        Ok(m) if m.is_dir() => {
+            return Err(
+                "That is a folder, not a file. Use list_dir to see what is in it.".to_string(),
+            );
+        }
+        Ok(m) if !m.is_file() => return Err("That is not a regular file.".to_string()),
+        Ok(_) => {}
+        Err(_) => return Err(UNREADABLE.to_string()),
     }
-    let found = project.existing(path)?;
-    if is_secret(&found.shown) && !allow_secret {
-        return Err("needs_approval".to_string());
-    }
-    let file =
-        std::fs::File::open(&found.real).map_err(|_| "That file could not be read.".to_string())?;
-    let meta = file
-        .metadata()
-        .map_err(|_| "That file could not be read.".to_string())?;
-    if meta.is_dir() {
-        return Err("That is a folder, not a file. Use list_dir to see what is in it.".to_string());
-    }
+    let file = std::fs::File::open(real).map_err(|_| UNREADABLE.to_string())?;
+    let meta = file.metadata().map_err(|_| UNREADABLE.to_string())?;
     if !meta.is_file() {
         return Err("That is not a regular file.".to_string());
     }
     if meta.len() > MAX_READ_BYTES {
-        return Err("That file is larger than 5 MB, so it cannot be read.".to_string());
+        return Err(BIG.to_string());
     }
-    read_bounded(file, MAX_READ_BYTES)
-        .ok_or_else(|| "That file is larger than 5 MB, so it cannot be read.".to_string())
+    read_bounded(file, MAX_READ_BYTES).ok_or_else(|| BIG.to_string())
 }
 
 pub fn list_dir(project: &Project, args: &Value) -> ToolOutcome {
@@ -231,11 +280,12 @@ pub fn list_dir(project: &Project, args: &Value) -> ToolOutcome {
             continue;
         };
         let name = entry.file_name().to_string_lossy().into_owned();
+        let shown = clean(&name);
         if kind.is_dir() {
-            rows.push((name.clone(), format!("{name}/")));
+            rows.push((name.clone(), format!("{shown}/")));
         } else if kind.is_file() {
             let bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
-            rows.push((name.clone(), format!("{name}\t{bytes}")));
+            rows.push((name.clone(), format!("{shown}\t{bytes}")));
         }
     }
     rows.sort_by_cached_key(|(name, _)| (name.to_lowercase(), name.clone()));
@@ -516,5 +566,75 @@ mod tests {
         assert!(o.text.contains("\"offset\""));
         let o = read(&p, &l, json!({"path": "a", "limit": 0}));
         assert!(o.text.contains("\"limit\""));
+    }
+
+    #[test]
+    fn clean_replaces_control_and_format_characters() {
+        assert_eq!(clean("a\nb\tc\u{202e}d\u{200b}e\0f"), "a?b?c?d?e?f");
+        assert_eq!(clean("plain é/ü.rs"), "plain é/ü.rs");
+    }
+
+    #[test]
+    fn summary_text_cleans_and_cuts_at_80_characters() {
+        assert_eq!(summary_text("short"), "short");
+        let long = "é".repeat(100);
+        let got = summary_text(&long);
+        assert_eq!(got.chars().count(), 81);
+        assert!(got.ends_with('…'));
+        assert_eq!(summary_text("a\nb"), "a?b");
+        assert_eq!(summary_text(&"x".repeat(80)), "x".repeat(80));
+    }
+
+    #[test]
+    fn read_summary_uses_the_resolved_path_never_the_raw_string() {
+        let (t, p, l) = setup();
+        fs::create_dir(t.path().join("src")).unwrap();
+        fs::write(t.path().join("src/a.txt"), "x\n").unwrap();
+        let o = read(&p, &l, json!({"path": "./src//a.txt"}));
+        assert_eq!(o.summary, "Read src/a.txt");
+        // Refused before resolution: a fixed line.
+        let o = read(&p, &l, json!({"path": "../x\nEvil"}));
+        assert_eq!(o.summary, "Read a file");
+        let o = read(&p, &l, json!({"path": "no\nsuch.txt"}));
+        assert_eq!(o.summary, "Read a file");
+        // Refused after resolution: the shown path.
+        fs::write(t.path().join("b.bin"), b"\0").unwrap();
+        let o = read(&p, &l, json!({"path": "./b.bin"}));
+        assert_eq!(o.summary, "Read b.bin");
+        let o = read(&p, &l, json!({"path": "skill:x/\u{202e}y\nz"}));
+        assert_eq!(o.status, ToolStatus::Error);
+        assert!(!o.summary.contains(['\n', '\u{202e}']), "{}", o.summary);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_file_refuses_a_named_pipe_promptly() {
+        let (t, p, l) = setup();
+        let fifo = t.path().join("pipe.txt");
+        if !std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .is_ok_and(|s| s.success())
+        {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(read_file(&p, &l, &json!({"path": "pipe.txt"}), false));
+        });
+        let o = rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("read_file hung on a FIFO");
+        assert_eq!(o.status, ToolStatus::Error);
+        assert!(o.text.contains("not a regular file"), "{}", o.text);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn list_dir_replaces_control_characters_in_names() {
+        let (t, p, _l) = setup();
+        fs::write(t.path().join("a\nforged\t99"), "").unwrap();
+        let o = list_dir(&p, &json!({}));
+        assert_eq!(o.text, "a?forged?99\t0");
     }
 }

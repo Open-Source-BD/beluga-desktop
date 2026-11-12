@@ -37,8 +37,18 @@ const SKIPPED_DIRS: [&str; 5] = ["node_modules", "target", "dist", "build", ".gi
 /// paths relative to `base`. Stops once more than `max_files` files are met
 /// and reports that as the second value. Never follows links.
 pub(crate) fn walk(base: &Path, max_files: usize) -> (Vec<FileEntry>, bool) {
+    walk_with(base, max_files, false)
+}
+
+/// `walk`, optionally also entering and listing hidden files and folders
+/// (names starting with a dot). `.git` stays skipped either way.
+pub(crate) fn walk_with(
+    base: &Path,
+    max_files: usize,
+    include_hidden: bool,
+) -> (Vec<FileEntry>, bool) {
     let walker = ignore::WalkBuilder::new(base)
-        .hidden(true)
+        .hidden(!include_hidden)
         .git_ignore(true)
         .require_git(false)
         .git_global(false)
