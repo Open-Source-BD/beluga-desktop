@@ -109,3 +109,27 @@ describe("a deleted chat", () => {
     expect(h.result.current.status).toBe("idle");
   });
 });
+
+describe("round 2", () => {
+  it("a user row stored mid-run does not leave a second copy of the declined call; the next reply's call_0 keeps its output", async () => {
+    const h = await started();
+    ev("a", { type: "tool_started", call_id: "call_0", name: "n", summary: "x" });
+    ev("a", { type: "tool_finished", call_id: "call_0", status: "declined", summary: "Declined: x", detail: null });
+    const a1 = row({ id: "a1", tool_calls: [call("call_0")] });
+    const t1 = row({ id: "t1", role: "tool", kind: "tool", tool_call_id: "call_0", tool_meta: { name: "n", status: "declined", summary: "Declined: x", detail: null } });
+    const U2 = row({ id: "u2", role: "user", text: "do y" });
+    await stored(h, "a", [U, a1, t1, U2], 4);
+    expect(h.result.current.live).toEqual([]);
+    ev("a", { type: "tool_started", call_id: "call_0", name: "n", summary: "two" });
+    ev("a", { type: "tool_output", call_id: "call_0", text: "out2" });
+    await stored(h, "a", [U, a1, t1, U2, row({ id: "a2", tool_calls: [call("call_0")] })], 5);
+    expect(h.result.current.live[0]).toMatchObject({ summary: "two", output: "out2" });
+  });
+
+  it("stored text with leading space still matches the stream", async () => {
+    const h = await started();
+    ev("a", { type: "text_delta", text: "Hello" });
+    await stored(h, "a", [U, row({ id: "a1", text: "  Hello\n" })], 2);
+    expect(h.result.current.streamingText).toBe("");
+  });
+});

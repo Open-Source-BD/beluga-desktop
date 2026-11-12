@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   chatUsage,
   compactChat,
@@ -14,7 +14,7 @@ import {
   type TurnResult,
   type UiError,
 } from "../../lib/ipc";
-import { answeredLive, OUTPUT_KEEP, pairStored, type TrailEntry } from "../agent/trailEntries";
+import { answeredLive, OUTPUT_KEEP, pairStored, type Run, type TrailEntry } from "../agent/trailEntries";
 import { toUiError } from "./errors";
 
 /** "paused": a project task stopped and waits for the user; the chat is usable and nothing failed. */
@@ -42,6 +42,9 @@ export interface ChatState {
   usageBase: ChatUsage | null;
   /** Rows stored during the task (each `message_stored`). */
   storedCount: number;
+  /** Ids of the rows stored when the running (or last) task began, and a key for its lines. */
+  runBase: ReadonlySet<string> | null;
+  runKey: string;
   /** Changes when the checklist, background commands or approvals may have changed. */
   taskTick: number;
 }
@@ -62,6 +65,8 @@ const EMPTY: ChatState = {
   taskUsage: null,
   usageBase: null,
   storedCount: 0,
+  runBase: null,
+  runKey: "",
   taskTick: 0,
 };
 
@@ -74,6 +79,8 @@ export interface CompactOutcome {
 export interface UseChat extends ChatState {
   /** The chat's request count and cost including the running task; null when unknown. */
   usage: ChatUsage | null;
+  /** The task's own rows are those not in `run.base`; null when no task has run here. */
+  run: Run | null;
   /**
    * Sends to `targetChatId` (default: the selected chat). Ignored while that chat is
    * streaming; the result says whether it was accepted.
@@ -129,13 +136,13 @@ function withStoredRows(s: ChatState, messages: StoredMessage[]): Partial<ChatSt
   let text = s.streamingText;
   for (const m of fresh) {
     if (m.kind !== "message" || m.role !== "assistant" || !m.text.trim()) continue;
-    const stored = norm(m.text).trimEnd();
-    const lead = norm(text).trimStart();
+    const stored = norm(m.text).trim();
+    const lead = norm(text).trim();
     text = lead.startsWith(stored) ? lead.slice(stored.length) : "";
   }
   if (!text.trim()) text = "";
   const answered = answeredLive(
-    pairStored(messages),
+    pairStored(messages, s.runBase ? { base: s.runBase, key: s.runKey } : null),
     s.live,
     new Set(fresh.filter((m) => m.kind === "tool").map((m) => m.id)),
   );
@@ -217,7 +224,9 @@ export function useChat(
       lastModel.current[id] = modelId;
       const turn = (turnSeq.current[id] ?? 0) + 1;
       turnSeq.current[id] = turn;
-      patch(id, () => ({
+      patch(id, (s) => ({
+        runBase: new Set(s.messages.map((m) => m.id)),
+        runKey: `r${turn}`,
         streamingText: "",
         pendingUser: pending?.text ?? null,
         status: "streaming",
@@ -447,5 +456,10 @@ export function useChat(
         }
       : null;
 
-  return { ...current, usage, send, stop, reload: reloadSelected, forget, retry, regenerate, compact };
+  const run = useMemo(
+    () => (current.runBase ? { base: current.runBase, key: current.runKey } : null),
+    [current.runBase, current.runKey],
+  );
+
+  return { ...current, usage, run, send, stop, reload: reloadSelected, forget, retry, regenerate, compact };
 }

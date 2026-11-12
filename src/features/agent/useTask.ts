@@ -10,7 +10,9 @@ const NONE: TaskState = { plan: [], edits_allowed: false, background: [], projec
  * or one overtaken by a later request, is ignored, and a chat never shows another's state.
  */
 export function useTask(chatId: string | null, tick = 0) {
-  const [held, setHeld] = useState<{ id: string; state: TaskState } | null>(null);
+  const [held, setHeld] = useState<{ id: string; state: TaskState; tick: number } | null>(null);
+  const tickRef = useRef(tick);
+  tickRef.current = tick;
   const chatRef = useRef(chatId);
   chatRef.current = chatId;
   const seq = useRef(0);
@@ -19,12 +21,13 @@ export function useTask(chatId: string | null, tick = 0) {
 
   const refresh = useCallback(async (id: string | null = chatRef.current) => {
     if (!id || deleted.current.has(id)) return;
+    const started = tickRef.current;
     const mine = ++seq.current;
     latest.current.set(id, mine);
     try {
       const s = await taskState(id);
       if (!s || deleted.current.has(id) || latest.current.get(id) !== mine || chatRef.current !== id) return;
-      setHeld({ id, state: s });
+      setHeld({ id, state: s, tick: started });
     } catch {
       // Keep what is shown.
     }
@@ -72,5 +75,7 @@ export function useTask(chatId: string | null, tick = 0) {
     waiting: s.waiting,
     refresh,
     forget,
+    /** The `tick` that was current when the shown state was asked for; -1 before any answer. */
+    loadedTick: held && held.id === chatId ? held.tick : -1,
   };
 }

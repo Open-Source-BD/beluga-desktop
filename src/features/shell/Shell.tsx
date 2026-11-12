@@ -165,7 +165,9 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   // open (a paused task) and goes when the task ends with everything done.
   // While the task runs, its events are the truth; once it settles the core's state is.
   const running = chat.status === "streaming";
-  const planItems = running ? (chat.plan ?? task.plan) : task.plan;
+  // Until the refresh for the settle has returned, the core's list may be the pre-task one.
+  const pending = running || task.loadedTick < chat.taskTick;
+  const planItems = pending ? (chat.plan ?? task.plan) : task.plan;
   const showPlan =
     planItems.length > 0 &&
     (planItems.some((i) => i.state !== "done") || (running && chat.plan !== null));
@@ -664,6 +666,8 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
                 status={chat.status}
                 error={chat.error}
                 live={chat.live}
+                run={chat.run}
+                chatId={selectedId}
                 waiting={chat.waiting}
                 notSent={chat.unsent !== null}
                 onEdit={(m) => void editMessage(m)}

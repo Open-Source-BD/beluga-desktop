@@ -67,7 +67,8 @@ describe("calls are matched by position", () => {
     ];
     render(<Thread {...props} status="streaming" messages={msgs} />);
     expect(screen.getByText("not run")).toBeInTheDocument();
-    expect(screen.getByText("running")).toBeInTheDocument();
+    expect(screen.getByText("Waiting to run")).toBeInTheDocument();
+    expect(screen.queryByText("running")).toBeNull();
   });
 });
 

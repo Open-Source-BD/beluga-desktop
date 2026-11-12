@@ -1,7 +1,8 @@
 import type { StoredMessage, StoredToolCall, ToolStatus } from "../../lib/ipc";
 
 /** "running" while the call is in progress, then how it ended. */
-export type TrailStatus = "running" | ToolStatus;
+/** "waiting": stored, not started yet. */
+export type TrailStatus = "running" | "waiting" | ToolStatus;
 
 /** One tool call as the conversation shows it. Text comes from the core, already sanitised. */
 export interface TrailEntry {
@@ -36,13 +37,16 @@ export function stateWord(status: TrailStatus): string | null {
 }
 
 /** A stored call with no result and no live information: only its name is known. */
-export function bareEntry(call: StoredToolCall, running: boolean): TrailEntry {
-  return {
-    callId: call.id,
-    name: call.name,
-    summary: call.name,
-    status: running ? "running" : "not_run",
-  };
+export function bareEntry(call: StoredToolCall, waiting: boolean): TrailEntry {
+  return waiting
+    ? { callId: call.id, name: call.name, summary: "Waiting to run", status: "waiting" }
+    : { callId: call.id, name: call.name, summary: call.name, status: "not_run" };
+}
+
+/** The run in progress: ids of the rows stored before it began, and a key for its lines. */
+export interface Run {
+  base: ReadonlySet<string>;
+  key: string;
 }
 
 /** A stored call and the result stored for it, if any. */
@@ -72,7 +76,7 @@ export interface StoredTrail {
  * inside that stretch by id, and a repeated id pairs in order. Any other tool row is an
  * orphan and is never shown.
  */
-export function pairStored(messages: StoredMessage[]): StoredTrail {
+export function pairStored(messages: StoredMessage[], run: Run | null = null): StoredTrail {
   const rows = new Map<string, Slot[]>();
   let lastUser = -1;
   let lastAssistantId: string | null = null;
@@ -80,7 +84,14 @@ export function pairStored(messages: StoredMessage[]): StoredTrail {
     if (m.kind === "message" && m.role === "user") lastUser = i;
     if (m.kind === "message" && m.role === "assistant") lastAssistantId = m.id;
   });
-  const taskKey = lastUser >= 0 ? messages[lastUser].id : "start";
+  // The task is the rows of the run (a user row can arrive in the middle of it); without a
+  // known run, the replies after the latest user message.
+  let runStart = lastUser + 1;
+  if (run) {
+    runStart = messages.findIndex((m) => !run.base.has(m.id));
+    if (runStart < 0) runStart = messages.length;
+  }
+  const taskKey = run ? run.key : lastUser >= 0 ? messages[lastUser].id : "start";
   const task: Slot[] = [];
   messages.forEach((m, i) => {
     if (m.kind !== "message" || m.role !== "assistant" || m.tool_calls.length === 0) return;
@@ -100,7 +111,7 @@ export function pairStored(messages: StoredMessage[]): StoredTrail {
           : null,
       };
     });
-    if (i > lastUser) slots.forEach((s) => { s.key = `${taskKey}:${task.length}`; task.push(s); });
+    if (i >= runStart) slots.forEach((s) => { s.key = `${taskKey}:${task.length}`; task.push(s); });
     rows.set(m.id, slots);
   });
   return { rows, task, taskKey, lastAssistantId };

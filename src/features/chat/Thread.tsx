@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { StoredMessage, UiError } from "../../lib/ipc";
 import Trail from "../agent/Trail";
-import { bareEntry, matchLive, pairStored, stateWord, type Slot, type TrailEntry } from "../agent/trailEntries";
+import { bareEntry, matchLive, pairStored, stateWord, type Run, type Slot, type TrailEntry } from "../agent/trailEntries";
 import ErrorNotice from "./ErrorNotice";
 import { shouldFollow } from "./follow";
 import JumpToLatest from "./JumpToLatest";
@@ -17,6 +17,10 @@ interface Props {
   error: UiError | null;
   /** Tool calls of the running task, from events. */
   live?: TrailEntry[];
+  /** The task's own rows (not in `run.base`), so a user row mid-task does not split it. */
+  run?: Run | null;
+  /** The chat shown; switching it resets what the status region has read. */
+  chatId?: string | null;
   /** Seconds of a rate-limit wait being served. */
   waiting?: number | null;
   /** The pending text was rejected before it was stored. */
@@ -45,6 +49,8 @@ export default function Thread({
   status,
   error,
   live = NO_LIVE,
+  run = null,
+  chatId = null,
   waiting = null,
   notSent = false,
   onEdit,
@@ -80,7 +86,7 @@ export default function Thread({
   // Calls are paired with their results by position, as the core does. A call with no
   // result yet takes the live line that started under it (a command still running); only a
   // call of the last reply can be running, any other unanswered one was not run.
-  const stored = useMemo(() => pairStored(messages), [messages]);
+  const stored = useMemo(() => pairStored(messages, run), [messages, run]);
   const bare = useMemo(() => {
     const out = new Map<Slot, TrailEntry>();
     for (const [id, slots] of stored.rows)
@@ -104,17 +110,24 @@ export default function Thread({
 
   // Settled lines are announced once; running ones and their output never are.
   const announced = useRef(new Set<number>());
-  const [said, setSaid] = useState("");
+  const shownChat = useRef<string | null | symbol>(Symbol("none"));
+  const [said, setSaid] = useState<{ id: number; text: string }[]>([]);
   useEffect(() => {
-    const now: string[] = [];
+    const switched = shownChat.current !== chatId;
+    shownChat.current = chatId;
+    const now: { id: number; text: string }[] = [];
     for (const e of live) {
-      if (e.status === "running" || e.liveId === undefined || announced.current.has(e.liveId)) continue;
+      if (e.status === "running" || e.status === "waiting" || e.liveId === undefined) continue;
+      if (announced.current.has(e.liveId)) continue;
       announced.current.add(e.liveId);
+      // Lines already settled when a chat is shown are not read again.
+      if (switched) continue;
       const word = stateWord(e.status);
-      now.push(word ? `${e.summary} ${word}` : e.summary);
+      now.push({ id: e.liveId, text: word ? `${e.summary} ${word}` : e.summary });
     }
-    if (now.length > 0) setSaid(now.join(". "));
-  }, [live]);
+    if (switched) setSaid([]);
+    else if (now.length > 0) setSaid(now);
+  }, [live, chatId]);
   const anyRunning = live.some((e) => e.status === "running");
   const canEdit = onEdit !== undefined && !streaming && pendingUser === null;
   const showInterrupted =
@@ -211,7 +224,9 @@ export default function Thread({
         )}
         <Trail entries={rest} keys={restKeys} expanded={expanded} onToggle={toggle} />
         <div role="status" className="sr-only">
-          {said}
+          {said.map((n) => (
+            <p key={n.id}>{n.text}</p>
+          ))}
         </div>
         <div className="reply live" aria-live="polite">
           {streaming && streamingText && <Markdown text={streamingText} />}

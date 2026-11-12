@@ -199,4 +199,21 @@ describe("Shell during a task", () => {
     expect(await screen.findByText("Core open")).toBeInTheDocument();
     expect(screen.queryByText("Live item")).toBeNull();
   });
+
+  it("keeps the event checklist until the refresh for the settled task returns", async () => {
+    ipc.taskState.mockResolvedValue({ ...noTask, plan: [{ text: "Old open", state: "pending" }] });
+    render(<Shell />);
+    await open("Chat A");
+    expect(await screen.findByText("Old open")).toBeInTheDocument();
+    await send();
+    ev("ca", { type: "plan_updated", items: [{ text: "Live item", state: "in_progress" }] });
+    expect(await screen.findByText("Live item")).toBeInTheDocument();
+    let resolve!: (v: unknown) => void;
+    ipc.taskState.mockReturnValue(new Promise((r) => { resolve = r; }));
+    await act(async () => finishes.ca({ status: "done", reason: null, error: null }));
+    expect(screen.queryByText("Old open")).toBeNull();
+    expect(screen.getByText("Live item")).toBeInTheDocument();
+    await act(async () => resolve({ ...noTask, plan: [{ text: "Live item", state: "done" }] }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Task checklist" })).toBeNull());
+  });
 });
