@@ -549,10 +549,13 @@ impl Guards {
     /// for, at most 60 seconds, 10 when it named nothing), up to three
     /// times a task; the fourth pauses. On a free model the key status is
     /// read first, and no free requests left pauses at once. A rate limit or
-    /// an empty balance also has the key status read again before the next
+    /// an empty or low balance also has the key status read again before the next
     /// request.
     pub async fn retry_after(&mut self, env: &Env<'_>, requests: u32, error: &StepError) -> Retry {
-        if matches!(error.ui.kind.as_str(), "rate_limited" | "no_credit") {
+        if matches!(
+            error.ui.kind.as_str(),
+            "rate_limited" | "no_credit" | "low_credit"
+        ) {
             self.key_due = true;
         }
         if error.ui.kind != "rate_limited" {

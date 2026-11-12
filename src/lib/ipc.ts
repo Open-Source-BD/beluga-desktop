@@ -33,6 +33,7 @@ export type UiErrorKind =
   | "unauthorized"
   | "rate_limited"
   | "no_credit"
+  | "low_credit"
   | "model_unavailable"
   | "context_too_long"
   | "network"

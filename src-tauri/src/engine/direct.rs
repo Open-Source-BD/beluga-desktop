@@ -315,6 +315,13 @@ mod tests {
                 false,
             ),
             (
+                402,
+                r#"{"error":{"message":"You requested up to 131072 tokens, but can only afford 8450."}}"#,
+                "low_credit",
+                "Your balance is too low for this model's full reply. Add credit or pick a cheaper model.",
+                false,
+            ),
+            (
                 404,
                 r#"{"error":{"message":"No endpoints found for m/x"}}"#,
                 "model_unavailable",

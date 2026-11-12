@@ -870,6 +870,7 @@ mod fixtures {
         vec![
             UiError::other("Something went wrong."),
             UiError::daily_limit("You have reached today's spending limit of $1.00."),
+            UiError::from(crate::openrouter::error::ApiError::LowCredit),
         ]
     }
 

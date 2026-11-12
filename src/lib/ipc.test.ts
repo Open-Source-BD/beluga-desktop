@@ -443,6 +443,7 @@ const uiErrorKinds: Record<ipc.UiErrorKind, true> = {
   unauthorized: true,
   rate_limited: true,
   no_credit: true,
+  low_credit: true,
   model_unavailable: true,
   context_too_long: true,
   network: true,

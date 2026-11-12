@@ -13,6 +13,7 @@ export function nextStep(error: UiError): NextStep | null {
     case "unauthorized":
       return { label: "Sign in again", action: "sign_in" };
     case "no_credit":
+    case "low_credit":
     case "model_unavailable":
     case "context_too_long":
       return { label: "Pick another model", action: "pick_model" };

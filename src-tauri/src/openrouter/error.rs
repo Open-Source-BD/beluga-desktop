@@ -3,12 +3,20 @@ const MAX_MESSAGE_CHARS: usize = 200;
 #[derive(Debug, Clone, PartialEq)]
 pub enum ApiError {
     Unauthorized,
-    RateLimited { retry_after_secs: Option<u64> },
+    RateLimited {
+        retry_after_secs: Option<u64>,
+    },
     NoCredit,
+    /// The balance cannot cover the model's full reply (OpenRouter reserves
+    /// the whole output when no `max_tokens` is sent), though it is not empty.
+    LowCredit,
     ModelUnavailable,
     ContextTooLong,
     Network(String),
-    Other { status: u16, message: String },
+    Other {
+        status: u16,
+        message: String,
+    },
 }
 
 impl ApiError {
@@ -19,6 +27,7 @@ impl ApiError {
         let lower = message.to_lowercase();
         match status {
             401 => ApiError::Unauthorized,
+            402 if body.to_lowercase().contains("can only afford") => ApiError::LowCredit,
             402 => ApiError::NoCredit,
             429 => ApiError::RateLimited {
                 retry_after_secs: None,
@@ -64,6 +73,27 @@ fn short_message(body: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A 402 from the live check: no `max_tokens` was sent, so OpenRouter
+    /// reserved the model's whole output.
+    const CANNOT_AFFORD_REPLY: &str = r#"{"error":{"message":"This request requires more credits, or fewer max_tokens. You requested up to 131072 tokens, but can only afford 8450. To increase, visit https://openrouter.ai/workspaces/default/keys/[key-hash] and adjust the key's total limit","code":402}}"#;
+
+    #[test]
+    fn a_402_that_can_only_afford_part_of_the_reply_is_low_credit() {
+        assert_eq!(
+            ApiError::from_response(402, CANNOT_AFFORD_REPLY),
+            ApiError::LowCredit
+        );
+        assert_eq!(
+            ApiError::from_response(402, "{\"error\":{\"message\":\"CAN ONLY AFFORD 3\"}}"),
+            ApiError::LowCredit
+        );
+        // Any other 402 is still an empty balance.
+        assert_eq!(
+            ApiError::from_response(402, "{\"error\":{\"message\":\"Insufficient credits\"}}"),
+            ApiError::NoCredit
+        );
+    }
 
     #[test]
     fn maps_status_codes() {

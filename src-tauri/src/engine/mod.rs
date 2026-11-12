@@ -86,6 +86,11 @@ impl From<ApiError> for UiError {
                 "This model needs credit and your OpenRouter balance is empty. Pick a free model or add credit.",
                 false,
             ),
+            ApiError::LowCredit => Self::new(
+                "low_credit",
+                "Your balance is too low for this model's full reply. Add credit or pick a cheaper model.",
+                false,
+            ),
             ApiError::ModelUnavailable => Self::new(
                 "model_unavailable",
                 "This model is not available right now. Pick another model and try again.",

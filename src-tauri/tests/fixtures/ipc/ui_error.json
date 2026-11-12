@@ -8,5 +8,10 @@
     "kind": "daily_limit",
     "message": "You have reached today's spending limit of $1.00.",
     "retryable": false
+  },
+  {
+    "kind": "low_credit",
+    "message": "Your balance is too low for this model's full reply. Add credit or pick a cheaper model.",
+    "retryable": false
   }
 ]
