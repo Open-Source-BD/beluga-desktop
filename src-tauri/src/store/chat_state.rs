@@ -5,6 +5,26 @@ use super::chats::{MESSAGE_COLUMNS, message_row};
 use super::{Result, Store, StoredMessage};
 use rusqlite::{OptionalExtension, params};
 
+/// Keeps a tool result only when the call it answers was made by the most
+/// recent assistant row (its own turn segment). A summary boundary that
+/// splits a call from its results would otherwise leave results the model
+/// cannot place.
+fn drop_orphan_tool_rows(rows: Vec<StoredMessage>) -> Vec<StoredMessage> {
+    let mut current: Vec<String> = Vec::new();
+    rows.into_iter()
+        .filter(|m| {
+            if m.kind == "tool" {
+                m.tool_call_id
+                    .as_ref()
+                    .is_some_and(|id| current.contains(id))
+            } else {
+                current = m.tool_calls.iter().map(|c| c.id.clone()).collect();
+                true
+            }
+        })
+        .collect()
+}
+
 impl Store {
     pub fn active_skills(&self, chat_id: &str) -> Result<Vec<String>> {
         let json: Option<String> = self
@@ -156,7 +176,10 @@ impl Store {
                AND seq >= COALESCE((SELECT sent_from_seq FROM chats WHERE id = ?1), 0)
              ORDER BY seq"
         ))?;
-        stmt.query_map([chat_id], message_row)?.collect()
+        let rows: Vec<StoredMessage> = stmt
+            .query_map([chat_id], message_row)?
+            .collect::<Result<_>>()?;
+        Ok(drop_orphan_tool_rows(rows))
     }
 
     pub fn switch(&self, id: &str) -> Result<Option<bool>> {

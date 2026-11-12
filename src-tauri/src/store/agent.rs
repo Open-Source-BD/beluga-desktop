@@ -6,18 +6,22 @@ use rusqlite::{OptionalExtension, params};
 
 impl Store {
     /// Calls in the sendable rows that have no result row yet, oldest first.
+    /// A result answers a call only inside the call's own turn: after its
+    /// assistant row and before the next one, so a reused id cannot match.
     pub fn unanswered_calls(&self, chat_id: &str) -> Result<Vec<StoredToolCall>> {
         let rows = self.sendable_messages(chat_id)?;
-        let answered: std::collections::HashSet<&str> = rows
-            .iter()
-            .filter_map(|m| m.tool_call_id.as_deref())
-            .collect();
-        Ok(rows
-            .iter()
-            .flat_map(|m| m.tool_calls.iter())
-            .filter(|c| !answered.contains(c.id.as_str()))
-            .cloned()
-            .collect())
+        let mut open: Vec<StoredToolCall> = Vec::new();
+        let mut out = Vec::new();
+        for m in &rows {
+            if m.kind == "tool" {
+                open.retain(|c| Some(&c.id) != m.tool_call_id.as_ref());
+            } else {
+                out.append(&mut open);
+                open = m.tool_calls.clone();
+            }
+        }
+        out.append(&mut open);
+        Ok(out)
     }
 
     pub fn edits_allowed(&self, chat_id: &str) -> Result<bool> {

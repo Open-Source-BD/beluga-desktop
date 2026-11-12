@@ -531,7 +531,7 @@ fn a_v3_database_upgrades_to_4_and_keeps_every_chat_and_message_sendable() {
     let sendable = s.sendable_messages("chat-a").unwrap();
     assert_eq!(
         sendable.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(),
-        ["Look at this", "It says hi."]
+        ["It says hi."]
     );
     assert!(
         sendable
@@ -543,6 +543,41 @@ fn a_v3_database_upgrades_to_4_and_keeps_every_chat_and_message_sendable() {
     assert!(s.is_folder_approved("/work/one").unwrap());
     assert!(!s.edits_allowed("chat-a").unwrap());
     assert_eq!(s.plan("chat-a").unwrap(), "[]");
+    assert_eq!(
+        s.summary("chat-a").unwrap(),
+        Some(("Earlier: they looked at a file.".to_string(), 2))
+    );
+    assert_eq!(s.active_skills("chat-a").unwrap(), ["skill-a"]);
+    assert_eq!(
+        s.get_messages("chat-a").unwrap()[2].kind,
+        "note",
+        "the note row survives"
+    );
+}
+
+#[test]
+fn a_v2_database_upgrades_with_its_chat_state_and_an_empty_approved_folders() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Store::open(&file_from(&dir, DB_V2)).unwrap();
+    assert_eq!(s.approved_folders().unwrap(), Vec::<String>::new());
+    assert_eq!(s.folder("chat-a").unwrap().as_deref(), Some("/work/one"));
+    assert_eq!(s.active_skills("chat-a").unwrap(), ["skill-a"]);
+    assert_eq!(
+        s.summary("chat-a").unwrap(),
+        Some(("Earlier: they looked at a file.".to_string(), 2))
+    );
+    let all = s.get_messages("chat-a").unwrap();
+    assert_eq!(all.len(), 3);
+    assert_eq!(all[2].kind, "note");
+    assert_eq!(all[2].text, "Skill turned on");
+    assert_eq!(s.sendable_messages("chat-a").unwrap().len(), 1);
+}
+
+#[test]
+fn a_v3_database_keeps_its_approved_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Store::open(&file_from(&dir, DB_V3)).unwrap();
+    assert_eq!(s.approved_folders().unwrap(), ["/work/one"]);
 }
 
 #[test]
@@ -705,4 +740,83 @@ fn settings_round_trip_and_overwrite() {
     s.set_setting("daily_limit", "1.00").unwrap();
     s.set_setting("daily_limit", "2.50").unwrap();
     assert_eq!(s.setting("daily_limit").unwrap().as_deref(), Some("2.50"));
+}
+
+// ---- tool calls and the compaction boundary ----
+
+/// user, assistant with call `id`, tool result for `id`; returns the seqs.
+fn tool_turn(s: &Store, chat: &str, id: &str, answer: bool) -> Vec<i64> {
+    let mut seqs = vec![
+        s.append_message(chat, "user", "go", &[], false)
+            .unwrap()
+            .seq,
+    ];
+    seqs.push(
+        s.append_assistant(chat, "", &[call(id)], false)
+            .unwrap()
+            .seq,
+    );
+    if answer {
+        seqs.push(
+            s.append_tool_result(chat, id, &meta("ok"), "r")
+                .unwrap()
+                .seq,
+        );
+    }
+    seqs
+}
+
+#[test]
+fn a_boundary_before_the_assistant_row_keeps_the_whole_pair() {
+    let s = store();
+    let c = s.create_chat("m/a").unwrap();
+    let seqs = tool_turn(&s, &c.id, "c1", true);
+    s.set_summary(&c.id, "sum", seqs[1]).unwrap();
+    let kinds: Vec<_> = s
+        .sendable_messages(&c.id)
+        .unwrap()
+        .iter()
+        .map(|m| m.kind.clone())
+        .collect();
+    assert_eq!(kinds, ["message", "tool"]);
+    assert!(s.unanswered_calls(&c.id).unwrap().is_empty());
+}
+
+#[test]
+fn a_boundary_splitting_the_pair_drops_the_orphan_tool_rows() {
+    let s = store();
+    let c = s.create_chat("m/a").unwrap();
+    let seqs = tool_turn(&s, &c.id, "c1", true);
+    s.set_summary(&c.id, "sum", seqs[2]).unwrap();
+    assert!(s.sendable_messages(&c.id).unwrap().is_empty());
+    assert!(s.unanswered_calls(&c.id).unwrap().is_empty());
+    // Rows after the orphan are kept.
+    s.append_assistant(&c.id, "done", &[], false).unwrap();
+    let rows = s.sendable_messages(&c.id).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].text, "done");
+}
+
+#[test]
+fn a_boundary_after_the_pair_leaves_later_rows() {
+    let s = store();
+    let c = s.create_chat("m/a").unwrap();
+    tool_turn(&s, &c.id, "c1", true);
+    let later = tool_turn(&s, &c.id, "c2", false);
+    s.set_summary(&c.id, "sum", later[0]).unwrap();
+    let rows = s.sendable_messages(&c.id).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(s.unanswered_calls(&c.id).unwrap(), vec![call("c2")]);
+}
+
+#[test]
+fn a_reused_call_id_in_a_later_turn_is_not_hidden_by_an_old_result() {
+    let s = store();
+    let c = s.create_chat("m/a").unwrap();
+    tool_turn(&s, &c.id, "call_0", true);
+    tool_turn(&s, &c.id, "call_0", false);
+    assert_eq!(s.unanswered_calls(&c.id).unwrap(), vec![call("call_0")]);
+    s.append_tool_result(&c.id, "call_0", &meta("ok"), "r")
+        .unwrap();
+    assert!(s.unanswered_calls(&c.id).unwrap().is_empty());
 }

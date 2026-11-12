@@ -42,7 +42,7 @@ CREATE TABLE approved_folders (
 PRAGMA user_version = 3;
 
 -- 2026-11-15 12:00 UTC is 1794744000; 2026-11-16 00:30 UTC is 1794789000.
-INSERT INTO chats (id, title, model_id, created_at, updated_at, folder) VALUES ('chat-a', 'First chat', 'm/a', 1794740000, 1794744000, '/work/one');
+INSERT INTO chats (id, title, model_id, created_at, updated_at, folder, active_skills, summary, sent_from_seq) VALUES ('chat-a', 'First chat', 'm/a', 1794740000, 1794744000, '/work/one', '["skill-a"]', 'Earlier: they looked at a file.', 2);
 INSERT INTO chats (id, title, model_id, created_at, updated_at) VALUES ('chat-b', 'Second chat', 'm/b', 1794740100, 1794789000);
 INSERT INTO messages (id, chat_id, role, text, attachments, interrupted, created_at, kind) VALUES ('a1', 'chat-a', 'user', 'Look at this', '[]', 0, 1794740001, 'message');
 INSERT INTO messages (id, chat_id, role, text, attachments, interrupted, created_at, kind) VALUES ('a2', 'chat-a', 'assistant', 'It says hi.', '[]', 0, 1794740002, 'message');
