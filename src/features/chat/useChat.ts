@@ -50,6 +50,8 @@ export interface UseChat extends ChatState {
     targetChatId?: string,
   ): void;
   stop(): void;
+  /** Loads the stored messages again (after the core removed some) and clears a stale failure. */
+  reload(): Promise<void>;
   /**
    * Shortens the selected chat. It runs like a reply (status "streaming", Stop
    * cancels it); `onOutcome` hears how it ended, so a failure is reported by
@@ -72,7 +74,7 @@ export interface UseChat extends ChatState {
  */
 export function useChat(
   chatId: string | null,
-  onTurnEnd?: (chatId: string) => void,
+  onTurnEnd?: (chatId: string, status: ChatStatus) => void,
 ): UseChat {
   const [states, setStates] = useState<Record<string, ChatState>>({});
   const streaming = useRef(new Set<string>());
@@ -156,7 +158,7 @@ export function useChat(
           status,
           error,
         }));
-        onTurnEndRef.current?.(id);
+        onTurnEndRef.current?.(id, status);
       };
       const onEvent = (event: EngineEvent) => {
         if (settled || event.type !== "text_delta") return;
@@ -191,6 +193,12 @@ export function useChat(
       stopTurn(chatId).catch(() => {});
     }
   }, [chatId]);
+
+  const reloadSelected = useCallback(async () => {
+    if (!chatId || streaming.current.has(chatId)) return;
+    const messages = await reload(chatId);
+    if (messages) patch(chatId, () => ({ messages, status: "idle", error: null, unsent: null, pendingUser: null }));
+  }, [chatId, reload, patch]);
 
   const retry = useCallback(
     (modelId?: string | null) => {
@@ -227,5 +235,5 @@ export function useChat(
     [chatId, start],
   );
 
-  return { ...current, send, stop, retry, compact };
+  return { ...current, send, stop, reload: reloadSelected, retry, compact };
 }

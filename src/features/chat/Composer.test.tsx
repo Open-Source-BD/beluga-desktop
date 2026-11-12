@@ -26,14 +26,27 @@ describe("Composer", () => {
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
 
-  it("cannot send while streaming, and the control becomes Stop", async () => {
+  it("stays enabled while streaming: Enter still sends, and the control is Stop", async () => {
     const onSend = vi.fn();
     const onStop = vi.fn();
     render(<Composer onSend={onSend} onStop={onStop} streaming />);
     await userEvent.type(screen.getByLabelText("Message"), "more{Enter}");
-    expect(onSend).not.toHaveBeenCalled();
+    expect(onSend).toHaveBeenCalledWith("more", []);
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(onStop).toHaveBeenCalledTimes(1);
+  });
+
+  it("Esc stops a running reply, but not when the menu took the key or nothing is running", async () => {
+    const onStop = vi.fn();
+    const { rerender } = render(<Composer onSend={vi.fn()} onStop={onStop} />);
+    await userEvent.type(screen.getByLabelText("Message"), "{Escape}");
+    expect(onStop).not.toHaveBeenCalled();
+    rerender(<Composer onSend={vi.fn()} onStop={onStop} streaming />);
+    await userEvent.type(screen.getByLabelText("Message"), "{Escape}");
+    expect(onStop).toHaveBeenCalledTimes(1);
+    rerender(<Composer onSend={vi.fn()} onStop={onStop} streaming onKeyIntercept={() => true} />);
+    await userEvent.type(screen.getByLabelText("Message"), "{Escape}");
     expect(onStop).toHaveBeenCalledTimes(1);
   });
 

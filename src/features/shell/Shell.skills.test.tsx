@@ -21,6 +21,7 @@ const ipc = vi.hoisted(() => ({
   signOut: vi.fn(),
   listPacks: vi.fn(),
   chatState: vi.fn(),
+  chatFullness: vi.fn(),
   activateSkill: vi.fn(),
   deactivateSkill: vi.fn(),
   compactChat: vi.fn(),
@@ -58,6 +59,7 @@ beforeEach(() => {
   ipc.chatUsage.mockResolvedValue({ requests: 7, cost_usd: 0.25 });
   ipc.createChat.mockResolvedValue(CHAT);
   ipc.chatState.mockResolvedValue(EMPTY_STATE);
+  ipc.chatFullness.mockResolvedValue({ percent: 0, context_length: 0 });
   ipc.listPacks.mockResolvedValue([
     pack("superpowers", "superpowers", [skill("superpowers:brainstorming"), skill("superpowers:off", { available: false, on: false })]),
   ]);

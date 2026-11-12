@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Composer, { type ComposerControl, type SendIntent } from "../chat/Composer";
 import EmptyChat from "../chat/EmptyChat";
+import ConfirmEdit from "../chat/ConfirmEdit";
 import ErrorNotice from "../chat/ErrorNotice";
+import Fullness from "../chat/Fullness";
+import Queued from "../chat/Queued";
+import { useFullness } from "../chat/useFullness";
 import { toUiError } from "../chat/errors";
 import { useChatCreation } from "../chat/useChatCreation";
 import ModelPicker from "../models/ModelPicker";
@@ -12,7 +16,7 @@ import LowAllowance from "../gauge/LowAllowance";
 import { formatChatUsage } from "../gauge/allowance";
 import { useAllowance } from "../gauge/useAllowance";
 import Thread from "../chat/Thread";
-import { useChat } from "../chat/useChat";
+import { useChat, type ChatStatus } from "../chat/useChat";
 import { resolveSlash } from "../commands/resolveSlash";
 import { commands } from "../commands/registry";
 import { useCommandActions } from "../commands/useCommandActions";
@@ -30,13 +34,26 @@ import {
   listChats,
   renameChat,
   skillFile,
+  rowsAfter,
+  takeUserMessage,
   type AttachmentInput,
   type ChatSummary,
+  type StoredMessage,
 } from "../../lib/ipc";
 import Settings from "../settings/Settings";
 import Sidebar from "./Sidebar";
 import "./shell.css";
 import "../chat/chat.css";
+
+/** A message waiting for the running reply to finish. */
+interface Queue {
+  /** What is sent, after a typed /skill-id was split off. */
+  text: string;
+  /** What the user typed, for the line above the box. */
+  shown: string;
+  attachments: AttachmentInput[];
+  intent?: SendIntent;
+}
 
 interface Props {
   onSignInAgain?: () => void;
@@ -53,6 +70,14 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   const [showSkills, setShowSkills] = useState(false);
   const [pendingFile, setPendingFile] = useState<AttachmentInput | null>(null);
 
+  const [queued, setQueued] = useState<Record<string, Queue>>({});
+  const queuedRef = useRef(queued);
+  queuedRef.current = queued;
+  const [confirmEdit, setConfirmEdit] = useState<{ message: StoredMessage; count: number } | null>(null);
+  const [turn, setTurn] = useState(0);
+  const [draftChars, setDraftChars] = useState(0);
+  const flushRef = useRef<(id: string) => void>(() => {});
+
   const refreshChats = useCallback(() => {
     listChats().then(setChats, () => {});
   }, []);
@@ -64,10 +89,13 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   const activeSkills = useChatState(selectedId, modelId);
   const refreshActive = activeSkills.refresh;
   const onTurnEnd = useCallback(
-    (id: string) => {
+    (id: string, status: ChatStatus) => {
       refreshChats();
       refreshAllowance();
       void refreshActive(id);
+      setTurn((n) => n + 1);
+      // A queued message goes out when the reply is done, not when it failed or was stopped.
+      if (status === "idle") flushRef.current(id);
     },
     [refreshChats, refreshAllowance, refreshActive],
   );
@@ -99,15 +127,31 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
       }
     }
     if (!modelId || creating) return;
+    if (selectedId && chat.status === "streaming") {
+      // A reply is running: hold this one (replacing any earlier) until it is done.
+      setQueued((all) => ({ ...all, [selectedId]: { text, shown: original ?? text, attachments, intent } }));
+      actions.clearAlert();
+      return;
+    }
     // Rejecting keeps the draft in the message box.
     const id = await ensureChat();
+    try {
+      await deliver(id, text, attachments, intent);
+    } catch (e) {
+      // A new chat swaps the message box for a fresh one: put the draft back.
+      if (original !== null) control.current?.setText(original);
+      throw e;
+    }
+  };
+
+  /** Activates the intent's skill in chat `id`, then sends. A refused skill shows its message and throws. */
+  const deliver = async (id: string, text: string, attachments: AttachmentInput[], intent?: SendIntent) => {
+    if (!modelId) return;
     if (intent?.skill) {
       try {
         await activateSkill(id, intent.skill, modelId);
       } catch (e) {
         actions.showAlert(toUiError(e).message);
-        // A new chat swaps the message box for a fresh one: put the draft back.
-        if (original !== null) control.current?.setText(original);
         throw e;
       }
       await refreshActive(id, modelId);
@@ -116,7 +160,44 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     chat.send(text, attachments, modelId, id);
   };
 
+  flushRef.current = (id) => {
+    const q = queuedRef.current[id];
+    if (!q) return;
+    setQueued(({ [id]: _gone, ...rest }) => rest);
+    deliver(id, q.text, q.attachments, q.intent).catch(() => {
+      // Not accepted (the alert is up): keep it queued so nothing typed is lost.
+      setQueued((all) => ({ ...all, [id]: q }));
+    });
+  };
+
+  /** Brings a user message back into the box and removes it, and what followed, from the chat. */
+  const takeForEdit = async (message: StoredMessage) => {
+    if (!selectedId) return;
+    try {
+      const taken = await takeUserMessage(selectedId, message.id);
+      const lead = activeSkills.skills.find((s) => taken.text.startsWith(`/${s.id} `));
+      const text = lead ? taken.text.slice(lead.id.length + 2) : taken.text;
+      await chat.reload();
+      setTurn((n) => n + 1);
+      control.current?.setText(text);
+      taken.attachments.forEach((a) => control.current?.addAttachment(a));
+    } catch (e) {
+      actions.showAlert(toUiError(e).message);
+    }
+  };
+  const editMessage = async (message: StoredMessage) => {
+    if (!selectedId || chat.status === "streaming") return;
+    const latest = chat.messages.filter((m) => m.kind === "message" && m.role === "user").pop();
+    if (latest?.id === message.id) return takeForEdit(message);
+    try {
+      setConfirmEdit({ message, count: await rowsAfter(selectedId, message.id) });
+    } catch (e) {
+      actions.showAlert(toUiError(e).message);
+    }
+  };
+
   const select = (id: string | null) => {
+    setConfirmEdit(null);
     setShowSettings(false);
     setShowSkills(false);
     if (models) {
@@ -167,6 +248,14 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     control,
   });
   const menus = useComposerMenus(slash, mention);
+  const fullness = useFullness(
+    selectedId,
+    modelId,
+    activeSkills.skills.map((s) => s.id).join(","),
+    turn,
+    draftChars,
+  );
+  const queuedHere = selectedId ? queued[selectedId] : undefined;
 
   // A file picked on the Skills screen lands in the message box once it is back.
   useEffect(() => {
@@ -198,12 +287,21 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     {blocked && models && <LowAllowance models={models} onPick={chooseFromPicker} />}
     {actions.panels}
     <ActiveSkills skills={activeSkills.skills} onRemove={activeSkills.remove} />
+    {queuedHere && selectedId && (
+      <Queued
+        text={queuedHere.shown}
+        onRemove={() => setQueued(({ [selectedId]: _gone, ...rest }) => rest)}
+      />
+    )}
     <Composer
       controlRef={control}
       menu={menus.menu}
       fieldAria={menus.fieldAria}
       onKeyIntercept={menus.onKeyIntercept}
-      onTextChange={menus.onTextChange}
+      onTextChange={(t, c) => {
+        setDraftChars(t.length);
+        menus.onTextChange(t, c);
+      }}
       onSend={handleSend}
       onStop={chat.stop}
       streaming={chat.status === "streaming"}
@@ -284,6 +382,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
         <section className="main">
           <header className="head">
             <span className="ttl">{selected?.title ?? "New chat"}</span>
+            {selectedId && fullness !== null && <Fullness percent={fullness} />}
             <div className="usage" data-slot="usage">
               {selectedId && allowance.usage && (
                 <>
@@ -315,12 +414,24 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
                 status={chat.status}
                 error={chat.error}
                 notSent={chat.unsent !== null}
+                onEdit={(m) => void editMessage(m)}
                 onRetry={() => chat.retry(modelId)}
                 onSignInAgain={() => onSignInAgain?.()}
                 onPickModel={pickModel}
               />
               {composer}
             </>
+          )}
+          {confirmEdit && (
+            <ConfirmEdit
+              count={confirmEdit.count}
+              onCancel={() => setConfirmEdit(null)}
+              onConfirm={() => {
+                const { message } = confirmEdit;
+                setConfirmEdit(null);
+                void takeForEdit(message);
+              }}
+            />
           )}
         </section>
       )}

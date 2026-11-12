@@ -159,3 +159,24 @@ describe("Thread notes", () => {
     expect(container.querySelectorAll(".reply")).toHaveLength(2); // hello + the empty live region
   });
 });
+
+describe("Thread edit pencil", () => {
+  const user = (id: string, text: string, kind: "message" | "note" = "message"): StoredMessage => ({
+    id, role: "user", text, attachments: [], interrupted: false, created_at: 1, kind, seq: 1,
+  });
+  const msgs = [user("u1", "first"), asst("a1"), user("u2", "second"), user("n1", "a note", "note")];
+
+  it("is on every user message, not on replies or notes, and calls onEdit with the message", async () => {
+    const onEdit = vi.fn();
+    render(<Thread {...base} messages={msgs} onEdit={onEdit} />);
+    const pencils = screen.getAllByRole("button", { name: "Edit message" });
+    expect(pencils).toHaveLength(2);
+    await userEvent.click(pencils[0]);
+    expect(onEdit).toHaveBeenCalledWith(msgs[0]);
+  });
+
+  it("is hidden while a reply is running", () => {
+    render(<Thread {...base} messages={msgs} onEdit={vi.fn()} status="streaming" />);
+    expect(screen.queryByRole("button", { name: "Edit message" })).toBeNull();
+  });
+});

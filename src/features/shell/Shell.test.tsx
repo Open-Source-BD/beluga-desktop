@@ -21,6 +21,7 @@ const ipc = vi.hoisted(() => ({
   signOut: vi.fn(),
   listPacks: vi.fn(),
   chatState: vi.fn(),
+  chatFullness: vi.fn(),
   activateSkill: vi.fn(),
   deactivateSkill: vi.fn(),
   compactChat: vi.fn(),
@@ -53,6 +54,7 @@ beforeEach(() => {
   ipc.authStatus.mockResolvedValue({ signed_in: true, storage: "keychain" });
   ipc.listPacks.mockResolvedValue([]);
   ipc.chatState.mockResolvedValue({ active_skills: [], folder: null, compacted: false });
+  ipc.chatFullness.mockResolvedValue({ percent: 0, context_length: 0 });
   ipc.sendMessage.mockImplementation((_c, _t, _a, _m, onEvent) => {
     emit = onEvent;
     return new Promise<TurnResult>((resolve) => {

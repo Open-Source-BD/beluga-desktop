@@ -15,6 +15,7 @@ const ipc = vi.hoisted(() => ({
   chatUsage: vi.fn(),
   listPacks: vi.fn(),
   chatState: vi.fn(),
+  chatFullness: vi.fn(),
   chooseChatFolder: vi.fn(),
   approvedFolders: vi.fn(),
   setChatFolder: vi.fn(),
@@ -40,6 +41,7 @@ beforeEach(() => {
   ipc.createChat.mockResolvedValue(CHAT);
   ipc.listPacks.mockResolvedValue([]);
   ipc.chatState.mockResolvedValue(state(null));
+  ipc.chatFullness.mockResolvedValue({ percent: 0, context_length: 0 });
   ipc.approvedFolders.mockResolvedValue([]);
   ipc.sendMessage.mockReturnValue(new Promise(() => {}));
   ipc.folderFiles.mockResolvedValue({ entries: [{ path: "a.ts", is_dir: false, bytes: 3 }], total: 1, cut: false });

@@ -261,3 +261,77 @@
   bottom: calc(100% + 8px);
   z-index: 15;
 }
+
+.me {
+  position: relative;
+}
+.me-edit {
+  position: absolute;
+  top: 6px;
+  left: -30px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--mid);
+  opacity: 0;
+}
+.me:hover .me-edit,
+.me:focus-within .me-edit,
+.me-edit:focus-visible {
+  opacity: 1;
+}
+.me-edit:hover {
+  color: var(--deep);
+  background: var(--floe);
+}
+.me-edit:focus-visible {
+  outline: 2px solid var(--sonar);
+  outline-offset: 1px;
+}
+
+.queued {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--floe);
+  color: var(--text2);
+  font-size: 13px;
+}
+.queued-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.queued-remove {
+  flex: none;
+  margin-left: auto;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--mid);
+}
+.queued-remove:hover {
+  color: var(--deep);
+}
+.queued-remove:focus-visible {
+  outline: 2px solid var(--sonar);
+  outline-offset: 1px;
+}
+
+.fullness {
+  color: var(--mid);
+  font-size: 13px;
+}
+.fullness.high {
+  color: var(--ask-ink);
+}
+.fullness-hint {
+  margin-left: 8px;
+}

@@ -57,7 +57,7 @@ interface Props {
   /** Extra attributes for the text field (combobox wiring for a menu). */
   fieldAria?: TextareaHTMLAttributes<HTMLTextAreaElement>;
   onStop?: () => void;
-  /** A reply is streaming in this chat: sending is blocked and the button becomes Stop. */
+  /** A reply is running: the button becomes Stop and Esc stops it. Sending still works (the caller queues). */
   streaming?: boolean;
   disabled?: boolean;
   /** No model chosen: the box is disabled and shows "Pick a model to start." */
@@ -96,7 +96,7 @@ export default function Composer({
   const hasImage = files.some((f) => f.mime.startsWith("image/"));
   const imageBlocked = hasImage && !acceptsImages;
   const canSendText = (t: string) =>
-    !locked && !streaming && !sending && !imageBlocked && (t.trim() !== "" || files.length > 0);
+    !locked && !sending && !imageBlocked && (t.trim() !== "" || files.length > 0);
   const canSend = canSendText(text);
   const caretAt = useRef<number | null>(null);
   const lastCaret = useRef(0);
@@ -192,6 +192,11 @@ export default function Composer({
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (!e.nativeEvent.isComposing && onKeyIntercept?.(e)) {
       e.preventDefault();
+      return;
+    }
+    if (e.key === "Escape" && streaming && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      onStop?.();
       return;
     }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
