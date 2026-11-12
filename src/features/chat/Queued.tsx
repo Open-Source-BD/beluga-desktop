@@ -3,12 +3,15 @@ const SHOWN = 80;
 interface Props {
   text: string;
   onRemove: () => void;
+  /** Why it could not be sent, shown with it. */
+  error?: string;
 }
 
 /** The message waiting for the running reply to finish. */
-export default function Queued({ text, onRemove }: Props) {
+export default function Queued({ text, onRemove, error }: Props) {
   return (
     <div className="queued">
+      {error && <p className="queued-error" role="alert">{error}</p>}
       <span className="queued-text">{`Queued: ${text.slice(0, SHOWN)}`}</span>
       <button type="button" className="queued-remove" aria-label="Remove queued message" onClick={onRemove}>
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true" focusable="false">

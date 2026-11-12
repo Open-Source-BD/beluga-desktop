@@ -42,13 +42,16 @@ export interface CompactOutcome {
 }
 
 export interface UseChat extends ChatState {
-  /** Sends to `targetChatId` (default: the selected chat). Ignored while that chat is streaming. */
+  /**
+   * Sends to `targetChatId` (default: the selected chat). Ignored while that chat is
+   * streaming; the result says whether it was accepted.
+   */
   send(
     text: string,
     attachments: AttachmentInput[],
     modelId: string,
     targetChatId?: string,
-  ): void;
+  ): boolean;
   stop(): void;
   /** Loads the stored messages again (after the core removed some) and clears a stale failure. */
   reload(): Promise<void>;
@@ -126,8 +129,8 @@ export function useChat(
       modelId: string,
       pending: { text: string; attachments: AttachmentInput[] } | null,
       run: (onEvent: (e: EngineEvent) => void) => Promise<TurnResult>,
-    ) => {
-      if (streaming.current.has(id)) return;
+    ): boolean => {
+      if (streaming.current.has(id)) return false;
       streaming.current.add(id);
       lastModel.current[id] = modelId;
       patch(id, () => ({
@@ -173,6 +176,7 @@ export function useChat(
         },
         (e: unknown) => settle("failed", toUiError(e), true),
       );
+      return true;
     },
     [patch, reload],
   );
@@ -180,8 +184,8 @@ export function useChat(
   const send = useCallback<UseChat["send"]>(
     (text, attachments, modelId, targetChatId) => {
       const id = targetChatId ?? chatId;
-      if (!id) return;
-      start(id, modelId, { text, attachments }, (onEvent) =>
+      if (!id) return false;
+      return start(id, modelId, { text, attachments }, (onEvent) =>
         sendMessage(id, text, attachments, modelId, onEvent),
       );
     },

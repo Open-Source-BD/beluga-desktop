@@ -293,6 +293,7 @@
 
 .queued {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin: 0 0 6px;
@@ -334,4 +335,9 @@
 }
 .fullness-hint {
   margin-left: 8px;
+}
+.queued-error {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--ask-ink);
 }

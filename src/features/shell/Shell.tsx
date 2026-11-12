@@ -53,6 +53,10 @@ interface Queue {
   shown: string;
   attachments: AttachmentInput[];
   intent?: SendIntent;
+  /** The model of the chat it was queued in. */
+  modelId: string;
+  /** Why the last attempt to send it failed. */
+  error?: string;
 }
 
 interface Props {
@@ -76,6 +80,8 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
   const [confirmEdit, setConfirmEdit] = useState<{ message: StoredMessage; count: number } | null>(null);
   const [turn, setTurn] = useState(0);
   const [draftChars, setDraftChars] = useState(0);
+  const flushing = useRef(new Set<string>());
+  const deleted = useRef(new Set<string>());
   const flushRef = useRef<(id: string) => void>(() => {});
 
   const refreshChats = useCallback(() => {
@@ -129,14 +135,18 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     if (!modelId || creating) return;
     if (selectedId && chat.status === "streaming") {
       // A reply is running: hold this one (replacing any earlier) until it is done.
-      setQueued((all) => ({ ...all, [selectedId]: { text, shown: original ?? text, attachments, intent } }));
+      setQueued((all) => ({
+        ...all,
+        [selectedId]: { text, shown: original ?? text, attachments, intent, modelId },
+      }));
       actions.clearAlert();
       return;
     }
     // Rejecting keeps the draft in the message box.
     const id = await ensureChat();
     try {
-      await deliver(id, text, attachments, intent);
+      await deliver(id, modelId, text, attachments, intent, actions.showAlert);
+      actions.clearAlert();
     } catch (e) {
       // A new chat swaps the message box for a fresh one: put the draft back.
       if (original !== null) control.current?.setText(original);
@@ -144,30 +154,49 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     }
   };
 
-  /** Activates the intent's skill in chat `id`, then sends. A refused skill shows its message and throws. */
-  const deliver = async (id: string, text: string, attachments: AttachmentInput[], intent?: SendIntent) => {
-    if (!modelId) return;
+  /**
+   * Activates the intent's skill in chat `id`, then sends on `model`. A refused skill
+   * throws (and shows its message through `onError`); true when the send was accepted.
+   */
+  const deliver = async (
+    id: string,
+    model: string,
+    text: string,
+    attachments: AttachmentInput[],
+    intent: SendIntent | undefined,
+    onError: (message: string) => void,
+  ): Promise<boolean> => {
     if (intent?.skill) {
       try {
-        await activateSkill(id, intent.skill, modelId);
+        await activateSkill(id, intent.skill, model);
       } catch (e) {
-        actions.showAlert(toUiError(e).message);
+        onError(toUiError(e).message);
         throw e;
       }
-      await refreshActive(id, modelId);
+      await refreshActive(id, model);
     }
-    actions.clearAlert();
-    chat.send(text, attachments, modelId, id);
+    return chat.send(text, attachments, model, id);
   };
 
   flushRef.current = (id) => {
     const q = queuedRef.current[id];
-    if (!q) return;
-    setQueued(({ [id]: _gone, ...rest }) => rest);
-    deliver(id, q.text, q.attachments, q.intent).catch(() => {
-      // Not accepted (the alert is up): keep it queued so nothing typed is lost.
-      setQueued((all) => ({ ...all, [id]: q }));
-    });
+    if (!q || flushing.current.has(id)) return;
+    if (deleted.current.has(id)) {
+      setQueued(({ [id]: _gone, ...rest }) => rest);
+      return;
+    }
+    flushing.current.add(id);
+    // It stays queued until the send is accepted: a failure or a busy chat keeps it shown.
+    deliver(id, q.modelId, q.text, q.attachments, q.intent, (error) =>
+      setQueued((all) => (all[id] ? { ...all, [id]: { ...all[id], error } } : all)),
+    )
+      .then(
+        (accepted) => {
+          if (accepted) setQueued(({ [id]: _gone, ...rest }) => rest);
+        },
+        () => {},
+      )
+      .finally(() => flushing.current.delete(id));
   };
 
   /** Brings a user message back into the box and removes it, and what followed, from the chat. */
@@ -290,6 +319,7 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
     {queuedHere && selectedId && (
       <Queued
         text={queuedHere.shown}
+        error={queuedHere.error}
         onRemove={() => setQueued(({ [selectedId]: _gone, ...rest }) => rest)}
       />
     )}
@@ -336,6 +366,8 @@ export default function Shell({ onSignInAgain, onOpenSkills }: Props) {
         onRename={(id, title) => renameChat(id, title).then(refreshChats, () => {})}
         onDelete={(id) =>
           deleteChat(id).then(() => {
+            deleted.current.add(id);
+            setQueued(({ [id]: _gone, ...rest }) => rest);
             if (id === selectedId) select(null);
             refreshChats();
           }, () => {})

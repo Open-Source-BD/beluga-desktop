@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PackView, SkillView, StoredMessage, TurnResult } from "../../lib/ipc";
@@ -270,5 +270,78 @@ describe("Shell fullness", () => {
     await openChat();
     await waitFor(() => expect(ipc.chatFullness).toHaveBeenCalled());
     expect(screen.queryByText(/Chat is/)).toBeNull();
+  });
+});
+
+describe("Shell queued message safety", () => {
+  const OTHER = model({ id: "test/other", name: "Other One" });
+  const CHAT_B = { id: "c2", title: "Other chat", model_id: "test/other", updated_at: 0 };
+
+  it("a message queued in a chat you left is sent with that chat's model, to that chat", async () => {
+    ipc.listModels.mockResolvedValue([PAID, OTHER]);
+    ipc.listChats.mockResolvedValue([CHAT, CHAT_B]);
+    render(<Shell />);
+    await openChat();
+    const settle = await startReply();
+    await userEvent.type(await box(), "/pk:skill look{Enter}");
+    await userEvent.click(await screen.findByText("Other chat"));
+    ipc.sendMessage.mockReturnValueOnce(new Promise(() => {}));
+    settle(done);
+    await waitFor(() => expect(ipc.sendMessage).toHaveBeenCalledTimes(2));
+    expect(ipc.activateSkill).toHaveBeenCalledWith("c1", "pk:skill", "test/model");
+    expect(ipc.sendMessage.mock.calls[1].slice(0, 2)).toEqual(["c1", "look"]);
+    expect(ipc.sendMessage.mock.calls[1][3]).toBe("test/model");
+  });
+
+  it("a refused skill keeps the message queued and shows the reason with it", async () => {
+    ipc.activateSkill.mockRejectedValue({ kind: "other", message: "That skill is off.", retryable: false });
+    render(<Shell />);
+    await openChat();
+    const settle = await startReply();
+    await userEvent.type(await box(), "/pk:skill look{Enter}");
+    settle(done);
+    expect(await screen.findByText("That skill is off.")).toBeInTheDocument();
+    expect(screen.getByText("Queued: /pk:skill look")).toBeInTheDocument();
+    expect(ipc.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("a fresh send during the activation window does not lose or double the queued one", async () => {
+    render(<Shell />);
+    await openChat();
+    const settle = await startReply();
+    await userEvent.type(await box(), "/pk:skill look{Enter}");
+    let release!: () => void;
+    ipc.activateSkill.mockReturnValueOnce(new Promise<void>((r) => { release = r; }));
+    let settleFresh!: (r: TurnResult) => void;
+    ipc.sendMessage.mockReturnValueOnce(new Promise<TurnResult>((r) => { settleFresh = r; }));
+    settle(done);
+    await waitFor(() => expect(ipc.activateSkill).toHaveBeenCalledTimes(1));
+    await userEvent.type(await box(), "fresh{Enter}");
+    await waitFor(() => expect(ipc.sendMessage).toHaveBeenCalledTimes(2));
+    release();
+    await waitFor(() => expect(ipc.activateSkill).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("Queued: /pk:skill look")).toBeInTheDocument();
+    expect(ipc.sendMessage).toHaveBeenCalledTimes(2);
+    ipc.sendMessage.mockReturnValueOnce(new Promise(() => {}));
+    settleFresh(done);
+    await waitFor(() => expect(ipc.sendMessage).toHaveBeenCalledTimes(3));
+    expect(ipc.sendMessage.mock.calls[2][1]).toBe("look");
+  });
+
+  it("deleting a chat drops its queued message; nothing is sent when its reply settles", async () => {
+    ipc.deleteChat.mockResolvedValue(undefined);
+    render(<Shell />);
+    await openChat();
+    const settle = await startReply();
+    await userEvent.type(await box(), "orphan{Enter}");
+    act(() => screen.getByRole("button", { name: "Login page" }).focus());
+    await userEvent.click(await screen.findByRole("button", { name: "Delete Login page" }));
+    ipc.listChats.mockResolvedValue([]);
+    await userEvent.click(await screen.findByRole("button", { name: "Delete chat" }));
+    await waitFor(() => expect(ipc.deleteChat).toHaveBeenCalledWith("c1"));
+    settle(done);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(ipc.sendMessage).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
