@@ -101,6 +101,7 @@ describe("useChat", () => {
 
   it("failed sets the error and keeps the user's message", async () => {
     const { result } = renderHook(() => useChat("a"));
+    await act(async () => {}); // the chat's rows are read before a run starts
     act(() => result.current.send("hi", [], "m1"));
     ipc.getMessages.mockResolvedValue([msg("1", "user", "hi")]);
     await act(async () => finish(failed(OFFLINE)));
@@ -119,6 +120,7 @@ describe("useChat", () => {
 
   it("interrupted keeps the partial reply; retry resends the last user message", async () => {
     const { result } = renderHook(() => useChat("a"));
+    await act(async () => {}); // the chat's rows are read before a run starts
     act(() => result.current.send("hi", [], "m1"));
     ipc.getMessages.mockResolvedValue([msg("1", "user", "hi"), msg("2", "assistant", "Hel", true)]);
     await act(async () => finish(interrupted("stopped")));
@@ -132,6 +134,7 @@ describe("useChat", () => {
 
   it("after a failed event (message stored) retry uses retryTurn, never sendMessage", async () => {
     const { result } = renderHook(() => useChat("a"));
+    await act(async () => {}); // the chat's rows are read before a run starts
     act(() => result.current.send("hi", [], "m1"));
     ipc.getMessages.mockResolvedValue([msg("1", "user", "hi")]);
     await act(async () => finish(failed(OFFLINE)));
@@ -169,6 +172,7 @@ describe("useChat", () => {
 
   it("a promise resolving with status failed and no terminal event shows the error", async () => {
     const { result } = renderHook(() => useChat("a"));
+    await act(async () => {}); // the chat's rows are read before a run starts
     act(() => result.current.send("hi", [], "m1"));
     act(() => emit({ type: "text_delta", text: "He" }));
     ipc.getMessages.mockResolvedValue([msg("1", "user", "hi")]);
@@ -197,8 +201,9 @@ describe("useChat", () => {
     expect(result.current.messages[1]).toMatchObject({ text: "Hel", interrupted: true });
   });
 
-  it("does not start a second send while the chat is streaming", () => {
+  it("does not start a second send while the chat is streaming", async () => {
     const { result } = renderHook(() => useChat("a"));
+    await act(async () => {}); // the chat's rows are read before a run starts
     act(() => result.current.send("one", [], "m1"));
     act(() => result.current.send("two", [], "m1"));
     expect(ipc.sendMessage).toHaveBeenCalledTimes(1);

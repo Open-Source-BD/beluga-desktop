@@ -79,10 +79,8 @@ export interface StoredTrail {
 export function pairStored(messages: StoredMessage[], run: Run | null = null): StoredTrail {
   const rows = new Map<string, Slot[]>();
   let lastUser = -1;
-  let lastAssistantId: string | null = null;
   messages.forEach((m, i) => {
     if (m.kind === "message" && m.role === "user") lastUser = i;
-    if (m.kind === "message" && m.role === "assistant") lastAssistantId = m.id;
   });
   // The task is the rows of the run (a user row can arrive in the middle of it); without a
   // known run, the replies after the latest user message.
@@ -91,6 +89,11 @@ export function pairStored(messages: StoredMessage[], run: Run | null = null): S
     runStart = messages.findIndex((m) => !run.base.has(m.id));
     if (runStart < 0) runStart = messages.length;
   }
+  // Only a reply of this run can be waiting to run; an unanswered call of an earlier run was not run.
+  let lastAssistantId: string | null = null;
+  messages.forEach((m, i) => {
+    if (i >= runStart && m.kind === "message" && m.role === "assistant") lastAssistantId = m.id;
+  });
   const taskKey = run ? run.key : lastUser >= 0 ? messages[lastUser].id : "start";
   const task: Slot[] = [];
   messages.forEach((m, i) => {

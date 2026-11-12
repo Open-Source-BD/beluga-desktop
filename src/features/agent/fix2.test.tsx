@@ -62,3 +62,24 @@ describe("announcements", () => {
     expect(second).toHaveTextContent("Ran z");
   });
 });
+
+describe("calls of an earlier run", () => {
+  it("an unanswered call from before this run shows not run, never Waiting to run", () => {
+    const run = { base: new Set(["u", "a1"]), key: "r2" };
+    const msgs = [
+      row({ id: "u", role: "user", text: "q" }),
+      row({ id: "a1", tool_calls: [call("c1")] }),
+      row({ id: "u2", role: "user", text: "again" }),
+    ];
+    render(<Thread {...props} run={run} messages={msgs} live={[]} />);
+    expect(screen.queryByText("Waiting to run")).toBeNull();
+    expect(screen.getByText("not run")).toBeInTheDocument();
+  });
+
+  it("the current run's last reply still waits", () => {
+    const run = { base: new Set(["u"]), key: "r1" };
+    const msgs = [row({ id: "u", role: "user", text: "q" }), row({ id: "a1", tool_calls: [call("c1")] })];
+    render(<Thread {...props} run={run} messages={msgs} live={[]} />);
+    expect(screen.getByText("Waiting to run")).toBeInTheDocument();
+  });
+});

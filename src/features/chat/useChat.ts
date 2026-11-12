@@ -170,6 +170,8 @@ export function useChat(
   const lastModel = useRef<Record<string, string>>({});
   const turnSeq = useRef<Record<string, number>>({});
   const deleted = useRef(new Set<string>());
+  /** Chats whose stored rows have been read at least once. */
+  const loadedRows = useRef(new Set<string>());
   const onTurnEndRef = useRef(onTurnEnd);
   onTurnEndRef.current = onTurnEnd;
   const current = (chatId && states[chatId]) || EMPTY;
@@ -204,6 +206,7 @@ export function useChat(
     let live = true;
     reload(chatId).then((messages) => {
       if (!live || !messages || streaming.current.has(chatId)) return;
+      loadedRows.current.add(chatId);
       patch(chatId, () => ({ messages, status: "idle", error: null }));
     });
     return () => {
@@ -224,8 +227,11 @@ export function useChat(
       lastModel.current[id] = modelId;
       const turn = (turnSeq.current[id] ?? 0) + 1;
       turnSeq.current[id] = turn;
+      // The run's base is the rows stored before it: when they were never read (a send before the
+      // chat loaded, or after a failed load) read them now, before anything is sent.
+      const known = loadedRows.current.has(id);
       patch(id, (s) => ({
-        runBase: new Set(s.messages.map((m) => m.id)),
+        runBase: known ? new Set(s.messages.map((m) => m.id)) : null,
         runKey: `r${turn}`,
         streamingText: "",
         pendingUser: pending?.text ?? null,
@@ -239,132 +245,145 @@ export function useChat(
         taskUsage: null,
         usageBase: null,
       }));
-      // The task's usage events carry its own totals: remember the chat's as they stand now.
-      try {
-        chatUsage(id).then(
-          (u) => {
-            if (u && turnSeq.current[id] === turn) patch(id, () => ({ usageBase: u }));
-          },
-          () => {},
-        );
-      } catch {
-        // No base: the header keeps showing the stored totals.
-      }
-
-      // The command's promise is the only end-of-turn signal: it settles after
-      // the core has stored the reply. Channel events only carry reply text.
-      let settled = false;
-      const settle = async (
-        status: ChatStatus,
-        error: UiError | null,
-        notSent = false,
-        pausedReason: string | null = null,
-      ) => {
-        settled = true;
-        const messages = await reload(id);
-        streaming.current.delete(id);
-        patch(id, (s) => ({
-          messages: messages ?? s.messages,
-          streamingText: "",
-          pausedReason,
-          waiting: null,
-          // The stored rows now hold every call; if they could not be read, keep the live lines.
-          live: messages ? [] : s.live,
-          taskTick: s.taskTick + 1,
-          // A rejected send stored nothing: keep the text so it can be retried.
-          pendingUser: notSent || !messages ? s.pendingUser : null,
-          unsent: notSent && pending ? { attachments: pending.attachments } : null,
-          status,
-          error,
-        }));
-        if (!deleted.current.has(id)) onTurnEndRef.current?.(id, status);
-      };
-      const onEvent = (event: EngineEvent) => {
-        if (settled) return;
-        switch (event.type) {
-          case "text_delta":
-            patch(id, (s) => ({ streamingText: s.streamingText + event.text, waiting: null }));
-            break;
-          case "usage":
-            patch(id, () => ({
-              taskUsage: { requests: event.requests, cost_usd: event.cost_usd },
-              waiting: null,
-            }));
-            break;
-          case "tool_started":
-            patch(id, (s) => ({
-              waiting: null,
-              live: [
-                ...s.live,
-                {
-                  callId: event.call_id,
-                  name: event.name,
-                  summary: event.summary,
-                  status: "running",
-                  liveId: ++liveSeq,
-                },
-              ],
-            }));
-            break;
-          case "tool_output":
-            patch(id, (s) => {
-              const at = lastIndexOf(s.live, event.call_id);
-              return {
-                live: s.live.map((e, i) =>
-                  i === at ? { ...e, output: ((e.output ?? "") + event.text).slice(-OUTPUT_KEEP) } : e,
-                ),
-              };
-            });
-            break;
-          case "tool_finished":
-            patch(id, (s) => {
-              const done = {
-                status: event.status,
-                summary: event.summary,
-                detail: event.detail,
-              } as const;
-              const at = lastIndexOf(s.live, event.call_id);
-              return {
-                live:
-                  at >= 0
-                    ? s.live.map((e, i) =>
-                        // The detail replaces what streamed in.
-                        i === at ? { ...e, ...done, output: undefined } : e,
-                      )
-                    : [...s.live, { callId: event.call_id, name: "", liveId: ++liveSeq, ...done }],
-              };
-            });
-            break;
-          case "plan_updated":
-            patch(id, (s) => ({ plan: event.items, taskTick: s.taskTick + 1 }));
-            break;
-          case "background_changed":
-          case "approval_cleared":
-            patch(id, (s) => ({ taskTick: s.taskTick + 1 }));
-            break;
-          case "waiting":
-            patch(id, () => ({ waiting: event.seconds }));
-            break;
-          case "message_stored":
-            patch(id, (s) => ({ storedCount: s.storedCount + 1 }));
-            void reload(id).then((messages) => {
-              if (messages && !settled) patch(id, (s) => withStoredRows(s, messages));
-            });
-            break;
-          default:
-            break;
+      const go = () => {
+        // The task's usage events carry its own totals: remember the chat's as they stand now.
+        try {
+          chatUsage(id).then(
+            (u) => {
+              if (u && turnSeq.current[id] === turn) patch(id, () => ({ usageBase: u }));
+            },
+            () => {},
+          );
+        } catch {
+          // No base: the header keeps showing the stored totals.
         }
-      };
-      run(onEvent).then(
-        (r) => {
-          if (r.status === "failed") {
-            return settle("failed", r.error ?? toUiError(null));
+
+        // The command's promise is the only end-of-turn signal: it settles after
+        // the core has stored the reply. Channel events only carry reply text.
+        let settled = false;
+        const settle = async (
+          status: ChatStatus,
+          error: UiError | null,
+          notSent = false,
+          pausedReason: string | null = null,
+        ) => {
+          settled = true;
+          const messages = await reload(id);
+          streaming.current.delete(id);
+          patch(id, (s) => ({
+            messages: messages ?? s.messages,
+            streamingText: "",
+            pausedReason,
+            waiting: null,
+            // The stored rows now hold every call; if they could not be read, keep the live lines.
+            live: messages ? [] : s.live,
+            taskTick: s.taskTick + 1,
+            // A rejected send stored nothing: keep the text so it can be retried.
+            pendingUser: notSent || !messages ? s.pendingUser : null,
+            unsent: notSent && pending ? { attachments: pending.attachments } : null,
+            status,
+            error,
+          }));
+          if (!deleted.current.has(id)) onTurnEndRef.current?.(id, status);
+        };
+        const onEvent = (event: EngineEvent) => {
+          if (settled) return;
+          switch (event.type) {
+            case "text_delta":
+              patch(id, (s) => ({ streamingText: s.streamingText + event.text, waiting: null }));
+              break;
+            case "usage":
+              patch(id, () => ({
+                taskUsage: { requests: event.requests, cost_usd: event.cost_usd },
+                waiting: null,
+              }));
+              break;
+            case "tool_started":
+              patch(id, (s) => ({
+                waiting: null,
+                live: [
+                  ...s.live,
+                  {
+                    callId: event.call_id,
+                    name: event.name,
+                    summary: event.summary,
+                    status: "running",
+                    liveId: ++liveSeq,
+                  },
+                ],
+              }));
+              break;
+            case "tool_output":
+              patch(id, (s) => {
+                const at = lastIndexOf(s.live, event.call_id);
+                return {
+                  live: s.live.map((e, i) =>
+                    i === at ? { ...e, output: ((e.output ?? "") + event.text).slice(-OUTPUT_KEEP) } : e,
+                  ),
+                };
+              });
+              break;
+            case "tool_finished":
+              patch(id, (s) => {
+                const done = {
+                  status: event.status,
+                  summary: event.summary,
+                  detail: event.detail,
+                } as const;
+                const at = lastIndexOf(s.live, event.call_id);
+                return {
+                  live:
+                    at >= 0
+                      ? s.live.map((e, i) =>
+                          // The detail replaces what streamed in.
+                          i === at ? { ...e, ...done, output: undefined } : e,
+                        )
+                      : [...s.live, { callId: event.call_id, name: "", liveId: ++liveSeq, ...done }],
+                };
+              });
+              break;
+            case "plan_updated":
+              patch(id, (s) => ({ plan: event.items, taskTick: s.taskTick + 1 }));
+              break;
+            case "background_changed":
+            case "approval_cleared":
+              patch(id, (s) => ({ taskTick: s.taskTick + 1 }));
+              break;
+            case "waiting":
+              patch(id, () => ({ waiting: event.seconds }));
+              break;
+            case "message_stored":
+              patch(id, (s) => ({ storedCount: s.storedCount + 1 }));
+              void reload(id).then((messages) => {
+                if (messages && !settled) patch(id, (s) => withStoredRows(s, messages));
+              });
+              break;
+            default:
+              break;
           }
-          if (r.status === "paused") return settle("paused", null, false, r.reason);
-          return settle(r.status === "interrupted" ? "interrupted" : "idle", null);
-        },
-        (e: unknown) => settle("failed", toUiError(e), true),
-      );
+        };
+        run(onEvent).then(
+          (r) => {
+            if (r.status === "failed") {
+              return settle("failed", r.error ?? toUiError(null));
+            }
+            if (r.status === "paused") return settle("paused", null, false, r.reason);
+            return settle(r.status === "interrupted" ? "interrupted" : "idle", null);
+          },
+          (e: unknown) => settle("failed", toUiError(e), true),
+        );
+      };
+      if (known) go();
+      else {
+        void reload(id).then((rows) => {
+          if (deleted.current.has(id)) return;
+          if (rows) {
+            loadedRows.current.add(id);
+            patch(id, () => ({ messages: rows, runBase: new Set(rows.map((m) => m.id)) }));
+          }
+          go();
+        });
+      }
       return true;
     },
     [patch, reload],
@@ -391,6 +410,7 @@ export function useChat(
     deleted.current.add(id);
     streaming.current.delete(id);
     delete loadSeq.current[id];
+    loadedRows.current.delete(id);
     delete lastModel.current[id];
     delete turnSeq.current[id];
     setStates(({ [id]: _gone, ...rest }) => rest);
@@ -399,6 +419,7 @@ export function useChat(
   const reloadSelected = useCallback(async () => {
     if (!chatId || streaming.current.has(chatId)) return;
     const messages = await reload(chatId);
+    if (messages) loadedRows.current.add(chatId);
     if (messages) patch(chatId, () => ({ messages, status: "idle", error: null, unsent: null, pendingUser: null }));
   }, [chatId, reload, patch]);
 

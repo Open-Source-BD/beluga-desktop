@@ -133,3 +133,29 @@ describe("round 2", () => {
     expect(h.result.current.streamingText).toBe("");
   });
 });
+
+describe("a send before the rows are loaded", () => {
+  const OLD = [row({ id: "u0", role: "user", text: "old" }), row({ id: "a0", tool_calls: [call("call_0")] })];
+
+  it("loads the rows first and builds the run's base from them", async () => {
+    let n = 0;
+    ipc.getMessages.mockImplementation(() => (++n === 1 ? new Promise(() => {}) : Promise.resolve(OLD)));
+    const h = renderHook(({ chat }) => useChat(chat), { initialProps: { chat: "a" } });
+    await waitFor(() => expect(ipc.getMessages).toHaveBeenCalledTimes(1));
+    act(() => { h.result.current.send("go", [], "m1"); });
+    await waitFor(() => expect(ipc.sendMessage).toHaveBeenCalled());
+    expect(h.result.current.run?.base.has("a0")).toBe(true);
+    expect(h.result.current.run?.base.has("u0")).toBe(true);
+  });
+
+  it("still sends when the rows cannot be loaded; the run is then the rows after the latest user row", async () => {
+    let n = 0;
+    ipc.getMessages.mockImplementation(() => (++n === 1 ? new Promise(() => {}) : Promise.reject(new Error("no"))));
+    const h = renderHook(({ chat }) => useChat(chat), { initialProps: { chat: "a" } });
+    await waitFor(() => expect(ipc.getMessages).toHaveBeenCalledTimes(1));
+    act(() => { h.result.current.send("go", [], "m1"); });
+    await waitFor(() => expect(ipc.sendMessage).toHaveBeenCalled());
+    expect(h.result.current.status).toBe("streaming");
+    expect(h.result.current.run).toBeNull();
+  });
+});
