@@ -5,6 +5,7 @@
 use super::chat_state::require_chat;
 use super::chats::local;
 use super::turn::{AttachmentInput, MAX_IMAGE_BYTES, MAX_TEXT_BYTES, not_attachable, too_large};
+use crate::agent::paths::{GIT_ROOT, in_git_folder};
 use crate::engine::UiError;
 use crate::folder::{self, FileList};
 use crate::state::AppState;
@@ -23,12 +24,17 @@ fn outside(message: String) -> UiError {
     UiError::other(&message)
 }
 
+/// The folder's real path. A `.git` folder, or a folder inside one, is
+/// refused: it cannot be a project (`Project::open`).
 fn real_folder(path: &str) -> Result<String, UiError> {
     let p = Path::new(path);
     if !p.is_absolute() || !p.is_dir() {
         return Err(cannot_open());
     }
     let real = std::fs::canonicalize(p).map_err(|_| cannot_open())?;
+    if in_git_folder(&real) {
+        return Err(UiError::other(GIT_ROOT));
+    }
     Ok(real.to_str().ok_or_else(cannot_open)?.to_string())
 }
 

@@ -3191,6 +3191,43 @@ async fn choose_chat_folder_stores_the_canonical_path_and_a_cancel_changes_nothi
 }
 
 #[tokio::test]
+async fn a_git_folder_cannot_be_chosen_or_set_as_a_chats_folder() {
+    const REFUSED: &str = "A .git folder cannot be opened as a project.";
+    let h = signed_out("http://unused");
+    let id = chats::create_chat(&h.state, "m/a").unwrap().id;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("repo/.git/hooks")).unwrap();
+    for rel in ["repo/.git", "repo/.git/hooks"] {
+        *h.dialogs.pick.lock().unwrap() = Some(dir.path().join(rel));
+        assert_eq!(
+            folder::choose_chat_folder(&h.state, &id).await,
+            Err(UiError::other(REFUSED)),
+            "{rel}"
+        );
+    }
+    assert_eq!(h.state.store.folder(&id).unwrap(), None);
+    assert_eq!(folder::approved_folders(&h.state), Ok(vec![]));
+    // One approved before this rule existed is refused as well.
+    let hooks = std::fs::canonicalize(dir.path().join("repo/.git/hooks"))
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    h.state.store.approve_folder(&hooks).unwrap();
+    assert_eq!(
+        folder::set_chat_folder(&h.state, &id, Some(hooks)).await,
+        Err(UiError::other(REFUSED))
+    );
+    assert_eq!(h.state.store.folder(&id).unwrap(), None);
+    // The repository itself opens.
+    *h.dialogs.pick.lock().unwrap() = Some(dir.path().join("repo"));
+    assert!(matches!(
+        folder::choose_chat_folder(&h.state, &id).await,
+        Ok(Some(_))
+    ));
+}
+
+#[tokio::test]
 async fn approved_folders_are_listed_most_recent_first() {
     let h = signed_out("http://unused");
     let id = chats::create_chat(&h.state, "m/a").unwrap().id;

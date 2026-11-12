@@ -229,3 +229,5 @@ Decisions the designer made during the build that change what this document says
 **The app's own data folder.** The file tools refuse every path whose real path is in the app's data folder (its database, key file and installed skills), and `find_files` and `search` never enter it, even when the project folder contains it. A file named `key` or `.beluga-live-key` is a secret file wherever it is.
 
 **What a file card names.** The edit and secret-file cards show the file's path inside the project and, labelled "Folder" as on the command card, the project folder's real path (without a Windows `\\?\` prefix).
+
+**A `.git` folder is not a project.** A folder that is, or is inside, a `.git` folder (any component of its real path, in any case) cannot be opened as a chat's folder: "A .git folder cannot be opened as a project." Otherwise the secret rule, which reads the path below the project folder, would not see it.

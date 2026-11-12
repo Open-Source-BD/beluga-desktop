@@ -28,6 +28,15 @@ use std::path::{Component, Path, PathBuf};
 pub const OUTSIDE: &str = "That path is outside the project folder.";
 pub const UNUSABLE: &str = "That path cannot be used.";
 pub const PRIVATE: &str = "That path is in the app's own data folder, so it cannot be used.";
+pub const GIT_ROOT: &str = "A .git folder cannot be opened as a project.";
+
+/// A real folder path that is, or is inside, a `.git` folder (any component,
+/// in any case). Opened as a project, the secret rule (which reads the path
+/// below the project folder) would not see the `.git` above it.
+pub fn in_git_folder(real: &Path) -> bool {
+    real.components()
+        .any(|c| c.as_os_str().to_string_lossy().eq_ignore_ascii_case(".git"))
+}
 
 /// The canonical folder of a chat.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,10 +178,14 @@ impl Project {
         self.private.as_deref()
     }
 
-    /// Opens a folder: it must exist and be a directory.
+    /// Opens a folder: it must exist, be a directory, and not be or be
+    /// inside a `.git` folder.
     pub fn open(folder: &str) -> Result<Project, String> {
         const GONE: &str = "The project folder is missing or is not a folder.";
         let root = std::fs::canonicalize(folder).map_err(|_| GONE.to_string())?;
+        if in_git_folder(&root) {
+            return Err(GIT_ROOT.to_string());
+        }
         if root.is_dir() {
             Ok(Project {
                 root,
@@ -673,6 +686,27 @@ mod tests {
         let file = d.path().join("f");
         fs::write(&file, "x").unwrap();
         assert!(Project::open(file.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn a_git_folder_or_a_folder_inside_one_is_not_opened_as_a_project() {
+        let d = tempfile::tempdir().unwrap();
+        fs::create_dir_all(d.path().join("repo/.git/hooks")).unwrap();
+        fs::create_dir_all(d.path().join("other/.GIT/x")).unwrap();
+        fs::create_dir_all(d.path().join("fine/.github")).unwrap();
+        fs::create_dir_all(d.path().join("fine/x.git")).unwrap();
+        for rel in ["repo/.git", "repo/.git/hooks", "other/.GIT", "other/.GIT/x"] {
+            let given = d.path().join(rel);
+            assert_eq!(
+                Project::open(given.to_str().unwrap()).unwrap_err(),
+                "A .git folder cannot be opened as a project.",
+                "{rel}"
+            );
+        }
+        for rel in ["repo", "fine/.github", "fine/x.git"] {
+            let given = d.path().join(rel);
+            assert!(Project::open(given.to_str().unwrap()).is_ok(), "{rel}");
+        }
     }
 
     #[test]
